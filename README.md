@@ -244,7 +244,7 @@ HTML 适配是「按主题猜 DOM」，HLS 规范化又直接决定播不播得�
 ```bash
 cd D:/TRAE/视频壳 && python _build.py :app:assembleDebug
 cd D:/TRAE/releases/.tools/videoshell_verify && python runall.py
-# 期望末行：==== 合计 PASS=321  FAIL=0 ====
+# 期望末行：==== 合计 PASS=368  FAIL=0 ====
 ```
 
 各套件：`runverify3`（HTML 适配 54 条）、`runlive2`（真实 suspend 链路 + SiteDoctor 20 条）、
@@ -254,6 +254,9 @@ cd D:/TRAE/releases/.tools/videoshell_verify && python runall.py
 `runbs`（**金牌影视 15 条**：分类判据 / 线路名 / 详情与播放页选集）、
 `runbs3`（**跨实例 16 条**：每个步骤都新建 adapter，复现真机 Activity 边界）、
 `runyg`（**自研 SSR 站 40 条**：尾斜杠目录式分类 + 集合级聚类判据 + `SsrPayload` 分集提取）、
+`runpic`（**封面 39 条**：内嵌 JSON 封面表、`fillPics` 五规则、默认分享图挡掉、
+与分集判据互斥、普通站不退化）、
+`runlivepic`（**封面线上 8 条**：列表封面统计 + **真取图**验证可达性 + 详情封面回落）、
 `runbs4`（**分集名 + 校准逻辑 60 条**：剧名前缀剥离、分类形状、容器反推、配方优先级与失效自愈、
 点击定性「只提示不拦人」、**校准配方压过 apiMode**）。
 
@@ -363,6 +366,26 @@ cd D:/TRAE/releases/.tools/videoshell_verify && python runall.py
 从页面内嵌 JSON 抽分集（支持 devalue 扁平数组与普通嵌套 JSON 两种编码），
 **按"每项都是对象且都带像媒体地址的 URL"的元素形态挑数组，不按键名猜**。
 取不到就返回空、不抛异常，DOM 层判据照旧兜底。
+
+**封面掉的是同一个坑**（v1.0.17）：卡片写的是
+`<img class="loading" src="data:image/gif;base64,R0lGOD…" alt="剧名">` ——
+`src` 是 **1×1 透明占位 GIF**，真地址由客户端 JS 运行时再填，DOM 里连 `data-src` 都没有。
+`picOf` 遇到 `data:` 会跳过 ⇒ 整屏封面全空。
+
+| 字段 | 不在 DOM 时去哪找 | 挑数组的判据 |
+|---|---|---|
+| 分集 | 播放页 `__NUXT_DATA__.episodeAll` | 每项都带**像媒体地址**的 URL（`.m3u8`） |
+| 封面 | 列表页 `__NUXT_DATA__.data.list` | 每项都带**不像媒体地址**的 http 值（封面词表的键） |
+
+两条判据天然互斥，所以同一份 `SsrPayload` 里互不误收。`parseList` 拿 `rawHtml` 补封面时
+走 `fillPics`：**已有封面一律不动 → 按 id 匹配 → 名称匹配（要求长度 ≥2）**。
+
+> 顺带排掉的两个"看起来像"的假设（都实测过，写下来免得后人重走）：
+> **不是防盗链** —— 图床对 Referer/UA **完全不敏感**（裸请求 / Ref=站点 / Ref=图床自身 /
+> 无 UA / 浏览器式带 `Sec-Fetch-*`，**6 种组合全 200**），所以**没有**去改 Coil 请求头；
+> **也不是 `og:image` 缺失** —— 详情页一直是真海报，坏的一直是列表页。
+> 反而是顺手发现：很多站的 `og:image` 是**站点级默认分享图**（`social-default.png`），
+> 认了它整站每部剧都挂同一张 —— `parsePic` 现在会挡掉这类默认图，宁可显示占位图。
 
 ### 加一个新站的最短路径
 

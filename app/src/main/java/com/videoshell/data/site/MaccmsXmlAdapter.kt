@@ -6,6 +6,7 @@ import com.videoshell.data.model.SiteConfig
 import com.videoshell.data.model.VideoDetail
 import com.videoshell.data.model.VideoItem
 import com.videoshell.data.net.Http
+import com.videoshell.util.resolveUrl
 import com.videoshell.util.stripHtml
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
@@ -71,7 +72,7 @@ class MaccmsXmlAdapter(site: SiteConfig) : SiteAdapter(site) {
         return VideoDetail(
             id = id,
             name = v.selectFirst("name")?.text().orEmpty().trim(),
-            pic = v.selectFirst("pic")?.text().orEmpty().trim(),
+            pic = resolveUrl(site.baseUrl, v.selectFirst("pic")?.text().orEmpty().trim()),
             remarks = v.selectFirst("note")?.text().orEmpty().trim(),
             typeName = v.selectFirst("type")?.text().orEmpty().trim(),
             year = v.selectFirst("year")?.text().orEmpty().trim(),
@@ -94,7 +95,7 @@ class MaccmsXmlAdapter(site: SiteConfig) : SiteAdapter(site) {
                 VideoItem(
                     id = id,
                     name = name,
-                    pic = v.selectFirst("pic")?.text().orEmpty().trim(),
+                    pic = resolveUrl(site.baseUrl, v.selectFirst("pic")?.text().orEmpty().trim()),
                     remarks = v.selectFirst("note")?.text().orEmpty().trim(),
                     typeName = v.selectFirst("type")?.text().orEmpty().trim(),
                     year = v.selectFirst("year")?.text().orEmpty().trim(),

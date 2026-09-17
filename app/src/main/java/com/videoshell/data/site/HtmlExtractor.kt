@@ -71,7 +71,19 @@ object HtmlExtractor {
         val remarks: String
     )
 
-    fun parseList(doc: Document, base: String, vodIsCategory: Boolean = false): List<VideoItem> {
+    /**
+     * 解析列表卡片。
+     *
+     * [rawHtml] 传进来时，会给**没有封面的卡片**补封面 —— 见 [fillPics]。
+     * 自研 SSR 站（Nuxt）的封面地址不在 DOM 里，只能从页面内嵌 JSON 取。
+     */
+    @JvmOverloads
+    fun parseList(
+        doc: Document,
+        base: String,
+        vodIsCategory: Boolean = false,
+        rawHtml: String? = null
+    ): List<VideoItem> {
         val out = LinkedHashMap<String, VideoItem>()
         for (a in doc.select("a[href]")) {
             val c = card(a, vodIsCategory) ?: continue
@@ -83,7 +95,31 @@ object HtmlExtractor {
                 remarks = c.remarks
             )
         }
-        return out.values.toList()
+        val items = out.values.toList()
+        // 封面兜底：全都有封面就直接返回，**不白解一遍 payload**（它要遍历整棵 JSON 树）
+        if (rawHtml == null || items.none { it.pic.isBlank() }) return items
+        val cv = SsrPayload.covers(rawHtml)
+        if (cv.isEmpty) return items
+        return fillPics(items, cv)
+    }
+
+    /**
+     * 用内嵌 JSON 的封面表补空封面。
+     *
+     * 三条规则：
+     * 1. **已有封面的一律不动** —— 这些是站点真渲染出来的，比 payload 可信；
+     * 2. 按 `id` 匹配优先（`href` 里的数字段 = payload 的 `video_id`）；
+     * 3. 名称匹配只作后备，且要求**长度 ≥ 2** —— 单字标题（`"1"`、`"A"`）撞车概率太高。
+     *
+     * 纯函数，便于离线断言。
+     */
+    fun fillPics(items: List<VideoItem>, cv: SsrPayload.Covers): List<VideoItem> = items.map { v ->
+        if (v.pic.isNotBlank()) return@map v
+        val byId = cv.byId[v.id]
+        val url = if (!byId.isNullOrBlank()) byId
+        else if (v.name.trim().length >= 2) cv.byName[v.name.trim()].orEmpty()
+        else ""
+        if (url.isBlank()) v else v.copy(pic = url)
     }
 
     /**
@@ -518,7 +554,7 @@ object HtmlExtractor {
 
     fun parsePic(doc: Document): String {
         val meta = doc.selectFirst("meta[property=og:image]")?.attr("content")?.trim().orEmpty()
-        if (meta.isNotBlank()) return meta
+        if (meta.isNotBlank() && !isShareDefault(meta)) return meta
         for (s in PIC_SELECTORS) {
             val el = doc.selectFirst(s) ?: continue
             val v = picOf(el)
@@ -526,4 +562,20 @@ object HtmlExtractor {
         }
         return ""
     }
+
+    /**
+     * `og:image` 在很多站上是**站点级默认分享图**（`/images/social-default.png`），
+     * 不是这部影片的海报。认了它，整站每部剧都会挂同一张图 —— 看起来像"封面错乱"。
+     *
+     * 实测：野果的详情页 `og:image` 是真海报（可用），而列表页/首页是
+     * `social-default.png`（不可用）；茶杯狐等站也有同类命名的默认图。
+     * 命中时**继续往下找**（找不到就返回空，让 UI 显示占位图，也好过张冠李戴）。
+     */
+    private val SHARE_DEFAULT = Regex(
+        "social[-_]?default|default[-_]?share|share[-_]?default|placeholder|" +
+            "/logo\\.|logo\\.(?:png|jpe?g|webp|gif|svg)",
+        RegexOption.IGNORE_CASE
+    )
+
+    private fun isShareDefault(url: String): Boolean = SHARE_DEFAULT.containsMatchIn(url)
 }

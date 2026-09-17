@@ -55,6 +55,17 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
     private var lastDetailDoc: Document? = null
 
     /**
+     * 详情页 HTML 里拿到的封面。
+     *
+     * 留着它是为了「分集只能去播放页拿」的那条路径：详情页的 `og:image` 是真海报，
+     * 而**播放页的 `og:image` 往往是站点级默认分享图**（野果实测：详情页
+     * `…2026091721151270131.jpeg` vs 播放页 `images/social-default.png`）。
+     * 详情页抓到时就先把封面存下来，播放页兜底构造 VideoDetail 时接着用 ——
+     * 零额外请求，也不必回头再抓一次详情页。
+     */
+    private var detailPicHint: String = ""
+
+    /**
      * 站点配方：跨 Activity / 跨启动复用。
      *
      * **这是 v1.0.11 的关键修复**：详情页在独立的 `DetailActivity` 里，会新建 Adapter 实例，
@@ -584,7 +595,7 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
             val html = Http.getOrNull(build(tpl, kw = keyword, page = page), referer = site.baseUrl) ?: continue
             val doc = Jsoup.parse(html, site.baseUrl)
             rememberShape(doc)
-            val fresh = accept(HtmlExtractor.parseList(doc, site.baseUrl, vodIsCategory), page)
+            val fresh = accept(HtmlExtractor.parseList(doc, site.baseUrl, vodIsCategory, html), page)
             if (fresh == null) continue
             learnDetailTpl(doc)
             if (searchTpl != tpl) {
@@ -602,6 +613,7 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
         // 记录这一轮试过什么 —— 失败时随异常一起抛给 UI，自检报告里也会列出
         traceBuf.clear()
         detailTrace = ""
+        detailPicHint = ""                      // 每部影片各算各的，别串上一部的封面
         tr("影片 id=$id")
         tr("配方：详情模板=" + (detailTpl ?: "—") + "　播放模板=" + (playTpl ?: "—"))
 
@@ -653,6 +665,10 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
         val doc = Jsoup.parse(html, site.baseUrl)
         lastDetailDoc = doc
         rememberShape(doc)
+        // 封面与「分集解析成功与否」**无关**：先把详情页这张真海报存下来，
+        // 供后面「分集只能去播放页拿」的路径使用（播放页的 og:image 常是默认图）
+        resolveUrl(site.baseUrl, HtmlExtractor.parsePic(doc))
+            .takeIf { it.isNotBlank() }?.let { detailPicHint = it }
         // 播放页模板在详情页上就能学到（分集按钮的 href），**与分集解析成功与否无关** ——
         // 所以放在 groups 判断之前，失败路径上也能积累这次学习成果
         learnPlayTpl(doc)
@@ -701,7 +717,8 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
         return VideoDetail(
             id = id,
             name = title,
-            pic = resolveUrl(site.baseUrl, HtmlExtractor.parsePic(doc)),
+            // 播放页兜底时 og:image 常是站点默认图（已被 parsePic 挡掉）⇒ 回落到详情页那张
+            pic = resolveUrl(site.baseUrl, HtmlExtractor.parsePic(doc)).ifBlank { detailPicHint },
             summary = HtmlExtractor.parseSummary(doc),
             // 分集名里若带着剧名前缀（`兰香如故第01集`），按剧名削掉 —— 一屏几十集都重复剧名
             // 既挤又难扫，用户看到的就是「兰香如故 第01集」重复十几遍
@@ -797,7 +814,7 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
             val html = Http.getOrNull(u, referer = site.baseUrl) ?: continue
             val doc = Jsoup.parse(html, site.baseUrl)
             rememberShape(doc)
-            val fresh = accept(HtmlExtractor.parseList(doc, site.baseUrl, vodIsCategory), page)
+            val fresh = accept(HtmlExtractor.parseList(doc, site.baseUrl, vodIsCategory, html), page)
             if (fresh == null) continue
             learnDetailTpl(doc)
             if (fresh.isEmpty()) return emptyList()

@@ -108,6 +108,126 @@ object SsrPayload {
     /** 单线路站点的分组名（分组标签在 UI 上会显示，别留空串） */
     const val DEFAULT_GROUP = "默认"
 
+    // ------------------------------------------------------------------ 封面
+
+    /**
+     * 内嵌 JSON 里的封面表。**两张映射都返回**，调用方按可用性挑：
+     * - [byId]：`video_id` / `vod_id` → 封面地址。id 是稳定主键，**优先用它**。
+     * - [byName]：`title` / `name` → 封面地址。id 对不上时的后备。
+     */
+    data class Covers(val byId: Map<String, String>, val byName: Map<String, String>) {
+        val isEmpty: Boolean get() = byId.isEmpty() && byName.isEmpty()
+
+        companion object {
+            val EMPTY = Covers(emptyMap(), emptyMap())
+        }
+    }
+
+    /**
+     * 从页面内嵌 JSON 里取封面表（v1.0.17）。
+     *
+     * ## 为什么需要这一层
+     *
+     * 野果短剧那类 **Nuxt3 / Vue SSR 自研站**，封面和分集一样**不在 DOM 里**：卡片是
+     * `<img class="loading" src="data:image/gif;base64,R0lGOD…" alt="洞洞杂货铺">` ——
+     * `src` 是 **1×1 透明占位 GIF**，真地址由客户端 JS 运行时再填，DOM 里连 `data-src`
+     * 都没有。`HtmlExtractor.picOf` 遇到 `data:` 会跳过 ⇒ **整屏封面全空**。
+     *
+     * 实测 `/tag/AI短剧/`：payload 的 `data.list` 有 30 条，每条带
+     * `cover` / `video_id` / `title`；而 DOM 里 href 的数字段 = `video_id`、`img` 的
+     * `alt` = `title` —— 所以两张表都能对上（见 [byId] / [byName]）。
+     *
+     * ## 挑哪条数组：和 [toEpisodes] 正好相反
+     *
+     * - 分集数组的特征是「每项都带**像媒体地址**的 URL」（`.m3u8`）；
+     * - 封面数组的特征是「每项都带**不像媒体地址**的 http 值」（命中封面词表的键）。
+     *
+     * 两条判据天然互斥，所以 `episodeAll` 不会被当成封面表；反过来，封面表也不会被
+     * [toEpisodes] 收走。实测同时排掉了 `actorList`（只有头像没有封面）、
+     * `schemaOrg.itemListElement`（只有链接）、评论列表（`avatar` 不在词表里）。
+     *
+     * 取不到返回 [Covers.EMPTY]、**不抛异常**（只是兜底路径，失败要继续走原逻辑）。
+     */
+    fun covers(html: String?): Covers {
+        val text = html ?: return Covers.EMPTY
+        if (text.length < 64) return Covers.EMPTY
+        val byId = LinkedHashMap<String, String>()
+        val byName = LinkedHashMap<String, String>()
+        for (blob in jsonBlobs(text)) {
+            if (blob.isBlank()) continue
+            val root = runCatching { JsonParser.parseString(blob) }.getOrNull() ?: continue
+            val flat = runCatching { resolveFlat(root) }.getOrNull()
+            if (flat != null) collectCovers(flat, byId, byName, 0, IntArray(1) { MAX_NODES })
+            else collectCovers(root, byId, byName, 0, IntArray(1) { MAX_NODES })
+        }
+        return Covers(byId, byName)
+    }
+
+    /** 一条封面记录：id、名称、封面地址 —— 三者都可能为空串（缺哪个就少一张表） */
+    private data class CoverEntry(val id: String, val name: String, val cover: String)
+
+    private fun collectCovers(
+        el: JsonElement,
+        byId: MutableMap<String, String>,
+        byName: MutableMap<String, String>,
+        depth: Int,
+        budget: IntArray
+    ) {
+        if (depth > MAX_DEPTH || budget[0] <= 0) return
+        budget[0]--
+        when {
+            el.isJsonArray -> {
+                val a = el.asJsonArray
+                // 命中就收，**继续下钻**：同一页可能有多条影片数组（榜单 + 推荐位 + 相关推荐），
+                // 它们给的封面是同一批数据，多收不冲突（putIfAbsent 先到先得）
+                toCoverEntries(a)?.forEach { e ->
+                    if (e.id.isNotBlank()) byId.putIfAbsent(e.id, e.cover)
+                    if (e.name.isNotBlank()) byName.putIfAbsent(e.name, e.cover)
+                }
+                for (e in a) collectCovers(e, byId, byName, depth + 1, budget)
+            }
+            el.isJsonObject -> {
+                for ((_, v) in el.asJsonObject.entrySet()) {
+                    collectCovers(v, byId, byName, depth + 1, budget)
+                }
+            }
+        }
+    }
+
+    /** 把一条数组当「影片卡片列表」试：**每项都是对象，且每项都带一个封面地址** */
+    private fun toCoverEntries(arr: JsonArray): List<CoverEntry>? {
+        val n = arr.size()
+        if (n < 1 || n > 3000) return null
+        val out = ArrayList<CoverEntry>(n)
+        for (i in 0 until n) {
+            val o = arr.get(i) as? JsonObject ?: return null
+            val cover = firstString(o, COVER_KEYS)
+            if (!isImageUrl(cover)) return null
+            out.add(CoverEntry(firstString(o, ID_KEYS), firstString(o, NAME_KEYS), cover))
+        }
+        return out
+    }
+
+    /**
+     * 像图片地址：http(s) 且**不是**媒体流。
+     *
+     * 要求 http(s) 是因为扁平数组里未还原的键值会是数字下标（`"cover": 34`），
+     * 不能当地址用 —— 这条同时兜住了「payload 没还原成功」的情况。
+     */
+    private fun isImageUrl(s: String): Boolean {
+        if (s.isBlank()) return false
+        if (!s.startsWith("http://") && !s.startsWith("https://")) return false
+        return !Media.looksLikeMedia(s)
+    }
+
+    private val COVER_KEYS = listOf(
+        "cover", "cover_url", "coverUrl", "vertical_cover", "horizontal_cover",
+        "vod_pic", "vodPic", "pic", "poster", "poster_url", "image", "image_url",
+        "thumb", "thumbnail"
+    )
+    private val ID_KEYS = listOf("video_id", "vod_id", "drama_id", "vid", "id")
+    private val NAME_KEYS = listOf("title", "name", "vod_name", "drama_name", "video_name")
+
     // ------------------------------------------------------------------ JSON 提取
 
     /** `<script id="__NUXT_DATA__">` / `__NEXT_DATA__` / `__INITIAL_STATE__` 之类，最可靠 */

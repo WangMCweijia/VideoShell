@@ -6,6 +6,7 @@ import com.videoshell.data.model.SiteConfig
 import com.videoshell.data.model.VideoDetail
 import com.videoshell.data.model.VideoItem
 import com.videoshell.data.net.Http
+import com.videoshell.util.resolveUrl
 import com.videoshell.util.stripHtml
 import org.json.JSONObject
 import java.io.IOException
@@ -92,7 +93,7 @@ class MaccmsAdapter(site: SiteConfig) : SiteAdapter(site) {
         return VideoDetail(
             id = MaccmsKit.str(o, "vod_id").ifBlank { id },
             name = MaccmsKit.str(o, "vod_name"),
-            pic = MaccmsKit.str(o, "vod_pic"),
+            pic = resolveUrl(site.baseUrl, MaccmsKit.str(o, "vod_pic")),
             remarks = MaccmsKit.str(o, "vod_remarks"),
             typeName = MaccmsKit.str(o, "type_name"),
             year = MaccmsKit.str(o, "vod_year"),
@@ -116,7 +117,7 @@ class MaccmsAdapter(site: SiteConfig) : SiteAdapter(site) {
                 VideoItem(
                     id = id,
                     name = name,
-                    pic = MaccmsKit.str(o, "vod_pic"),
+                    pic = resolveUrl(site.baseUrl, MaccmsKit.str(o, "vod_pic")),
                     remarks = MaccmsKit.str(o, "vod_remarks"),
                     typeName = MaccmsKit.str(o, "type_name"),
                     score = MaccmsKit.str(o, "vod_score").let { if (it == "0.0" || it == "0") "" else it },
