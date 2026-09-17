@@ -87,6 +87,46 @@
             android:layout_marginTop="6dp"
             android:textColor="@color/text_hint"
             android:textSize="12sp" />
+
+        <!--
+          确定 / 重选。
+          这两个按钮**始终可见** —— 上一版是"点完链接自动推进"，判据一否决就没有任何出路，
+          用户被锁死在第一步。现在点击只「选中」，推进必须由用户按「确定」，
+          所以按钮不能藏、也不能置灰（置灰等于又没反馈）。
+        -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="end|center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/btnReselect"
+                android:layout_width="wrap_content"
+                android:layout_height="30dp"
+                android:background="@drawable/bg_chip"
+                android:gravity="center"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:text="@string/calib_reselect"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/btnConfirm"
+                android:layout_width="wrap_content"
+                android:layout_height="30dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_btn_brand"
+                android:gravity="center"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:text="@string/calib_confirm_cat"
+                android:textColor="@color/white"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
     </LinearLayout>
 
     <FrameLayout

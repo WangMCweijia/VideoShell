@@ -79,17 +79,36 @@
     <string name="calib_title">调试校准 · 第 %1$d/3 步</string>
     <string name="calib_title_done">校准完成</string>
     <string name="calib_title_idle">调试校准</string>
-    <string name="calib_step1">① 点一个分类名</string>
-    <string name="calib_hint1">在下面的网页里点你要的「分类」（电影 / 电视剧 / 动漫…）。点完会记下分类所在的导航区域，以后就按它取分类。</string>
-    <string name="calib_step2">② 点一部影片</string>
-    <string name="calib_hint2">在列表里点一部影片的封面或标题，进入它的详情页。点完会记下「详情页链接的形状」。</string>
-    <string name="calib_step3">③ 点一集（分集）</string>
-    <string name="calib_hint3">在详情页的选集里点任意一集。点完会记下「播放页链接的形状」，并立刻解析 + 试播一次。</string>
+    <string name="calib_step1">① 点一个分类名，然后按「确定」</string>
+    <string name="calib_hint1">在下面的网页里点你要的「分类」（电影 / 电视剧 / 动漫…），点完按右下角的「确定」进入下一步。</string>
+    <string name="calib_step2">② 点一部影片，然后按「确定」</string>
+    <string name="calib_hint2">在列表里点一部影片的封面或标题，进入它的详情页，点完按「确定」。</string>
+    <string name="calib_step3">③ 点一集（分集），然后按「确定」</string>
+    <string name="calib_hint3">在详情页的选集里点任意一集，点完按「确定」—— 会立刻解析一次并试播。</string>
     <string name="calib_restarted">已重置，请重新点一个分类名</string>
-    <string name="calib_bad_cat">这看着不是分类链接 —— 请在导航区点一个分类名</string>
-    <string name="calib_bad_detail">这个链接里没有影片编号 —— 请点影片的封面或标题</string>
-    <string name="calib_bad_detail_is_play">这是播放页链接 —— 请先点影片进详情页，再点分集</string>
-    <string name="calib_bad_play">这看着不像分集链接 —— 请在选集列表里点一集</string>
+
+    <!-- 选中 / 确认（v1.0.14：点击只选中，推进必须按确定） -->
+    <string name="calib_confirm_cat">确定，用这个分类</string>
+    <string name="calib_confirm_detail">确定，用这个影片</string>
+    <string name="calib_confirm_play">确定，用这一集</string>
+    <string name="calib_reselect">重选</string>
+    <string name="calib_picked_cat">已选中分类「%1$s」—— 按「确定」继续</string>
+    <string name="calib_picked_detail">已选中影片「%1$s」—— 按「确定」继续</string>
+    <string name="calib_picked_play">已选中分集「%1$s」—— 按「确定」开始解析</string>
+    <string name="calib_picked_other">已选中「%1$s」</string>
+    <string name="calib_need_pick_cat">请先在网页里点一个分类名，再按「确定」</string>
+    <string name="calib_need_pick_detail">请先在列表里点一部影片，再按「确定」</string>
+    <string name="calib_need_pick_play">请先在选集里点一集，再按「确定」</string>
+    <string name="calib_not_link">这一处没有链接地址（点到了图标 / 按钮？）—— 请点带下划线的分类名或影片标题</string>
+    <string name="calib_script_link">这是脚本链接（javascript:），学不到形状 —— 换一个点，或直接按「确定」用已选中的</string>
+    <string name="calib_inject_failed">⚠ 点击监听没挂上（%1$s）—— 这一页点不动。请按「重来」重新加载网页；若一直不行，可能是网页禁用了脚本</string>
+
+    <!-- 判据不认时的**软提示**：只提醒，不拦人 -->
+    <string name="calib_soft_cat">⚠ 这不像标准分类链接，形状没学到（仍可继续 —— 之后会退回容器 / 默认逻辑）</string>
+    <string name="calib_soft_detail">⚠ 这里没有影片编号，详情模板没学到（仍可继续 —— 之后用默认逻辑）</string>
+    <string name="calib_soft_detail_is_play">⚠ 这像播放页链接，详情模板没学到（仍可继续 —— 下一步正好要点分集）</string>
+    <string name="calib_soft_play">⚠ 这不像分集链接，播放页模板没学到（仍可继续 —— 会靠网页嗅探）</string>
+
     <string name="calib_got_cat">已记下分类「%1$s」</string>
     <string name="calib_cat_tpl">形状 %1$s</string>
     <string name="calib_cat_tpl_none">形状未识别</string>

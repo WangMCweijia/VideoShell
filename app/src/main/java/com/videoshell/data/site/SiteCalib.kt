@@ -17,6 +17,93 @@ import org.jsoup.nodes.Element
  */
 object SiteCalib {
 
+    /** 校准三步。步骤语义放在这里而不是 UI 里，是为了让「判据」与「步骤」只有一个来源。 */
+    enum class Step(val n: Int) {
+        CAT(1), DETAIL(2), PLAY(3)
+    }
+
+    /**
+     * 用户点到的这一处的**定性**。
+     *
+     * **它只决定「界面怎么提示」，绝不决定「能不能继续」** —— 这是 v1.0.14 的关键修正。
+     *
+     * 上一版把 [isCategoryShape] 当成了闸门：判据一否决就 `return`，界面纹丝不动，
+     * 也没有任何按钮能往下走，用户被锁死在第一步。可**用户自己知道哪个是分类** ——
+     * 判据不认时该做的是提醒他「形状没学到、之后会退回兜底逻辑」，而不是把他拦在门外。
+     */
+    enum class PickKind {
+        /** 是这一类链接，形状也学到了 */
+        GOOD,
+
+        /** 是链接，但形状没学到 —— 仍可继续，之后走容器 / 默认逻辑 */
+        SHAPE_UNKNOWN,
+
+        /** 那一处压根没有链接地址（点到了图标、按钮、图片本身） */
+        NOT_LINK,
+
+        /** `javascript:` / `#` 这类脚本链接 —— 没有可学的地址 */
+        SCRIPT_LINK
+    }
+
+    /**
+     * 给一次点击定性。
+     *
+     * 要同时看 `raw`（原样 href）与 `abs`（绝对化后）：站点可能写相对路径，
+     * 也可能写绝对地址，而形状判据对两者的接受度不同 —— 见 [shapeCandidates]。
+     *
+     * [Step.DETAIL] 特意**把播放页链接排除在外**：详情模板要的是"影片页"的形状，
+     * 用户在第 2 步误点了一集时，界面该说的是"这像播放页，详情模板没学到"，
+     * 而不是把整条 `-1-1.html` 记成详情模板。
+     */
+    fun classify(raw: String, abs: String, step: Step): PickKind {
+        val h = raw.trim()
+        if (h.isEmpty()) return PickKind.NOT_LINK
+        if (h.startsWith("javascript") || h.startsWith("#") || h.startsWith("mailto")) {
+            return PickKind.SCRIPT_LINK
+        }
+        val ok = shapeCandidates(raw, abs).any { matches(it, step) }
+        return if (ok) PickKind.GOOD else PickKind.SHAPE_UNKNOWN
+    }
+
+    private fun matches(href: String, step: Step): Boolean = when (step) {
+        Step.CAT -> isCategoryShape(href)
+        Step.DETAIL -> !HtmlTemplates.isPlayLink(href) && HtmlTemplates.videoIdOf(href, false) != null
+        Step.PLAY -> HtmlTemplates.isPlayLink(href)
+    }
+
+    /**
+     * 判形状时该拿哪几个串去试 —— 只试一个是不够的。
+     *
+     * JS 报上来的是 `getAttribute('href')` 的**原样值**，而站点写法五花八门：
+     * 相对路径 `/bspvt/dianying.html`、绝对地址 `https://…/bspvt/dianying.html`、
+     * 带 query 的 `/index.php?tid=1`。偏偏 [isSlugCategory] / [isSlugDirCategory]
+     * 刻意**只认相对路径**（它们在"全文档扫描"场景容易被绝对地址误收），
+     * 于是绝对地址会被白白判成"形状未识别"—— 用户点得没错，界面却说没学到。
+     *
+     * 折中：原样、绝对、以及绝对地址的 path 各试一次，任一命中即算认得出。
+     */
+    private fun shapeCandidates(raw: String, abs: String): List<String> {
+        val out = ArrayList<String>(3)
+        if (raw.isNotBlank()) out += raw
+        if (abs.isNotBlank()) {
+            out += abs
+            pathOf(abs)?.let { if (it.isNotBlank() && it != abs) out += it }
+        }
+        return out
+    }
+
+    /** `https://host/bspvt/dianying.html?x=1` → `/bspvt/dianying.html?x=1`；非绝对地址返回 null */
+    private fun pathOf(url: String): String? {
+        val u = url.trim()
+        if (!u.startsWith("http")) return null
+        return runCatching {
+            val uri = java.net.URI(u)
+            val p = uri.rawPath.orEmpty()
+            if (p.isBlank()) null
+            else p + (uri.rawQuery?.let { q -> "?$q" } ?: "")
+        }.getOrNull()
+    }
+
     /**
      * 这一条链接像不像「分类」。
      *

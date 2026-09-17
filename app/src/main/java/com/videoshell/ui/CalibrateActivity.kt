@@ -67,9 +67,6 @@ class CalibrateActivity : AppCompatActivity() {
 
     companion object {
         private const val EXTRA_KEY = "site_key"
-        private const val STEP_CAT = 1
-        private const val STEP_DETAIL = 2
-        private const val STEP_PLAY = 3
 
         fun intent(context: Context, siteKey: String): Intent =
             Intent(context, CalibrateActivity::class.java).putExtra(EXTRA_KEY, siteKey)
@@ -78,7 +75,7 @@ class CalibrateActivity : AppCompatActivity() {
     private lateinit var binding: ActivityCalibrateBinding
     private lateinit var site: SiteConfig
 
-    private var step = STEP_CAT
+    private var step = SiteCalib.Step.CAT
     private var pageUrl = ""
 
     /** 三步各自学到的规则 */
@@ -89,6 +86,15 @@ class CalibrateActivity : AppCompatActivity() {
 
     /** 第三步走完（规则已齐），别再响应后续点击 */
     private var finished = false
+
+    /**
+     * 当前**已选中但还没确认**的点击。
+     *
+     * 这是 v1.0.14 的核心状态：点击只把候选放这儿，**推进必须由用户按「确定」**。
+     * 上一版是"点完链接判据通过就自动推进"，判据一否决策略性 `return`，
+     * 用户既没有按钮可按、也不知道自己在等什么 —— 于是卡死在第一步。
+     */
+    private var pending: Pick? = null
 
     /** 一次点击的原始信息 */
     private data class Pick(val raw: String, val abs: String, val text: String, val jsSel: String)
@@ -108,6 +114,8 @@ class CalibrateActivity : AppCompatActivity() {
 
         binding.btnBack.setOnClickListener { finish() }
         binding.btnRestart.setOnClickListener { restart() }
+        binding.btnConfirm.setOnClickListener { confirm() }
+        binding.btnReselect.setOnClickListener { reselect() }
 
         // 已校准过的话，把上次的规则先亮出来，方便对照着点
         RecipeStore.load(site.baseUrl)?.let {
@@ -124,21 +132,41 @@ class CalibrateActivity : AppCompatActivity() {
     private fun render() {
         binding.tvTitle.text =
             if (finished) getString(R.string.calib_title_done)
-            else getString(R.string.calib_title, step)
+            else getString(R.string.calib_title, step.n)
         when (step) {
-            STEP_CAT -> {
+            SiteCalib.Step.CAT -> {
                 binding.tvStep.setText(R.string.calib_step1)
                 binding.tvHint.setText(R.string.calib_hint1)
             }
-            STEP_DETAIL -> {
+            SiteCalib.Step.DETAIL -> {
                 binding.tvStep.setText(R.string.calib_step2)
                 binding.tvHint.setText(R.string.calib_hint2)
             }
-            else -> {
+            SiteCalib.Step.PLAY -> {
                 binding.tvStep.setText(R.string.calib_step3)
                 binding.tvHint.setText(R.string.calib_hint3)
             }
         }
+        renderActions()
+    }
+
+    /**
+     * 确定按钮的文案随步骤变，用户一眼知道"按下去会发生什么"。
+     * 按钮**永远可点**（不置灰）：置灰等于又一次"点了没反应"，宁可点了给提示。
+     */
+    private fun renderActions() {
+        binding.btnConfirm.setText(
+            when (step) {
+                SiteCalib.Step.CAT -> R.string.calib_confirm_cat
+                SiteCalib.Step.DETAIL -> R.string.calib_confirm_detail
+                SiteCalib.Step.PLAY -> R.string.calib_confirm_play
+            }
+        )
+        binding.btnConfirm.alpha = if (pending != null) 1f else 0.55f
+        val show = !finished
+        binding.btnConfirm.visibility = if (show) View.VISIBLE else View.GONE
+        binding.btnReselect.visibility =
+            if (show && pending != null) View.VISIBLE else View.GONE
     }
 
     private fun state(msg: String) {
@@ -146,14 +174,55 @@ class CalibrateActivity : AppCompatActivity() {
     }
 
     private fun restart() {
-        step = STEP_CAT
+        step = SiteCalib.Step.CAT
         finished = false
+        pending = null
         detailTpl = null
         playTpl = null
         binding.pb.visibility = View.GONE
         render()
         state(getString(R.string.calib_restarted))
         binding.webView.loadUrl(site.baseUrl)
+    }
+
+    // ------------------------------------------------------------------ 确认 / 重选
+
+    private fun confirm() {
+        if (finished) return
+        val p = pending
+        if (p == null) {
+            state(
+                getString(
+                    when (step) {
+                        SiteCalib.Step.CAT -> R.string.calib_need_pick_cat
+                        SiteCalib.Step.DETAIL -> R.string.calib_need_pick_detail
+                        SiteCalib.Step.PLAY -> R.string.calib_need_pick_play
+                    }
+                )
+            )
+            return
+        }
+        pending = null
+        renderActions()
+        when (step) {
+            SiteCalib.Step.CAT -> lifecycleScope.launch { pickCategory(p) }
+            SiteCalib.Step.DETAIL -> pickDetail(p)
+            SiteCalib.Step.PLAY -> pickPlay(p)
+        }
+    }
+
+    private fun reselect() {
+        pending = null
+        renderActions()
+        state(
+            getString(
+                when (step) {
+                    SiteCalib.Step.CAT -> R.string.calib_need_pick_cat
+                    SiteCalib.Step.DETAIL -> R.string.calib_need_pick_detail
+                    SiteCalib.Step.PLAY -> R.string.calib_need_pick_play
+                }
+            )
+        )
     }
 
     // ------------------------------------------------------------------ WebView
@@ -205,7 +274,16 @@ class CalibrateActivity : AppCompatActivity() {
     }
 
     private fun injectPicker() {
-        runCatching { binding.webView.evaluateJavascript(PICK_JS, null) }
+        runCatching {
+            binding.webView.evaluateJavascript(PICK_JS) { r ->
+                // 自检：脚本到底挂上了没有。没挂上，用户点任何东西都不会有反馈，
+                // 他只会看到"卡住了" —— 这种情况必须明确说出来，而不是让他对着死界面点。
+                val plain = r?.trim()?.removeSurrounding("\"")
+                if (plain != "ok") {
+                    state(getString(R.string.calib_inject_failed, plain ?: "null"))
+                }
+            }
+        }
     }
 
     /** JS 只做一件事：把用户点了哪个链接报上来。判定全在 Kotlin。 */
@@ -218,6 +296,13 @@ class CalibrateActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------ 点击处理
 
+    /**
+     * 一次网页点击 = **选中候选**（不推进）。推进只发生在用户按「确定」时。
+     *
+     * 关键：**任何点击都要给出反馈**。上一版对「没有 href」「javascript:」「判据不认」
+     * 三种情况一律静默 `return`，用户点半天界面纹丝不动 —— 这就是"卡在第一步"的观感来源。
+     * 现在这三种都会在引导卡上写明原因，且已选中的候选不会被一次误点冲掉。
+     */
     private fun handlePick(json: String) {
         if (finished) return
         val o = runCatching { JSONObject(json) }.getOrNull() ?: return
@@ -225,15 +310,51 @@ class CalibrateActivity : AppCompatActivity() {
         val text = o.optString("text").trim()
         val jsSel = o.optString("sel").trim()
         val page = o.optString("url").trim().ifBlank { pageUrl }
-        // 不是跳转链接（线路 tab 常用 `javascript:void(0)`）就当没点到 —— 这类点击不该推进步骤
-        if (raw.isBlank()) return
-        if (raw.startsWith("javascript") || raw.startsWith("#") || raw.startsWith("mailto")) return
-        val p = Pick(raw, absUrl(raw, page), text, jsSel)
-        when (step) {
-            STEP_CAT -> pickCategory(p)
-            STEP_DETAIL -> pickDetail(p)
-            STEP_PLAY -> pickPlay(p)
+
+        val abs = absUrl(raw, page)
+        when (SiteCalib.classify(raw, abs, step)) {
+            SiteCalib.PickKind.NOT_LINK -> {
+                state(getString(R.string.calib_not_link))
+                return
+            }
+            SiteCalib.PickKind.SCRIPT_LINK -> {
+                state(getString(R.string.calib_script_link))
+                return
+            }
+            else -> Unit
         }
+
+        val p = Pick(raw, abs, text, jsSel)
+        pending = p
+        renderActions()
+        state(pickedHint(p))
+    }
+
+    /** 选中后的提示：判据认了就报"已选中"，不认就先说清"哪一条没学到、仍可继续"。 */
+    private fun pickedHint(p: Pick): String {
+        val kind = SiteCalib.classify(p.raw, p.abs, step)
+        val label = p.text.ifBlank { p.abs }
+        if (kind == SiteCalib.PickKind.GOOD) {
+            return getString(
+                when (step) {
+                    SiteCalib.Step.CAT -> R.string.calib_picked_cat
+                    SiteCalib.Step.DETAIL -> R.string.calib_picked_detail
+                    SiteCalib.Step.PLAY -> R.string.calib_picked_play
+                },
+                label
+            )
+        }
+        val soft = when (step) {
+            SiteCalib.Step.CAT -> getString(R.string.calib_soft_cat)
+            SiteCalib.Step.DETAIL ->
+                if (HtmlTemplates.isPlayLink(p.raw) || HtmlTemplates.isPlayLink(p.abs)) {
+                    getString(R.string.calib_soft_detail_is_play)
+                } else {
+                    getString(R.string.calib_soft_detail)
+                }
+            SiteCalib.Step.PLAY -> getString(R.string.calib_soft_play)
+        }
+        return soft + "\n" + getString(R.string.calib_picked_other, label)
     }
 
     /**
@@ -241,66 +362,54 @@ class CalibrateActivity : AppCompatActivity() {
      *
      * 形状才是"分类逻辑"：站点把 maccms 的目录名改成了 `bspvt`，这件事只有用户点一下才能知道；
      * 而分类标签会散落在主菜单 / 二级面板 / 底部导航里，认形状才能一次全收。
+     *
+     * 形状没认出来（`catTpl == null`）**也照样推进** —— 容器 / 默认逻辑还在，不该把用户锁在第一步。
      */
-    private fun pickCategory(p: Pick) {
-        if (!SiteCalib.isCategoryShape(p.raw)) {
-            state(getString(R.string.calib_bad_cat))
-            return
-        }
+    private suspend fun pickCategory(p: Pick) {
         catTpl = HtmlTemplates.catTplFrom(p.abs)
-        step = STEP_DETAIL
+        step = SiteCalib.Step.DETAIL
         render()
-        state(getString(R.string.calib_got_cat, p.text.ifBlank { p.abs }))
-        lifecycleScope.launch {
-            val sel = deriveNavSel(p.abs) ?: p.jsSel.takeIf { it.isNotBlank() }
-            navSel = sel
-            val parts = ArrayList<String>(3)
-            parts += getString(R.string.calib_got_cat, p.text.ifBlank { p.abs })
-            parts += catTpl?.let { getString(R.string.calib_cat_tpl, it) }
-                ?: getString(R.string.calib_cat_tpl_none)
-            parts += sel?.let { getString(R.string.calib_nav_sel, it) }
-                ?: getString(R.string.calib_nav_sel_none)
-            state(parts.joinToString("　"))
-        }
+        val head = getString(R.string.calib_got_cat, p.text.ifBlank { p.abs })
+        val shape = catTpl?.let { getString(R.string.calib_cat_tpl, it) }
+            ?: getString(R.string.calib_cat_tpl_none)
+        state("$head　$shape")
+        val sel = deriveNavSel(p.abs) ?: p.jsSel.takeIf { it.isNotBlank() }
+        navSel = sel
+        val tail = sel?.let { getString(R.string.calib_nav_sel, it) }
+            ?: getString(R.string.calib_nav_sel_none)
+        // 用户可能已经点到第 2 步了，别把新提示覆盖掉
+        if (step == SiteCalib.Step.DETAIL) state("$head　$shape　$tail")
     }
 
-    /** ② 影片：反推详情页模板。点了播放页链接会被明确指出来（那是第 3 步该点的） */
+    /** ② 影片：反推详情页模板。没学到也推进（退用默认逻辑），只有"这像播放页"会额外说一句。 */
     private fun pickDetail(p: Pick) {
-        if (HtmlTemplates.isPlayLink(p.raw) || HtmlTemplates.isPlayLink(p.abs)) {
-            state(getString(R.string.calib_bad_detail_is_play))
-            return
-        }
+        val isPlay = HtmlTemplates.isPlayLink(p.raw) || HtmlTemplates.isPlayLink(p.abs)
         val id = HtmlTemplates.videoIdOf(p.raw, false) ?: HtmlTemplates.videoIdOf(p.abs, false)
-        val tpl = if (id.isNullOrBlank()) null else HtmlTemplates.detailTplFrom(p.abs, id)
-        if (tpl.isNullOrBlank()) {
-            state(getString(R.string.calib_bad_detail))
-            return
-        }
-        detailTpl = tpl
-        step = STEP_PLAY
+        detailTpl = if (isPlay || id.isNullOrBlank()) null
+        else HtmlTemplates.detailTplFrom(p.abs, id)
+        step = SiteCalib.Step.PLAY
         render()
-        state(getString(R.string.calib_got_detail, tpl))
+        val tpl = detailTpl
+        state(
+            when {
+                isPlay -> getString(R.string.calib_soft_detail_is_play)
+                tpl != null -> getString(R.string.calib_got_detail, tpl)
+                else -> getString(R.string.calib_soft_detail)
+            }
+        )
     }
 
-    /** ③ 分集：反推播放页模板，然后**真解析一次**，能出地址就顺势试播 */
+    /** ③ 分集：反推播放页模板，然后**真解析一次**，能出地址就顺势试播。模板没学到也照样试。 */
     private fun pickPlay(p: Pick) {
-        if (!HtmlTemplates.isPlayLink(p.raw) && !HtmlTemplates.isPlayLink(p.abs)) {
-            state(getString(R.string.calib_bad_play))
-            return
-        }
-        val tpl = HtmlTemplates.playTplFrom(p.abs)
-        if (tpl.isNullOrBlank()) {
-            state(getString(R.string.calib_bad_play))
-            return
-        }
-        playTpl = tpl
+        playTpl = HtmlTemplates.playTplFrom(p.abs)
         finished = true
         render()
-        state(getString(R.string.calib_got_play, tpl))
+        state(
+            playTpl?.let { getString(R.string.calib_got_play, it) }
+                ?: getString(R.string.calib_soft_play)
+        )
         resolveAndPlay(p.abs)
     }
-
-    private fun isCategoryShape(href: String): Boolean = SiteCalib.isCategoryShape(href)
 
     // ------------------------------------------------------------------ 分类容器反推
 
@@ -495,49 +604,60 @@ class CalibrateActivity : AppCompatActivity() {
      * **刻意不 preventDefault**：让网页按自己的方式跳转（用户看到的就是真实网站），
      * 我们只在捕获阶段记一笔。顺带把 `target=_blank` 改成 `_self` ——
      * 否则点「影片」会新开窗口，WebView 里原地不动，用户会以为没反应。
+     *
+     * v1.0.14 两处修正：
+     * 1. **点不到 `<a>` 时也上报**（`link:false`）—— 上一版直接 `return`，
+     *    用户点到图标 / 按钮时界面毫无动静，看起来就是"卡住了"。
+     * 2. **末尾返回 `'ok'` 供 Kotlin 自检**——注入失败时用户点任何东西都不会有反应，
+     *    这种情况必须显式告诉他，而不是让他对着一个死界面点。
      */
     private val PICK_JS = """
         (function(){
-          if (window.__vsCalib) return; window.__vsCalib = 1;
-          function one(e){
-            if(!e || !e.tagName) return '';
-            if(e.id) return e.tagName.toLowerCase()+'#'+e.id;
-            var cs = (e.getAttribute('class')||'').trim().split(/\s+/);
-            for(var i=0;i<cs.length;i++){
-              var c = cs[i];
-              if(c && c.length>=3 && c.length<=24 && !/^[0-9]/.test(c)) return e.tagName.toLowerCase()+'.'+c;
+          try {
+            if (!window.__vsCalib) {
+              window.__vsCalib = 1;
+              var one = function(e){
+                if(!e || !e.tagName) return '';
+                if(e.id) return e.tagName.toLowerCase()+'#'+e.id;
+                var cs = (e.getAttribute('class')||'').trim().split(/\s+/);
+                for(var i=0;i<cs.length;i++){
+                  var c = cs[i];
+                  if(c && c.length>=3 && c.length<=24 && !/^[0-9]/.test(c)) return e.tagName.toLowerCase()+'.'+c;
+                }
+                return e.tagName.toLowerCase();
+              };
+              var cont = function(a){
+                var cur = a.parentElement, best = null, hops = 0;
+                while(cur && cur !== document.body && hops < 6){
+                  var n = 0, ls = cur.querySelectorAll ? cur.querySelectorAll('a[href]') : [];
+                  for(var i=0;i<ls.length;i++){
+                    var h = ls[i].getAttribute('href')||'';
+                    if(h.indexOf('javascript:')!==0 && h.indexOf('#')!==0) n++;
+                  }
+                  if(n >= 2) best = cur;
+                  if(n >= 5) break;
+                  cur = cur.parentElement; hops++;
+                }
+                return best || (a ? a.parentElement : null);
+              };
+              document.addEventListener('click', function(e){
+                var n = e.target, a = null;
+                while(n && n !== document.body && !a){
+                  if(n.tagName === 'A') a = n;
+                  n = n.parentElement;
+                }
+                if(a && a.target && a.target !== '_self'){ try{ a.target = '_self'; }catch(err){} }
+                var href = a ? (a.getAttribute('href') || '') : '';
+                var src = a || e.target;
+                var text = ((src && src.textContent) || '').replace(/\s+/g,' ').trim().slice(0,40);
+                var sel = one(a ? cont(a) : e.target);
+                try {
+                  VS.onPick(JSON.stringify({href:href, text:text, sel:sel, url:location.href, link: !!a}));
+                } catch(err){}
+              }, true);
             }
-            return e.tagName.toLowerCase();
-          }
-          function cont(a){
-            var cur = a.parentElement, best = null, hops = 0;
-            while(cur && cur !== document.body && hops < 6){
-              var n = 0, ls = cur.querySelectorAll ? cur.querySelectorAll('a[href]') : [];
-              for(var i=0;i<ls.length;i++){
-                var h = ls[i].getAttribute('href')||'';
-                if(h.indexOf('javascript:')!==0 && h.indexOf('#')!==0) n++;
-              }
-              if(n >= 2) best = cur;
-              if(n >= 5) break;
-              cur = cur.parentElement; hops++;
-            }
-            return best || (a ? a.parentElement : null);
-          }
-          document.addEventListener('click', function(e){
-            var n = e.target, a = null;
-            while(n && n !== document.body && !a){
-              if(n.tagName === 'A') a = n;
-              n = n.parentElement;
-            }
-            if(!a) return;
-            try { if(a.target && a.target !== '_self') a.target = '_self'; } catch(err){}
-            var href = a.getAttribute('href') || '';
-            var text = (a.textContent || '').replace(/\s+/g,' ').trim().slice(0,40);
-            var sel = one(cont(a));
-            try {
-              VS.onPick(JSON.stringify({href:href, text:text, sel:sel, url:location.href}));
-            } catch(err){}
-          }, true);
+            return 'ok';
+          } catch(err) { return 'err:' + err; }
         })();
     """.trimIndent()
 }
