@@ -69,8 +69,12 @@ app/src/main/java/com/videoshell/
 
 CI（GitHub Actions）：推 `main` 自动编译 debug + release 并上传 artifact；推 `v*` tag 会自动创建 Release 并附上 release APK。
 
+> 本机 `git push` 走不通（直连 TLS reset / 代理不可用），所以推送与打 tag 都走 GitHub REST：
+
 ```bash
-git tag v1.0.1 && git push origin v1.0.1
+python _push_rest.py            # 推 main（服务端 sha 与本地逐位一致才算成功）
+python _tag.py v1.0.1          # 建 refs/tags/v1.0.1，触发 CI 建 Release
+python _ci_wait.py v1.0.1      # 轮询到 Release 挂上非空 APK
 ```
 
 ## 离线校验（HTML 适配回归）
