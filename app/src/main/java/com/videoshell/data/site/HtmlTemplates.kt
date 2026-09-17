@@ -27,7 +27,19 @@ object HtmlTemplates {
     private val PLAY = listOf(
         Regex("/play/"),
         Regex("vodplay/"),
-        Regex("/vod/play")
+        Regex("/vod/play"),
+        Regex("play/id/"),
+        Regex("/watch/"),
+        Regex("/episode/")
+    )
+
+    /**
+     * 分集链接的宽松判据：只在"候选容器内部"用。
+     * 容器里的链接本来就该是分集，判太严会把 `{id}-{sid}-{nid}.html` 这类漏掉。
+     */
+    private val EPISODE_HINT = Regex(
+        "(play|watch|episode|vod/\\d+-\\d+|/v/\\d+|-\\d+-\\d+\\.html|/vod/\\d+/\\d+/\\d+|/vod/\\d+\\.html\\?sid=)",
+        RegexOption.IGNORE_CASE
     )
 
     /** 弱详情：可能是详情页，也可能是分类页，取决于站点主题 */
@@ -55,6 +67,14 @@ object HtmlTemplates {
     fun isStrongDetail(href: String): Boolean = STRONG_DETAIL.any { it.containsMatchIn(href) }
 
     fun isPlayLink(href: String): Boolean = PLAY.any { it.containsMatchIn(href) }
+
+    /** 分集链接（容器内使用的宽松判据） */
+    fun isEpisodeLink(href: String): Boolean {
+        val h = href.trim()
+        if (h.isEmpty()) return false
+        if (h.startsWith("javascript") || h.startsWith("#") || h.startsWith("mailto")) return false
+        return isPlayLink(h) || EPISODE_HINT.containsMatchIn(h)
+    }
 
     /** 说明本站走「独立详情页 + 独立播放页」结构 —— 此时 `/vod/{id}.html` 属于分类页 */
     fun isDetailSignal(href: String): Boolean = isStrongDetail(href) || isPlayLink(href)
@@ -96,6 +116,21 @@ object HtmlTemplates {
         "$base/voddetail/{id}/",
         "$base/index.php/vod/detail/{id}.html",
         "$base/vod/{id}.html"
+    )
+
+    /**
+     * 播放页模板：**详情页解析不到分集时的兜底**。
+     * 很多主题的分集列表只在播放页里，详情页只有海报和简介。
+     */
+    fun playCandidates(base: String): List<String> = listOf(
+        "$base/play/{id}-1-1.html",
+        "$base/vodplay/{id}-1-1.html",
+        "$base/index.php/vod/play/id/{id}/sid/1/nid/1.html",
+        "$base/vod/play/id/{id}/sid/1/nid/1.html",
+        "$base/index.php/vod/play/{id}-1-1.html",
+        "$base/v/{id}-1-1.html",
+        "$base/watch/{id}-1-1.html",
+        "$base/play/{id}-1-1/"
     )
 
     fun searchCandidates(base: String): List<String> = listOf(

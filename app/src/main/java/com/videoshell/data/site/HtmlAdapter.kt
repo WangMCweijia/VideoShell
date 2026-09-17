@@ -1,6 +1,7 @@
 package com.videoshell.data.site
 
 import com.videoshell.data.model.Category
+import com.videoshell.data.model.PlayGroup
 import com.videoshell.data.model.SiteConfig
 import com.videoshell.data.model.VideoDetail
 import com.videoshell.data.model.VideoItem
@@ -25,10 +26,14 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
     private var listTpl: String? = null
     private var detailTpl: String? = null
     private var searchTpl: String? = null
+    private var playTpl: String? = null
 
     /** 本站是否走「独立详情页 + 独立播放页」结构（决定 `/vod/{id}.html` 是分类还是详情） */
     @Volatile
     private var vodIsCategory = false
+
+    /** 分类解析结果缓存 */
+    private var cachedCats: List<Category> = emptyList()
 
     /** 当前浏览目标的已见影片 id，用于分页去重 */
     private val seenIds = HashSet<String>()
@@ -50,8 +55,35 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
     )
 
     override suspend fun categories(): List<Category> {
-        val html = Http.getOrNull(site.baseUrl, referer = site.baseUrl) ?: return emptyList()
-        return categoriesFrom(Jsoup.parse(html, site.baseUrl))
+        if (cachedCats.isNotEmpty()) return cachedCats
+
+        // 1) 首页导航 —— 最理想，直接就是站点自己的分类标签
+        fetch(site.baseUrl)?.let { html ->
+            val list = categoriesFrom(Jsoup.parse(html, site.baseUrl))
+            if (list.size >= 2) {
+                cachedCats = list
+                return list
+            }
+        }
+
+        // 2) 兜底：有的站首页是纯 JS 渲染（导航藏在脚本里），但列表页有静态导航。
+        //    用列表模板探一遍，能拿到就用，拿不到也不影响"最新"浏览。
+        for (tpl in HtmlTemplates.listCandidates(root).take(5)) {
+            val url = build(tpl, id = "1", page = 1)
+            val html = fetch(url) ?: continue
+            val list = categoriesFrom(Jsoup.parse(html, site.baseUrl))
+            if (list.size >= 2) {
+                cachedCats = list
+                return list
+            }
+        }
+        return emptyList()
+    }
+
+    /** 带一次重试的抓取：首屏分类偶发超时会直接让分类栏消失，这里补一次 */
+    private suspend fun fetch(url: String): String? {
+        Http.getOrNull(url, referer = site.baseUrl)?.let { return it }
+        return Http.getOrNull(url, referer = site.baseUrl)
     }
 
     /** 从首页 DOM 里解析分类标签（独立成函数便于离线校验） */
@@ -152,22 +184,45 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
 
     override suspend fun detail(id: String): VideoDetail {
         for (tpl in ordered(detailTpl, HtmlTemplates.detailCandidates(root))) {
-            val html = Http.getOrNull(build(tpl, id = id), referer = site.baseUrl) ?: continue
+            val html = fetch(build(tpl, id = id)) ?: continue
             val doc = Jsoup.parse(html, site.baseUrl)
+            rememberShape(doc)
             val groups = HtmlExtractor.parseGroups(doc, site.baseUrl)
             if (groups.isEmpty()) continue
 
             detailTpl = tpl
-            return VideoDetail(
-                id = id,
-                name = HtmlExtractor.parseTitle(doc),
-                pic = resolveUrl(site.baseUrl, HtmlExtractor.parsePic(doc)),
-                summary = HtmlExtractor.parseSummary(doc),
-                groups = groups
-            )
+            return buildDetail(id, doc, groups)
         }
+        // 兜底：不少主题的**详情页只有海报和简介，分集列表只在播放页**。
+        // 用 play 模板探一次，从中把分集捞出来。
+        detailFromPlayPage(id)?.let { return it }
+
         throw IOException("未能解析该影片详情（HTML 模板不匹配，可尝试网页嗅探播放）")
     }
+
+    private fun buildDetail(id: String, doc: Document, groups: List<PlayGroup>): VideoDetail =
+        VideoDetail(
+            id = id,
+            name = HtmlExtractor.parseTitle(doc),
+            pic = resolveUrl(site.baseUrl, HtmlExtractor.parsePic(doc)),
+            summary = HtmlExtractor.parseSummary(doc),
+            groups = groups
+        )
+
+    private suspend fun detailFromPlayPage(id: String): VideoDetail? {
+        for (tpl in orderPlay(HtmlTemplates.playCandidates(root))) {
+            val html = fetch(build(tpl, id = id)) ?: continue
+            val doc = Jsoup.parse(html, site.baseUrl)
+            val groups = HtmlExtractor.parseGroups(doc, site.baseUrl)
+            if (groups.isEmpty()) continue
+            playTpl = tpl
+            return buildDetail(id, doc, groups)
+        }
+        return null
+    }
+
+    private fun orderPlay(all: List<String>): List<String> =
+        if (playTpl.isNullOrBlank()) all else listOf(playTpl!!) + all.filter { it != playTpl }
 
     // ------------------------------------------------------------------ 内部
 

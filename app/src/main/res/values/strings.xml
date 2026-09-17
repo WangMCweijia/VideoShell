@@ -31,7 +31,29 @@
     <string name="player_speed">倍速</string>
     <string name="player_episodes">选集</string>
     <string name="player_rotate">旋转</string>
+    <string name="player_mute">静音</string>
+    <string name="player_resize">画面比例</string>
+    <string name="player_lock">锁定</string>
+    <string name="player_unlock">解锁</string>
+    <string name="player_prev">上一集</string>
+    <string name="player_next">下一集</string>
+    <string name="player_rew">快退 10 秒</string>
+    <string name="player_ff">快进 10 秒</string>
+    <string name="player_play">播放/暂停</string>
     <string name="hud_speed">%1$sx</string>
+    <string name="hud_locked">已锁定，点左上角图标解锁</string>
+    <string name="hud_resume">已从 %1$s 继续播放</string>
+    <string name="hud_ratio">画面：%1$s</string>
+
+    <string name="player_error_title">播放失败</string>
+    <string name="player_error_close">关闭</string>
+    <string name="player_error_retry">重试</string>
+    <string name="player_error_sniff">改用网页嗅探</string>
+
+    <string name="cat_load_failed">分类没能加载出来</string>
+    <string name="cat_retry">重新加载</string>
+    <string name="cat_only_home">未解析到分类，按「最新」浏览</string>
+    <string name="detail_retry">重试</string>
 
     <string name="sniffer_running">正在嗅探视频地址，请在网页中点击播放…</string>
     <string name="sniffer_found">已捕获 %1$d 个候选地址</string>

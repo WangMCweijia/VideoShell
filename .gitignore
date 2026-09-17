@@ -17,3 +17,8 @@ _*.log
 _*.txt
 _*.json
 _*.html
+_*.m3u8
+_*.ts
+_*.java
+_vh/
+_vh2/

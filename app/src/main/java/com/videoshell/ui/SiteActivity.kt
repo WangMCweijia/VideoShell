@@ -102,6 +102,7 @@ class SiteActivity : AppCompatActivity() {
                 true
             } else false
         }
+        binding.btnCatRetry.setOnClickListener { loadCategories() }
 
         loadCategories()
     }
@@ -109,12 +110,15 @@ class SiteActivity : AppCompatActivity() {
     private fun loadCategories() {
         binding.pb.visibility = View.VISIBLE
         showState(null)
+        binding.catHintRow.visibility = View.GONE
         lifecycleScope.launch {
             val a = adapter ?: return@launch
             val list = runCatching { a.categories() }.getOrDefault(emptyList())
             binding.pb.visibility = View.GONE
             val all = listOf(Category("", getString(R.string.cat_latest))) + list
             catAdapter.submit(all)
+            // 解析不到分类时不禁用浏览 —— 至少"最新"还能用，同时给出重试入口
+            binding.catHintRow.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
             onCategory(0, all[0])
         }
     }

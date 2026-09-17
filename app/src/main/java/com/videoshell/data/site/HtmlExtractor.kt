@@ -159,25 +159,36 @@ object HtmlExtractor {
 
     // ------------------------------------------------------------------ 选集
 
-    /** 播放列表容器（优先精确的、再有兜底的） */
+    /** 播放列表容器（优先精确的、再有兜底的；尽量覆盖常见 maccms 主题） */
     private val CONTAINER_SELECTORS = listOf(
         "[id^=playlist]",
         ".tab-pane",
         ".module-play-list",
+        ".module-play-list-content",
         ".stui-content__playlist",
         ".play-list",
+        ".play-list-content",
         ".playlist",
+        ".playlist-content",
         ".ff-playurl",
         ".content-playlist",
-        ".playlist-content",
         ".lists-box",
         ".eplist",
-        "#playlist"
+        ".anthology",
+        ".episode-list",
+        ".detail-play-list",
+        ".play-source-list",
+        ".video-playlist",
+        ".num-list",
+        ".ep-list",
+        "#playlist",
+        "dl"
     )
 
     /** 线路名兜底：向上找最近的标题节点 */
     private val GROUP_TITLE_SELECTORS =
-        ".module-tab-item, .playlist-title, .play-source-tab, .stui-pannel__head h3, .stui-pannel__head h4, h3, .title"
+        ".module-tab-item, .playlist-title, .play-source-tab, .stui-pannel__head h3, " +
+            ".stui-pannel__head h4, .source-name, .line-name, .play-title, h3, .title"
 
     fun parseGroups(doc: Document, base: String): List<PlayGroup> {
         // 1) tab 标题映射：href="#playlist2" -> "极速播放"（顺序也按 tab 来）
@@ -209,16 +220,32 @@ object HtmlExtractor {
         if (out.isNotEmpty()) return out
 
         // 4) 兜底：认不出容器结构时，整页链接按文档顺序当成一条线路
+        //    先用严格判据，一个都没命中再放宽 —— 放宽只是为了别漏掉奇怪主题，不是在放宽噪声
+        var all = scanWholePage(doc, base, strict = true)
+        if (all.isEmpty()) all = scanWholePage(doc, base, strict = false)
+        return if (all.isEmpty()) emptyList() else listOf(PlayGroup("默认线路", all))
+    }
+
+    private fun scanWholePage(doc: Document, base: String, strict: Boolean): List<Episode> {
         val all = ArrayList<Episode>()
         val seen = HashSet<String>()
         for (a in doc.select("a[href]")) {
             val href = a.attr("href").trim()
-            if (!HtmlTemplates.isPlayLink(href)) continue
+            val ok = if (strict) HtmlTemplates.isPlayLink(href) else HtmlTemplates.isEpisodeLink(href)
+            if (!ok) continue
             val u = resolveUrl(base, href)
             if (u.isBlank() || !seen.add(u)) continue
             all.add(Episode(episodeName(a).ifBlank { "第${all.size + 1}集" }, u))
         }
-        return if (all.isEmpty()) emptyList() else listOf(PlayGroup("默认线路", all))
+        for (op in doc.select("option[value]")) {
+            val v = op.attr("value").trim()
+            val ok = if (strict) HtmlTemplates.isPlayLink(v) else HtmlTemplates.isEpisodeLink(v)
+            if (!ok) continue
+            val u = resolveUrl(base, v)
+            if (u.isBlank() || !seen.add(u)) continue
+            all.add(Episode(optionName(op).ifBlank { "第${all.size + 1}集" }, u))
+        }
+        return all
     }
 
     private fun collectEpisodes(container: Element, base: String): List<Episode> {
@@ -226,12 +253,27 @@ object HtmlExtractor {
         val seen = HashSet<String>()
         for (a in container.select("a[href]")) {
             val href = a.attr("href").trim()
-            if (!HtmlTemplates.isPlayLink(href)) continue
+            if (!HtmlTemplates.isEpisodeLink(href)) continue
             val u = resolveUrl(base, href)
             if (u.isBlank() || !seen.add(u)) continue
             eps.add(Episode(episodeName(a).ifBlank { "第${eps.size + 1}集" }, u))
         }
+        // 下拉式选集：<select><option value="/play/x-1-1.html">第1集</option>
+        for (op in container.select("option[value]")) {
+            val v = op.attr("value").trim()
+            if (!HtmlTemplates.isEpisodeLink(v)) continue
+            val u = resolveUrl(base, v)
+            if (u.isBlank() || !seen.add(u)) continue
+            eps.add(Episode(optionName(op).ifBlank { "第${eps.size + 1}集" }, u))
+        }
         return eps
+    }
+
+    private fun optionName(op: Element): String {
+        val t = op.text().replace(Regex("\\s+"), " ").trim()
+        if (t.isBlank() || t.length > 20) return ""
+        if (t.startsWith("选择") || t.startsWith("请选择")) return ""
+        return t
     }
 
     private fun episodeName(a: Element): String {

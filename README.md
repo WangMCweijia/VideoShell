@@ -14,9 +14,26 @@
 | 搜索 | 走接口 `ac=detail&wd=`；HTML 站逐个试常见搜索模板（含 `/vodsearch/wd/{kw}.html`） |
 | 选集 | 解析 `vod_play_from` / `vod_play_url`；HTML 站支持 `.tab-content > .tab-pane` 等结构，线路名按 tab 的 `href="#playlistN"` 映射（不靠 DOM 顺序猜），支持多线路（播放源）+ 剧集网格 |
 | 播放解析 | 三级策略：① 本身就是 m3u8/mp4 → 直用；② 播放页 → 从 HTML 里抠 `player_aaaa` 的真实地址（不用开网页）；③ 抠不到 → 网页嗅探 |
+| HLS 兼容层 | 拦截 m3u8 做**规范化**再喂播放器：分片路径绝对化、`#EXT-X-TARGETDURATION` 按实际最大分片修正、剔除跨目录插播广告分片（`/adjump/` 等）及其 `#EXT-X-DISCONTINUITY`。解决"网页能播、壳里播不了"的扁平 TS 清单（见下文说明） |
 | 网页嗅探 | WebView 钩住 XHR/fetch/video 事件 + `shouldInterceptRequest` 拦截媒体请求，按 HLS>DASH>MP4>FLV 打分排序，捕获到 HLS 自动跳转播放 |
-| 内置播放器 | Media3 ExoPlayer，支持 HLS；自定义请求头（User-Agent / Referer）；手势：单击显隐控件、双击播放暂停、横向拖动快进退、左半屏调亮度、右半屏调音量；倍速、选集面板、自动下一集、吸附式横竖屏切换 |
+| 内置播放器 | Media3 ExoPlayer，支持 HLS；自定义请求头（User-Agent / Referer） |
+| 播放器 · 画面 | **默认横屏**，一键循环「横屏 → 竖屏 → 跟随系统」并记住选择；画面比例循环（自适应 / 16:9 / 4:3 / 铺满 / 裁剪铺满）；**锁屏**（防误触，左上角解锁） |
+| 播放器 · 操作 | 播放/暂停、**上一集 / 下一集**、快退 / 快进 10 秒、倍速循环（1.0/1.25/1.5/2.0/0.75/0.5）、**长按屏幕临时 2.5x 加速**（松手复原）、静音、选集面板、自动下一集 |
+| 播放器 · 手势 | 单击显隐控件、双击播放暂停、横向拖动快进退、左半屏上下调亮度、右半屏上下调音量 |
+| 播放器 · 续播 | **进度记忆**：退出时记住位置，下次进同一集自动续播并提示 |
+| 播放器 · 诊断 | 失败时弹出错误码 / HTTP 状态 / 根因 / 地址，并提供「重试」（更大重试次数）与「改用网页嗅探」两条出路，而不是只闪一个 toast |
 | 直链播放 | 输入框粘 m3u8/mp4 直链，直接内置播放器播放 |
+
+### 为什么需要 HLS 兼容层
+
+一类"极速播放"源给的是**扁平 TS 清单**：几千个 1 秒分片、分片用相对路径，并且中间用
+`#EXT-X-DISCONTINUITY` 插播几段跨目录的广告分片（形如 `/video/adjump/time/xxx.ts`），
+同时 `#EXT-X-TARGETDURATION` 与真实分片时长对不上。
+
+浏览器的 hls.js 对这些都是"能忍则忍"，ExoPlayer 更严格，于是出现**网页能播、壳子里播不了**。
+`player/HlsFix.kt` 在数据源层面拦下 playlist 响应并规范化（分片绝对化 + TARGETDURATION 修正 +
+剔除插播广告段），分片请求则原样透传、不缓冲。master playlist 与直播流会被识别并跳过处理。
+
 
 ## 技术栈
 
@@ -47,8 +64,9 @@ app/src/main/java/com/videoshell/
 │       ├── HtmlExtractor.kt         列表 / 播放列表抽取
 │       └── Media.kt                 媒体地址识别 + 播放页地址抠取
 ├── player/
-│   ├── PlayerActivity.kt            内置播放器
-│   ├── PlayerGestureLayout.kt       手势层
+│   ├── PlayerActivity.kt            内置播放器（横竖屏 / 锁屏 / 比例 / 上下集 / 续播 / 失败诊断）
+│   ├── PlayerGestureLayout.kt       手势层（含长按加速与锁定）
+│   ├── HlsFix.kt                    ★ HLS playlist 规范化 + 数据源包装
 │   ├── SniffActivity.kt             网页嗅探
 │   └── PlayQueue.kt                 播放队列
 └── ui/
@@ -77,17 +95,21 @@ python _tag.py v1.0.1          # 建 refs/tags/v1.0.1，触发 CI 建 Release
 python _ci_wait.py v1.0.1      # 轮询到 Release 挂上非空 APK
 ```
 
-## 离线校验（HTML 适配回归）
+## 离线校验（HTML 适配 + HLS 规范化回归）
 
-HTML 适配是「按主题猜 DOM」，改动容易踩到别的站。`D:\TRAE\releases\.tools\videoshell_verify\` 里有一套
-离线校验：把抓下来的真实页面当输入，直接调用**刚编译出的 Kotlin 类**跑分类 / 列表 / 选集 / 播放地址抽取，
-无需真机与网络。改了 `Html*` 之后先跑它。
+HTML 适配是「按主题猜 DOM」，HLS 规范化又直接决定播不播得出来，两者改动都容易波及其它站。
+`D:\TRAE\releases\.tools\videoshell_verify\` 里有两套离线校验：把抓下来的**真实页面/真实 playlist** 当输入，
+直接调用**刚编译出的 Kotlin 类**跑分类 / 列表 / 选集 / 播放地址抽取 / playlist 规范化，无需真机与网络。
 
 ```bash
 cd D:/TRAE/视频壳 && python _build.py :app:assembleDebug
 cd D:/TRAE/releases/.tools/videoshell_verify && python verify.py D:/TRAE/视频壳
 # 期望末行：ALL CHECKS PASSED
 ```
+
+HLS 部分的断言在 `_verify2.java`（分片绝对化 / TARGETDURATION 合规 / 广告分片剔除 / master 与直播流不受影响）。
+
+> 调试 HLS 时注意：该 CDN 对 `HEAD` 一律返回 200，**必须用 `GET`（可带 `Range: bytes=0-0`）** 才能得到真实状态码。
 
 ## 签名
 

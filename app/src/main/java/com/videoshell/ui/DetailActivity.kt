@@ -193,7 +193,7 @@ class DetailActivity : AppCompatActivity() {
             binding.pb.visibility = View.GONE
             when (r) {
                 is MediaSource.Direct -> startActivity(
-                    PlayerActivity.intent(this@DetailActivity, r.url, label, r.headers)
+                    PlayerActivity.intent(this@DetailActivity, r.url, label, r.headers, ep.url)
                 )
                 is MediaSource.Sniff -> startActivity(
                     SniffActivity.intent(this@DetailActivity, r.pageUrl, label, r.headers)

@@ -9,8 +9,8 @@ import android.widget.FrameLayout
 import kotlin.math.abs
 
 /**
- * 播放器手势层：单击显隐控件、双击播放/暂停、横向拖动快进快退、左半屏上下调亮度、右半屏上下调音量。
- * 底部交给底部控制条的区域不拦截（返回 false，让 PlayerView 自己拿到事件）。
+ * 播放器手势层：单击显隐控件、双击播放/暂停、横向拖动快进快退、左半屏上下调亮度、右半屏上下调音量、
+ * 长按临时倍速。底部交给控制条的区域不拦截（返回 false，让下层的控制条自己拿到事件）。
  */
 class PlayerGestureLayout @JvmOverloads constructor(
     context: Context,
@@ -21,6 +21,9 @@ class PlayerGestureLayout @JvmOverloads constructor(
     /** 底部不拦截的高度（px），控件显示时设置 */
     var bottomBlockHeight: Int = 0
 
+    /** 锁定时完全不吃手势，只留解锁按钮 */
+    var locked: Boolean = false
+
     var onSingleTap: (() -> Unit)? = null
     var onDoubleTap: (() -> Unit)? = null
     var onSeekPreview: ((Long) -> Unit)? = null
@@ -28,11 +31,16 @@ class PlayerGestureLayout @JvmOverloads constructor(
     var onVolumeDelta: ((Float) -> Unit)? = null
     var onBrightnessDelta: ((Float) -> Unit)? = null
     var onGestureEnd: (() -> Unit)? = null
+    var onLongPressStart: (() -> Unit)? = null
+    var onLongPressEnd: (() -> Unit)? = null
 
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
 
+    private var longPressing = false
+
     private val tapDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent): Boolean = true
+
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
             onSingleTap?.invoke()
             return true
@@ -41,6 +49,12 @@ class PlayerGestureLayout @JvmOverloads constructor(
         override fun onDoubleTap(e: MotionEvent): Boolean {
             onDoubleTap?.invoke()
             return true
+        }
+
+        override fun onLongPress(e: MotionEvent) {
+            if (locked) return
+            longPressing = true
+            onLongPressStart?.invoke()
         }
     })
 
@@ -52,6 +66,8 @@ class PlayerGestureLayout @JvmOverloads constructor(
     private var seekMs = 0L
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (locked) return false
+
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             if (bottomBlockHeight > 0 && event.y > height - bottomBlockHeight) return false
             downX = event.x
@@ -60,6 +76,7 @@ class PlayerGestureLayout @JvmOverloads constructor(
             lastY = event.y
             mode = MODE_NONE
             seekMs = 0L
+            longPressing = false
             tapDetector.onTouchEvent(event)
             return true
         }
@@ -70,7 +87,7 @@ class PlayerGestureLayout @JvmOverloads constructor(
             MotionEvent.ACTION_MOVE -> {
                 val dx = event.x - lastX
                 val dy = event.y - lastY
-                if (mode == MODE_NONE) {
+                if (mode == MODE_NONE && !longPressing) {
                     val ax = abs(event.x - downX)
                     val ay = abs(event.y - downY)
                     if (ax > touchSlop || ay > touchSlop) {
@@ -94,6 +111,10 @@ class PlayerGestureLayout @JvmOverloads constructor(
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (longPressing) {
+                    longPressing = false
+                    onLongPressEnd?.invoke()
+                }
                 if (mode == MODE_H) onSeekCommit?.invoke(seekMs)
                 if (mode != MODE_NONE) onGestureEnd?.invoke()
                 mode = MODE_NONE
