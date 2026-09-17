@@ -214,19 +214,77 @@ HTML 适配是「按主题猜 DOM」，HLS 规范化又直接决定播不播得�
 ```bash
 cd D:/TRAE/视频壳 && python _build.py :app:assembleDebug
 cd D:/TRAE/releases/.tools/videoshell_verify && python runall.py
-# 期望末行：==== 合计 PASS=190  FAIL=0 ====
+# 期望末行：==== 合计 PASS=205  FAIL=0 ====
 ```
 
 各套件：`runverify3`（HTML 适配 54 条）、`runlive2`（真实 suspend 链路 + SiteDoctor 20 条）、
 `runlinefix`（线路/分集判定）、`runretry`（网络重试 17 条）、`runenc`（`encodeUrl` 14 条）、
 `runrank`（嗅探排序 43 条）、`runhdfix` / `runhdfix2`（HLS 规范化 11 + 12 条）、
-`runextract2`（**取最内层地址，19 条**：合成用例 + 真实播放页）。
+`runextract2`（**取最内层地址，19 条**：合成用例 + 真实播放页）、
+`runbs`（**金牌影视 15 条**：分类判据 / 线路名 / 详情与播放页选集）。
 
 `_cp.py` 是公共 classpath 构造器：因为 `SiteDoctor` 现在会调用播放器那套 DataSource，
 任何跑自检的 harness 都需要 media3 / androidx / guava / `android.jar` 在 classpath 上。
 
 > 调试 HLS 时注意：该 CDN 对 `HEAD` 一律返回 200，**必须用 `GET`（可带 `Range: bytes=0-0`）** 才能得到真实状态码。
 > 另外：**1KB 的 `Range` 探活不能代表"能播"** —— 它只证明地址存在，必须真下一段（几百 KB）才能看出链路够不够快。
+
+## 通配性：为什么有的站一粘就通、有的站要改代码
+
+先把"视频站"分成三类，**这个分类直接决定上限**：
+
+| 类型 | 特征 | 现在能不能自动适配 |
+|---|---|---|
+| A. 开放采集接口的 maccms | `/api.php/provide/vod/` 有响应 | 能，全自动（走 `MaccmsAdapter`） |
+| B. maccms 系但关了接口 / 改了 URL | 8 路探测全 `closed`，目录名自定义 | 能，走 HTML 适配（**通配性的主战场**） |
+| C. JS 解密 / 专用解析接口（jx） / 登录墙 | 地址运行时算出来 | 不能，原理上做不到 |
+
+`SiteDetector` 会先并发探 8 个采集接口路径；全不通就落到 HTML 适配。**这一步不要怀疑它判错** ——
+探测失败的站点本来就应该走 HTML 适配。
+
+### 三条原则（都是从踩坑里换来的）
+
+**1. 认形状，不认目录名。**
+
+同一个 maccms，后台可以把 URL 目录名全改掉。金牌影视把四个目录都换了：
+
+| 语义 | maccms 默认 | 金牌影视 |
+|---|---|---|
+| 分类 | `/vodtype/{id}.html` | `/bspvt/{别名}.html` |
+| 详情 | `/voddetail/{id}.html` | `/bspvd/{id}.html` |
+| 列表 | `/vodshow/{id}--------{页}---.html` | `/bspvs/{别名}-----------.html` |
+| 播放 | `/vodplay/{id}-{sid}-{nid}.html` | `/bspvp/{id}-{sid}-{nid}.html` |
+
+所以判据要写成**形状**：`/{任意目录}/{id}-{sid}-{nid}.html` 就是播放页 ——
+列举 `play` / `v_play` / `vodplay` / `watch` 永远举不全。
+
+**2. 用形状本身消歧，不靠白名单。**
+
+- 分类 = `/{目录}/{**字母开头**的别名}.html`
+- 详情 = `/{目录}/{**数字开头的 id**}.html`
+
+两者天然可分（见 `HtmlTemplates.isSlugDirCategory`），不需要给每个新站补一条规则。
+同理：卡片**必须自带图片**，就是"导航链接 vs 影片卡片"的消歧手段。
+
+**3. 能从页面上学的就别硬编码。**
+
+`HtmlExtractor.detailTplHint()` 会从列表页第一张真实卡片反推详情模板并记住
+（`/movie/23804.html` → `/movie/{id}.html`）。新增站点时优先补"怎么学"，而不是补"猜哪个模板"。
+
+### 加一个新站的最短路径
+
+1. 用 App 同款 OkHttp 抓真实页面（**不要用 Python urllib** —— 雷池 WAF 那类对请求姿态敏感，
+   urllib 403 / OkHttp 200，结论会跑偏）：
+
+   ```bash
+   cd D:/TRAE/releases/.tools/videoshell_verify
+   python runnet.py D:/TRAE/视频壳/_bs "https://站点/#home" "https://站点/分类页#cat" "https://站点/详情页#detail"
+   python rundetect.py https://站点          # 确认 8 路采集接口到底通不通
+   ```
+
+2. 复制 `Bs.java` 改成新站的断言（对照它的真实 URL 形态），跑 `python runbs.py`。
+   **先让它失败** —— 失败的地方就是断点，别凭代码猜。
+3. 改判据 → 编译 → 复跑，直到 `ALL CHECKS PASSED`，再跑 `runall.py` 确认没有回归。
 
 ## 签名
 
@@ -244,7 +302,9 @@ cd D:/TRAE/releases/.tools/videoshell_verify && python runall.py
 ## 已知边界
 
 - **只做适配，不提供任何内容源**。站点可用性、内容合法性由使用者自行判断。
-- HTML 通用适配是**尽力而为**（按 maccms 系常见模板猜），不如标准接口稳；这类站优先用嗅探播放。
+- HTML 通用适配靠 **URL 形状 + DOM 语义**推断（而不是穷举模板），对 maccms 系
+  （含把目录名全改过的那批）覆盖较好；对**完全自研前端**（Vue/React 运行时渲染、接口加密）的站
+  仍然要看具体情况，这类站优先用嗅探播放。见上面「通配性」一节。
 - 需要 JS 解密 / 对接专门解析接口（jx）的站不在当前支持范围。
 - 嗅探依赖页面真实发出媒体请求：若页面需要点击、或走加密接口，需在嗅探页手动操作一下。
 - **确实要求登录的站播不了**，这不是适配问题：页面正文就是「登录后即可观看」、
