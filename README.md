@@ -244,7 +244,7 @@ HTML 适配是「按主题猜 DOM」，HLS 规范化又直接决定播不播得�
 ```bash
 cd D:/TRAE/视频壳 && python _build.py :app:assembleDebug
 cd D:/TRAE/releases/.tools/videoshell_verify && python runall.py
-# 期望末行：==== 合计 PASS=281  FAIL=0 ====
+# 期望末行：==== 合计 PASS=321  FAIL=0 ====
 ```
 
 各套件：`runverify3`（HTML 适配 54 条）、`runlive2`（真实 suspend 链路 + SiteDoctor 20 条）、
