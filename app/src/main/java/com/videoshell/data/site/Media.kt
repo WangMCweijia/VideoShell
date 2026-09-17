@@ -37,6 +37,80 @@ object Media {
 
     fun isHls(url: String) = url.contains("m3u8", true)
 
+    private const val HEX = "0123456789ABCDEF"
+
+    private fun isHex(c: Char) = c in '0'..'9' || c in 'a'..'f' || c in 'A'..'F'
+
+    /**
+     * 把 URL 里「不该出现在请求行中」的字符做 UTF-8 百分号编码。
+     *
+     * ## 为什么必须做（这是「自检 200、播放 404」的真正原因）
+     *
+     * 站点的媒体路径常常含中文，例如
+     * `https://c1.ddbbffcdn.com/video/bianshuiwangshi/第01集/index.m3u8`。
+     * 这个地址有两套栈会去请求：
+     *
+     * | 谁 | 底层 | 对非 ASCII 路径的处理 |
+     * |---|---|---|
+     * | 自检 / 抓页面 | OkHttp | **自动百分号编码** → CDN 200 |
+     * | ExoPlayer 播放 | `DefaultHttpDataSource` → `HttpURLConnection` | **不编码**，原样塞字节 → CDN 404 |
+     *
+     * 本机回环实测抓到的原始请求行：
+     * ```
+     * OkHttp            → GET /video/%E7%AC%AC01%E9%9B%86/index.m3u8 HTTP/1.1
+     * HttpURLConnection → GET /video/ç¬¬01é/index.m3u8            HTTP/1.1
+     * ```
+     * 两者不同 —— 所以「自检全绿」永远无法证明「播放能成」，它们根本不是同一个请求。
+     *
+     * 修法：在交给播放器之前先把 URL 规范成纯 ASCII，让两套栈发出的字节完全一致。
+     * 已经存在的 `%XX` 会原样保留，避免被二次编码成 `%25XX`。
+     */
+    fun encodeUrl(url: String): String {
+        val u = url.trim()
+        if (u.isEmpty()) return u
+
+        // 快路径：整串都没有需要转义的字符，原样返回（对占绝大多数的纯 ASCII 地址零改动）
+        var need = false
+        for (c in u) {
+            if (isUnsafe(c)) { need = true; break }
+        }
+        if (!need) return u
+
+        val sb = StringBuilder(u.length + 24)
+        var i = 0
+        while (i < u.length) {
+            val c = u[i]
+            when {
+                // 已有的 %XX 原样保留（防二次编码）
+                c == '%' && i + 2 < u.length && isHex(u[i + 1]) && isHex(u[i + 2]) -> {
+                    sb.append(u, i, i + 3)
+                    i += 3
+                }
+                // 非 ASCII 或必须转义的 ASCII
+                isUnsafe(c) -> {
+                    val cp = u.codePointAt(i)
+                    val cc = Character.charCount(cp)
+                    val bytes = String(Character.toChars(cp)).toByteArray(Charsets.UTF_8)
+                    for (b in bytes) {
+                        val v = b.toInt() and 0xFF
+                        sb.append('%').append(HEX[v shr 4]).append(HEX[v and 0xF])
+                    }
+                    i += cc
+                }
+                else -> {
+                    sb.append(c)
+                    i++
+                }
+            }
+        }
+        return sb.toString()
+    }
+
+    private fun isUnsafe(c: Char): Boolean =
+        c.code > 127 || c == ' ' || c.code < 0x20 ||
+            c == '"' || c == '<' || c == '>' || c == '\\' ||
+            c == '^' || c == '`' || c == '{' || c == '|' || c == '}'
+
     fun looksLikeMedia(url: String): Boolean {
         val u = url.trim()
         if (!u.startsWith("http")) return false

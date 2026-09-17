@@ -368,10 +368,15 @@ class PlayerActivity : AppCompatActivity() {
         binding.diagPanel.visibility = View.GONE
     }
 
-    private fun playUrl(url: String, fromRetry: Boolean = false) {
+    private fun playUrl(rawUrl: String, fromRetry: Boolean = false) {
         val p = player ?: return
-        if (url.isBlank()) return
+        if (rawUrl.isBlank()) return
+        // 统一把非 ASCII 路径编码成 %XX 再交给播放器。
+        // 播放器底层是 HttpURLConnection，不像 OkHttp 那样自动百分号编码 ——
+        // 中文路径会被原样塞进请求行，CDN 查不到资源直接 404（表现为"所有剧集都播不了"）。
+        val url = Media.encodeUrl(rawUrl)
         currentUrl = url
+        if (url != rawUrl) android.util.Log.w("VideoShell", "playUrl 非 ASCII 已编码：$rawUrl -> $url")
         if (!fromRetry) autoSniffTried = false
 
         // 连接超时收紧到 8s：连不通就尽早失败，交给下面的错误重试策略换一次连接 ——
@@ -603,6 +608,14 @@ class PlayerActivity : AppCompatActivity() {
         binding.diagPanel.visibility = View.VISIBLE
         binding.ivPlay.setImageResource(R.drawable.ic_play)
         if (!controllerVisible) setBarsVisible(true)
+
+        // 同时打进 logcat（`adb logcat -s VideoShell`）：界面只摘要根因那一行，
+        // 日志里有完整 cause 链，排查"到底卡在哪一层"更准。
+        android.util.Log.e(
+            "VideoShell",
+            "播放失败 code=${error.errorCodeName}(${error.errorCode}) url=$currentUrl",
+            error
+        )
 
         // 直链播不了（CDN 404 / 超时 / 拒绝）就自动改走网页嗅探 ——
         // 用户不必自己判断"是源挂了还是解析错了"，换条路能把片放出来才是目的。

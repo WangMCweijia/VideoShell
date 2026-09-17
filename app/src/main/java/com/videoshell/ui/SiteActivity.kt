@@ -53,6 +53,7 @@ class SiteActivity : AppCompatActivity() {
     private val catAdapter = CategoryAdapter { index, c -> onCategory(index, c) }
     private val videoAdapter = VideoAdapter { openDetail(it) }
 
+    private var cats: List<Category> = emptyList()
     private var page = 1
     private var loading = false
     private var mode = MODE_CATEGORY
@@ -113,6 +114,9 @@ class SiteActivity : AppCompatActivity() {
             } else false
         }
         binding.btnCatRetry.setOnClickListener { loadCategories() }
+        // 分类栏（横向 chip）万一在某些机型上渲染不出来，这一行至少能把分类列出来给用户选 ——
+        // 诊断与兜底合一：看到"分类 4 个"却点不出名字 = 渲染问题；连数字都没有 = 解析问题。
+        binding.tvCatHint.setOnClickListener { showCategoryPicker() }
         binding.btnDoctor.setOnClickListener { runDoctor() }
 
         loadCategories()
@@ -145,17 +149,20 @@ class SiteActivity : AppCompatActivity() {
                     ?: a.lastDiag.ifBlank { NetLog.lastFailure() }
             }
             binding.pb.visibility = View.GONE
+            cats = list
             val all = listOf(Category("", getString(R.string.cat_latest))) + list
             catAdapter.submit(all)
-            // 解析不到分类时不禁用浏览 —— 至少"最新"还能用，同时给出重试入口与原因
-            if (list.isEmpty()) {
-                binding.tvCatHint.text =
-                    if (why.isBlank()) getString(R.string.cat_only_home)
-                    else getString(R.string.cat_only_home) + "（" + why + "）"
-                binding.catHintRow.visibility = View.VISIBLE
+            // 这一行**常驻显示**：成功时报数量、失败时报原因。
+            // 目的：让"分类栏是空的"自己说清是数据问题还是渲染问题 ——
+            // 此前从现象上看两种原因长得一模一样（都只是"没有分类"），已经因此盲改了好几版。
+            binding.tvCatHint.text = if (list.isEmpty()) {
+                if (why.isBlank()) getString(R.string.cat_only_home)
+                else getString(R.string.cat_only_home) + "（" + why + "）"
             } else {
-                binding.catHintRow.visibility = View.GONE
+                getString(R.string.cat_count, list.size)
             }
+            binding.btnCatRetry.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+            binding.catHintRow.visibility = View.VISIBLE
             onCategory(0, all[0])
         }
     }
@@ -199,6 +206,22 @@ class SiteActivity : AppCompatActivity() {
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    /** 把已解析出的分类用对话框列出来：既方便切换，也是"chip 栏渲染成功与否"的对照 */
+    private fun showCategoryPicker() {
+        val all = listOf(Category("", getString(R.string.cat_latest))) + cats
+        if (all.size <= 1) {
+            toast(getString(R.string.cat_count, 0))
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.cat_picker_title)
+            .setItems(all.map { it.name }.toTypedArray()) { _, which ->
+                onCategory(which, all[which])
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
 
     private fun onCategory(index: Int, c: Category) {
         catAdapter.select(index)

@@ -6,6 +6,8 @@ import com.videoshell.data.model.SiteConfig
 import com.videoshell.data.net.Http
 import com.videoshell.data.net.NetLog
 import com.videoshell.util.resolveUrl
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -121,6 +123,15 @@ object SiteDoctor {
             is MediaSource.Direct -> {
                 L("    直链：${ms.url}")
                 L("    HLS：${ms.isHls}    请求头：${ms.headers.keys.joinToString(" ")}")
+                // 把「编码前长什么样」也摆出来：媒体路径常含中文，
+                // 一眼就能看出这条地址有没有踩到"播放器不编码"那个坑。
+                val rawUrl = percentDecode(ms.url)
+                val hasNonAscii = rawUrl != ms.url
+                if (hasNonAscii) {
+                    L("    编码前：$rawUrl")
+                    L("    ⚠️ 原地址含中文等非 ASCII 字符，已自动百分号编码")
+                }
+
                 // 6) 媒体请求 —— 直接看 CDN 给什么状态码
                 L("")
                 L("[6] 媒体请求")
@@ -140,6 +151,25 @@ object SiteDoctor {
                     L("    HTTP $sst")
                     L("    ${seg.take(140)}")
                     if (sinfo.isNotBlank()) L("    $sinfo")
+                }
+
+                // 8) 请求栈对照 —— 本次问题的关键证据。
+                //    自检与抓页面走 OkHttp；而 ExoPlayer 的 DefaultHttpDataSource 底层是
+                //    HttpURLConnection，**它不会自动对非 ASCII 路径做百分号编码**。
+                //    同一个地址、同一个 CDN，两套栈结果可能完全不同 —— 这就是
+                //    "自检全绿、播放全挂"唯一说得通的解释，而且能在你的设备上直接复现出来。
+                L("")
+                L("[8] 请求栈对照（播放器 vs 自检）")
+                if (!hasNonAscii) {
+                    L("    本地址是纯 ASCII，两套栈发出的字节一致 —— 播放失败不是这个原因")
+                } else {
+                    val okSt = Http.probe(ms.url, site.baseUrl, "bytes=0-1023").first
+                    val hucEnc = withContext(Dispatchers.IO) { hucStatus(ms.url, site.baseUrl) }
+                    val hucRaw = withContext(Dispatchers.IO) { hucStatus(rawUrl, site.baseUrl) }
+                    L("    OkHttp（自检栈）        : HTTP $okSt")
+                    L("    HttpURLConnection 编码后: HTTP $hucEnc")
+                    L("    HttpURLConnection 未编码: HTTP $hucRaw   ← 修复前播放器发的就是这个形式")
+                    L("    解读：未编码那一行若是 404/-1，说明中文被原样塞进请求行，CDN 找不到资源。")
                 }
             }
             is MediaSource.Sniff -> {
@@ -165,6 +195,52 @@ object SiteDoctor {
         L("---------- HTTP 记录 ----------")
         L(NetLog.report())
     }
+
+    /** 把 URL 里的 `%XX` 还原回字节再按 UTF-8 解释：用于看"这条地址原本长什么样" */
+    private fun percentDecode(url: String): String {
+        if (!url.contains('%')) return url
+        val out = StringBuilder(url.length)
+        val buf = java.io.ByteArrayOutputStream()
+        var i = 0
+        while (i < url.length) {
+            val c = url[i]
+            if (c == '%' && i + 2 < url.length) {
+                val v = url.substring(i + 1, i + 3).toIntOrNull(16)
+                if (v != null) {
+                    buf.write(v)
+                    i += 3
+                    continue
+                }
+            }
+            if (buf.size() > 0) {
+                out.append(String(buf.toByteArray(), Charsets.UTF_8))
+                buf.reset()
+            }
+            out.append(c)
+            i++
+        }
+        if (buf.size() > 0) out.append(String(buf.toByteArray(), Charsets.UTF_8))
+        return out.toString()
+    }
+
+    /**
+     * 用 `HttpURLConnection` 取状态码 —— 这就是 ExoPlayer `DefaultHttpDataSource` 的底层。
+     * 用来在**真机上直接对照**两套请求栈对同一地址的反应，不用再靠推断。
+     * 失败（含 URL 非法/连不通）返回 -1。
+     */
+    private fun hucStatus(url: String, referer: String): Int = runCatching {
+        val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        c.setRequestProperty("User-Agent", Http.UA)
+        if (referer.isNotBlank()) c.setRequestProperty("Referer", referer)
+        c.setRequestProperty("Range", "bytes=0-1023")
+        c.connectTimeout = 8_000
+        c.readTimeout = 8_000
+        val st = c.responseCode
+        runCatching { c.inputStream?.close() }
+        runCatching { c.errorStream?.close() }
+        c.disconnect()
+        st
+    }.getOrDefault(-1)
 
     /**
      * 从 playlist 里取**第一个分片**地址；遇到 master 清单（`#EXT-X-STREAM-INF`）先下沉一层。

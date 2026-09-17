@@ -39,12 +39,18 @@ abstract class SiteAdapter(val site: SiteConfig) {
     open suspend fun resolve(episode: Episode): MediaSource {
         val u = episode.url.trim()
         if (u.isEmpty()) return MediaSource.Error("播放地址为空")
-        if (Media.isDirect(u)) return MediaSource.Direct(u, playHeaders(), Media.isHls(u))
+        // ⚠️ 必须过 encodeUrl —— 这是「自检 200、播放 404」的全部原因：
+        // 媒体路径经常含中文（如 /video/bianshuiwangshi/第01集/index.m3u8），
+        // 自检走 OkHttp（自动百分号编码），播放走 ExoPlayer 的 DefaultHttpDataSource
+        // → HttpURLConnection（**不编码**，把中文原样塞进请求行）→ CDN 404。
+        if (Media.isDirect(u)) return MediaSource.Direct(Media.encodeUrl(u), playHeaders(), Media.isHls(u))
         if (!u.startsWith("http")) return MediaSource.Error("无法识别的播放地址：$u")
 
         val html = Http.getOrNull(u, referer = site.baseUrl)
         val real = Media.extractFromHtml(html)
-        if (!real.isNullOrBlank()) return MediaSource.Direct(real, playHeaders(), Media.isHls(real))
+        if (!real.isNullOrBlank()) {
+            return MediaSource.Direct(Media.encodeUrl(real), playHeaders(), Media.isHls(real))
+        }
         return MediaSource.Sniff(u, playHeaders())
     }
 }
