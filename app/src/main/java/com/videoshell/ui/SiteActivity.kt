@@ -25,6 +25,7 @@ import com.videoshell.data.model.SiteConfig
 import com.videoshell.data.model.VideoItem
 import com.videoshell.data.net.NetLog
 import com.videoshell.data.site.AdapterFactory
+import com.videoshell.data.site.RecipeStore
 import com.videoshell.data.site.SiteAdapter
 import com.videoshell.data.site.SiteDoctor
 import com.videoshell.databinding.ActivitySiteBinding
@@ -202,7 +203,23 @@ class SiteActivity : AppCompatActivity() {
                 }
             }
             .setNegativeButton(R.string.site_doctor_close, null)
+            .setNeutralButton(R.string.site_recipe_reset) { _, _ -> resetRecipe() }
             .show()
+    }
+
+    /**
+     * 站点配方的手动校准入口。
+     *
+     * 配方是自动学习的（列表页 → 详情模板，详情页 → 播放模板），但站点改版、
+     * 或某次学歪了（列表页混进广告外链），就需要一个「从零再学一遍」的开关。
+     * 清掉配方 + 丢开旧适配器实例，下一次解析就等同首次访问。
+     */
+    private fun resetRecipe() {
+        RecipeStore.clear(site.baseUrl)
+        adapter = AdapterFactory.create(site)
+        cats = emptyList()
+        toast(getString(R.string.site_recipe_reset_done))
+        loadCategories()
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()

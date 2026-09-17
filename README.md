@@ -286,6 +286,45 @@ cd D:/TRAE/releases/.tools/videoshell_verify && python runall.py
    **先让它失败** —— 失败的地方就是断点，别凭代码猜。
 3. 改判据 → 编译 → 复跑，直到 `ALL CHECKS PASSED`，再跑 `runall.py` 确认没有回归。
 
+### 学到的模板要落盘：站点配方（SiteRecipe）
+
+**「能学到」还不够，得存下来。**
+
+App 里每个页面都是独立 Activity，**各自 new 一个 Adapter**：
+
+| 页面 | Adapter 实例 | 手上有什么 |
+|---|---|---|
+| 站点页 `SiteActivity` | 第 1 个 | 边浏览边学（分类、详情模板…） |
+| 详情页 `DetailActivity` | 第 2 个（全新） | **什么都没有** ← 断在这 |
+
+于是症状就是「能出分类、能出列表，一点进详情就失败」。
+详情页那个实例只能穷举 `/voddetail/`、`/detail/`、`/movie/`…，
+而金牌影视用 `/bspvd/{id}.html` —— 穷举里根本没有，必然 404。
+
+`SiteRecipe` + `RecipeStore`（`data/site/SiteRecipe.kt`）把学到的模板写进 SharedPreferences
+（key = `r_<host>`），任何 Activity 新建 Adapter 时自动载入：
+
+| 字段 | 学自 | 作用 |
+|---|---|---|
+| `detailTpl` | 列表页卡片链接 / 详情页命中 | 详情页直取，**1 次请求命中** |
+| `playTpl` | 详情页里的播放链接 | 分集只在播放页时的兜底 |
+| `listTpl` / `searchTpl` | 翻页 / 搜索命中 | 分页与搜索 |
+| `vodIsCategory` | 首页结构 | 判断 `/vod/{id}.html` 是分类还是详情 |
+
+配套两条自愈机制：
+
+1. **回首页现学**：手上没模板时，`detail()` 先抓一次首页学一条再试。
+   盲试 8 个必然 404 的候选要 8 次请求，学一条只要 1 次。
+2. **手动重学**：自检报告上的「重学本站」= 清掉配方 + 丢掉旧 Adapter，
+   下一次解析等同首次访问（站点改版、或某次学歪了时用）。
+
+> **固化的是「怎么找」，不是「找到的直链」。**
+> m3u8 直链多带时效签名，几小时后就失效，存下来只会得到死链；
+> 能长期复用的永远是**规则**（模板 / 选择器 / 形状判据）。
+>
+> 分类列表**刻意不固化**：它就 1 次首页请求，而且每次进站点页都该看到最新导航 ——
+> 缓存它省不了什么，却会在站点改版后给出过期分类。
+
 ## 签名
 
 `keystore/videoshell.jks` 与 `keystore.properties` 随仓库提交（私有库），所以 CI 与本地都能直接出**已签名**的 release APK。

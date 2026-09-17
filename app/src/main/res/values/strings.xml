@@ -69,6 +69,8 @@
     <string name="site_doctor_close">关闭</string>
     <string name="site_doctor_copy">复制</string>
     <string name="site_doctor_copied">报告已复制到剪贴板</string>
+    <string name="site_recipe_reset">重学本站</string>
+    <string name="site_recipe_reset_done">已清空本站配方，正在重新学习…</string>
     <string name="err_prefix">失败：%1$s</string>
 
     <string name="sniffer_running">正在嗅探视频地址，请在网页中点击播放…</string>

@@ -28,7 +28,9 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
     private var searchTpl: String? = null
     private var playTpl: String? = null
 
-    /** 本站是否走「独立详情页 + 独立播放页」结构（决定 `/vod/{id}.html` 是分类还是详情） */
+    /**
+     * 本站是否走「独立详情页 + 独立播放页」结构（决定 `/vod/{id}.html` 是分类还是详情）
+     */
     @Volatile
     private var vodIsCategory = false
 
@@ -40,6 +42,27 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
      * 比穷举 [HtmlTemplates.detailCandidates] 可靠得多，优先级也更高。
      */
     private var learnedDetailTpl: String? = null
+
+    /** 已回到首页现学过一次（避免每次详情失败都重抓首页） */
+    private var homeLearned = false
+
+    /**
+     * 站点配方：跨 Activity / 跨启动复用。
+     *
+     * **这是 v1.0.11 的关键修复**：详情页在独立的 `DetailActivity` 里，会新建 Adapter 实例，
+     * 实例内存的学习结果全丢 —— 不落盘就只能靠穷举模板，站点改过目录名必然失败。
+     */
+    init {
+        RecipeStore.load(site.baseUrl)?.let { r ->
+            // 成功命中过的模板 > 从列表页推测的模板，但两者都比穷举可信
+            detailTpl = r.detailTpl
+            learnedDetailTpl = r.detailTpl
+            playTpl = r.playTpl
+            listTpl = r.listTpl
+            searchTpl = r.searchTpl
+            if (r.vodIsCategory) vodIsCategory = true
+        }
+    }
 
     /** 分类为空时把原因带出去，让 UI 能显示出来（不然只能靠猜） */
     private var diag: String = ""
@@ -310,7 +333,10 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
             val fresh = accept(HtmlExtractor.parseList(doc, site.baseUrl, vodIsCategory), page)
             if (fresh == null) continue
             learnDetailTpl(doc)
-            searchTpl = tpl
+            if (searchTpl != tpl) {
+                searchTpl = tpl
+                RecipeStore.update(site.baseUrl) { it.copy(searchTpl = tpl) }
+            }
             return fresh
         }
         return emptyList()
@@ -319,23 +345,55 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
     // ------------------------------------------------------------------ 详情
 
     override suspend fun detail(id: String): VideoDetail {
-        // 列表页学到的模板优先：它一定对得上本站的路径约定
-        val pref = learnedDetailTpl ?: detailTpl
-        for (tpl in ordered(pref, HtmlTemplates.detailCandidates(root))) {
-            val html = fetch(build(tpl, id = id)) ?: continue
-            val doc = Jsoup.parse(html, site.baseUrl)
-            rememberShape(doc)
-            val groups = HtmlExtractor.parseGroups(doc, site.baseUrl)
-            if (groups.isEmpty()) continue
-
-            detailTpl = tpl
-            return buildDetail(id, doc, groups)
+        // 1) 配方 / 学到的模板优先。**关键**：它们来自磁盘，所以进详情页那个新 Activity
+        //    也能直接用 —— 这正是修掉「分类列表都能出、一点详情就失败」的地方。
+        for (tpl in listOfNotNull(detailTpl, learnedDetailTpl).distinct()) {
+            hitDetail(tpl, id)?.let { return it }
         }
-        // 兜底：不少主题的**详情页只有海报和简介，分集列表只在播放页**。
-        // 用 play 模板探一次，从中把分集捞出来。
+
+        // 2) 手上还没有模板 -> 回首页现学一次（首次冷启动、配方被清掉、站点改路径时自愈）。
+        //    放在穷举**之前**：盲试 8 个必然 404 的候选要发 8 次请求，学一条只要 1 次。
+        if (learnFromHome()) {
+            learnedDetailTpl?.let { tpl -> hitDetail(tpl, id)?.let { return it } }
+        }
+
+        // 3) 穷举候选兜底
+        for (tpl in HtmlTemplates.detailCandidates(root)) {
+            if (tpl == detailTpl || tpl == learnedDetailTpl) continue
+            hitDetail(tpl, id)?.let { return it }
+        }
+
+        // 4) 兜底：不少主题的**详情页只有海报和简介，分集列表只在播放页**。
+        //    用 play 模板探一次，从中把分集捞出来。
         detailFromPlayPage(id)?.let { return it }
 
         throw IOException("未能解析该影片详情（HTML 模板不匹配，可尝试网页嗅探播放）")
+    }
+
+    /** 用一条模板真抓详情页并解析分集；成功就把模板固化进配方 */
+    private suspend fun hitDetail(tpl: String, id: String): VideoDetail? {
+        val html = fetch(build(tpl, id = id)) ?: return null
+        val doc = Jsoup.parse(html, site.baseUrl)
+        rememberShape(doc)
+        val groups = HtmlExtractor.parseGroups(doc, site.baseUrl)
+        if (groups.isEmpty()) return null
+        if (detailTpl != tpl) {
+            detailTpl = tpl
+            RecipeStore.update(site.baseUrl) { it.copy(detailTpl = tpl) }
+        }
+        learnPlayTpl(doc)
+        return buildDetail(id, doc, groups)
+    }
+
+    /** 回首页抓一次，从卡片链接现学详情页模板（整个 Adapter 生命周期内只做一次） */
+    private suspend fun learnFromHome(): Boolean {
+        if (homeLearned) return false
+        homeLearned = true
+        val html = Http.getOrNull(root, referer = root) ?: return false
+        val doc = Jsoup.parse(html, root)
+        rememberShape(doc)
+        learnDetailTpl(doc)
+        return learnedDetailTpl != null
     }
 
     private fun buildDetail(id: String, doc: Document, groups: List<PlayGroup>): VideoDetail =
@@ -353,7 +411,10 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
             val doc = Jsoup.parse(html, site.baseUrl)
             val groups = HtmlExtractor.parseGroups(doc, site.baseUrl)
             if (groups.isEmpty()) continue
-            playTpl = tpl
+            if (playTpl != tpl) {
+                playTpl = tpl
+                RecipeStore.update(site.baseUrl) { it.copy(playTpl = tpl) }
+            }
             return buildDetail(id, doc, groups)
         }
         return null
@@ -391,21 +452,64 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
             if (fresh == null) continue
             learnDetailTpl(doc)
             if (fresh.isEmpty()) return emptyList()
-            if (urls.size > 1 && u == urls.first()) listTpl = guessTpl(u, page)
+            if (urls.size > 1 && u == urls.first()) {
+                val g = guessTpl(u, page)
+                if (g != null && g != listTpl) {
+                    listTpl = g
+                    RecipeStore.update(site.baseUrl) { it.copy(listTpl = g) }
+                }
+            }
             return fresh
         }
         return emptyList()
     }
 
-    /** 从列表页学一条详情页模板（只学一次） */
+    /** 从列表页学一条详情页模板（只学一次），学到就写进配方 */
     private fun learnDetailTpl(doc: Document) {
         if (learnedDetailTpl != null) return
-        learnedDetailTpl = HtmlExtractor.detailTplHint(doc, site.baseUrl, vodIsCategory)
+        val tpl = HtmlExtractor.detailTplHint(doc, site.baseUrl, vodIsCategory) ?: return
+        if (!sameHost(tpl)) return
+        learnedDetailTpl = tpl
+        RecipeStore.update(site.baseUrl) { it.copy(detailTpl = it.detailTpl ?: tpl) }
     }
 
-    /** 首页/列表页第一次解析时确定站点形态，之后沿用 */
+    /**
+     * 从详情页学一条**播放页**模板：`/bspvp/548165-1-1.html` -> `/bspvp/{id}-1-1.html`。
+     *
+     * 播放页的目录名同样是站点自己起的（金牌影视 `bspvp`、厂长 `/v_play/`），
+     * 穷举 [HtmlTemplates.playCandidates] 举不全。用于「详情页不给分集、只有播放页有」的兜底。
+     */
+    private fun learnPlayTpl(doc: Document) {
+        if (!playTpl.isNullOrBlank()) return
+        for (a in doc.select("a[href]")) {
+            val href = a.attr("href").trim()
+            if (!HtmlTemplates.isPlayLink(href)) continue
+            val tpl = HtmlTemplates.playTplFrom(abs(href)) ?: continue
+            if (!sameHost(tpl)) continue
+            playTpl = tpl
+            RecipeStore.update(site.baseUrl) { it.copy(playTpl = tpl) }
+            return
+        }
+    }
+
+    /** 学到的模板必须属于本站：列表页里混进广告 / 外链时会学到别家的模板 */
+    private fun sameHost(tpl: String): Boolean {
+        val a = hostIn(tpl)
+        val b = hostIn(root)
+        if (a.isBlank() || b.isBlank()) return false
+        return a == b || a.endsWith(".$b") || b.endsWith(".$a")
+    }
+
+    private fun hostIn(url: String): String =
+        Regex("^https?://([^/]+)", RegexOption.IGNORE_CASE)
+            .find(url)?.groupValues?.get(1)?.lowercase().orEmpty()
+
+    /** 首页/列表页第一次解析时确定站点形态，之后沿用；学到就写进配方 */
     private fun rememberShape(doc: Document) {
-        if (!vodIsCategory) vodIsCategory = detectVodShape(doc)
+        if (vodIsCategory) return
+        if (!detectVodShape(doc)) return
+        vodIsCategory = true
+        RecipeStore.update(site.baseUrl) { it.copy(vodIsCategory = true) }
     }
 
     private fun detectVodShape(doc: Document): Boolean {

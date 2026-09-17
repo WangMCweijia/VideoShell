@@ -82,7 +82,7 @@ object SiteDoctor {
         if (items.isEmpty()) {
             L("")
             L("→ 列表为空，后续步骤无法继续。请把以上内容截图反馈。")
-            appendTail(L)
+            appendTail(L, site)
             return sb.toString()
         }
 
@@ -97,7 +97,7 @@ object SiteDoctor {
         }
         if (d == null) {
             L("    结果：失败")
-            appendTail(L)
+            appendTail(L, site)
             return sb.toString()
         }
         L("    名称：${d.name}")
@@ -111,7 +111,7 @@ object SiteDoctor {
         if (ep == null) {
             L("")
             L("→ 没有可用剧集，后续步骤无法继续。")
-            appendTail(L)
+            appendTail(L, site)
             return sb.toString()
         }
 
@@ -203,7 +203,7 @@ object SiteDoctor {
             null -> L("    失败：未返回结果")
         }
 
-        appendTail(L)
+        appendTail(L, site)
         return sb.toString()
     }
 
@@ -278,8 +278,11 @@ object SiteDoctor {
      * 播放记录是这一版新加的通道 —— 播放器/嗅探自己失败的细节以前带不回来
      * （错误面板只能截图，嗅探页报告又复制不出来），现在随自检报告一起走。
      */
-    private fun appendTail(L: (String) -> Unit) {
+    private fun appendTail(L: (String) -> Unit, site: SiteConfig) {
         appendNetLog(L)
+        L("")
+        L("---------- 站点配方（已固化到本地，跨页面 / 跨启动复用） ----------")
+        L(RecipeStore.describe(site.baseUrl))
         L("")
         L("---------- 播放记录（播放器 / 嗅探自己写的） ----------")
         L(PlayLog.report())

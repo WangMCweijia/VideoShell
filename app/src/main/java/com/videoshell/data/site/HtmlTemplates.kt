@@ -184,6 +184,29 @@ object HtmlTemplates {
         return u.substring(0, idx) + "{id}" + u.substring(idx + k.length)
     }
 
+    /**
+     * 从一条真实的播放页链接反推播放页模板：
+     * `/bspvp/548165-1-1.html` -> `/bspvp/{id}-1-1.html`。
+     *
+     * 与 [detailTplFrom] 同理：播放页的目录名也是站点自己起的
+     * （金牌影视 `bspvp`、厂长 `/v_play/`），穷举 `playCandidates` 永远举不全，
+     * 从页面里学一条最稳。拿到的模板用于「详情页没有分集、只有播放页有」时兜底。
+     */
+    fun playTplFrom(url: String): String? {
+        val u = url.trim()
+        if (u.isEmpty()) return null
+        val m = PLAY_SHAPE.find(u) ?: return null
+        // groupValues: [0]=整段 [1]=目录 [2]=id [3]=sid [4]=nid
+        val dirStart = m.range.first + 1          // 目录名的首字符位置
+        val dir = m.groupValues[1]
+        val sid = m.groupValues[3]
+        val nid = m.groupValues[4]
+        return u.substring(0, dirStart) + dir + "/{id}-" + sid + "-" + nid + ".html"
+    }
+
+    /** maccms 播放页的万能形状 `/{目录}/{id}-{sid}-{nid}.html`，与目录名叫什么无关 */
+    private val PLAY_SHAPE = Regex("/([A-Za-z][\\w_\\-]*)/(\\d+)-(\\d+)-(\\d+)\\.html")
+
     fun listCandidates(base: String): List<String> = listOf(
         "$base/vodshow/{id}--------{page}---.html",
         "$base/index.php/vod/show/id/{id}/page/{page}.html",

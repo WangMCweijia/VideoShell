@@ -1,0 +1,125 @@
+package com.videoshell.data.site
+
+import android.content.Context
+import android.content.SharedPreferences
+import com.google.gson.Gson
+import com.videoshell.App
+
+/**
+ * 站点配方（Recipe）：把「从真实页面学到的东西」固化下来，跨 Activity / 跨启动复用。
+ *
+ * ## 为什么必须持久化（v1.0.11 修的根因）
+ *
+ * 详情页是独立的 `DetailActivity`，进来时会 `AdapterFactory.create(site)` **新建一个 Adapter 实例**。
+ * 而模板学习结果原本只活在实例内存里（`HtmlAdapter.learnedDetailTpl`）——
+ * 一到详情页就全丢，只能退回穷举模板（`/voddetail/`、`/detail/`、`/movie/`…）。
+ * maccms 站只要改过目录名（金牌影视用 `bspvd`），穷举必然全 404 →
+ * 症状就是「分类能出、列表能出，一点进详情就失败」。
+ *
+ * ## 原则
+ *
+ * **能从页面学到的东西，学一次就写盘；下次任何 Activity（甚至下次启动）都能直接用。**
+ *
+ * ## 存储
+ *
+ * SharedPreferences（key = `r_<host>`）。内存里再放一层 front cache，
+ * 因此磁盘不可用的场景（离线 JVM harness）退化成「进程内跨实例共享」，行为一致、可测。
+ *
+ * 注意 Gson + Kotlin 非空的老坑：所有字段都可空 + 给默认值，且带 [ver] 版本号，
+ * 模板语义变更时旧配方自动作废，避免拿一个错模板反复失败。
+ */
+data class SiteRecipe(
+    /** schema 版本：模板语义变了就 +1，旧配方自动作废 */
+    val ver: Int = VER,
+    /** 本站是否走「独立详情页 + 独立播放页」结构 */
+    val vodIsCategory: Boolean = false,
+    /** 验证过 / 学到的详情页模板，如 `https://x.com/bspvd/{id}.html` */
+    val detailTpl: String? = null,
+    /** 播放页模板，如 `https://x.com/bspvp/{id}-1-1.html` */
+    val playTpl: String? = null,
+    val listTpl: String? = null,
+    val searchTpl: String? = null,
+    /** 学到的分类容器选择器（调试校准模式下可覆盖） */
+    val navSel: String? = null,
+    val updatedAt: Long = 0L
+) {
+    companion object {
+        const val VER = 1
+    }
+
+    val isEmpty: Boolean
+        get() = detailTpl == null && playTpl == null && listTpl == null &&
+                searchTpl == null && navSel == null
+}
+
+object RecipeStore {
+
+    private const val SP = "videoshell_recipe"
+    private const val PREFIX = "r_"
+    private val gson = Gson()
+
+    /** 进程内 front cache；磁盘不可用时它就是唯一存储（离线 harness 靠它验证跨实例） */
+    private val mem = HashMap<String, SiteRecipe>()
+
+    private fun spOrNull(): SharedPreferences? =
+        runCatching { App.instance.getSharedPreferences(SP, Context.MODE_PRIVATE) }.getOrNull()
+
+    /** 配方按 host 归类：同一站换域名（http/https、www）仍能命中 */
+    fun hostOf(baseUrl: String): String =
+        Regex("^https?://([^/]+)", RegexOption.IGNORE_CASE)
+            .find(baseUrl.trim())?.groupValues?.get(1)?.lowercase().orEmpty()
+
+    fun load(baseUrl: String): SiteRecipe? {
+        val h = hostOf(baseUrl)
+        if (h.isBlank()) return null
+        mem[h]?.let { return it }
+        val s = runCatching { spOrNull()?.getString(PREFIX + h, null) }.getOrNull() ?: return null
+        val r = runCatching { gson.fromJson(s, SiteRecipe::class.java) }.getOrNull() ?: return null
+        if (r.ver != SiteRecipe.VER) return null
+        mem[h] = r
+        return r
+    }
+
+    fun save(baseUrl: String, r: SiteRecipe) {
+        val h = hostOf(baseUrl)
+        if (h.isBlank()) return
+        val v = r.copy(ver = SiteRecipe.VER, updatedAt = System.currentTimeMillis())
+        mem[h] = v
+        runCatching {
+            spOrNull()?.edit()?.putString(PREFIX + h, gson.toJson(v))?.apply()
+        }
+    }
+
+    /** 读-改-写。只在真的学到新东西时调用，避免无谓写盘 */
+    fun update(baseUrl: String, f: (SiteRecipe) -> SiteRecipe): SiteRecipe {
+        val cur = load(baseUrl) ?: SiteRecipe()
+        val next = f(cur)
+        val changed = next != cur.copy(updatedAt = cur.updatedAt)
+        if (changed) save(baseUrl, next) else mem[hostOf(baseUrl)] = cur
+        return if (changed) load(baseUrl) ?: next else cur
+    }
+
+    fun clear(baseUrl: String) {
+        val h = hostOf(baseUrl)
+        if (h.isBlank()) return
+        mem.remove(h)
+        runCatching { spOrNull()?.edit()?.remove(PREFIX + h)?.apply() }
+    }
+
+    /** 自检报告用：把当前配方摊开成人话 */
+    fun describe(baseUrl: String): String {
+        val r = load(baseUrl) ?: return "（尚未学到任何模板）"
+        val lines = ArrayList<String>()
+        lines += "详情页模板：" + (r.detailTpl ?: "—")
+        lines += "播放页模板：" + (r.playTpl ?: "—")
+        lines += "列表页模板：" + (r.listTpl ?: "—")
+        lines += "搜索页模板：" + (r.searchTpl ?: "—")
+        lines += "站点结构：  " + if (r.vodIsCategory) "详情页 + 播放页分离" else "单页/未知"
+        if (r.updatedAt > 0) {
+            lines += "更新时间：  " +
+                    java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+                        .format(java.util.Date(r.updatedAt))
+        }
+        return lines.joinToString("\n")
+    }
+}
