@@ -9,6 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
@@ -62,6 +63,9 @@ class SniffActivity : AppCompatActivity() {
     private var firstSeenAt = 0L
     private var webVisible = true
     private var ticks = 0
+
+    /** 主文档加载失败的原因；有值时状态栏直接显示，不再让用户对着空白页猜 */
+    private var pageError = ""
 
     private val autoPlayTask = Runnable {
         if (autoPlayed) return@Runnable
@@ -157,7 +161,30 @@ class SniffActivity : AppCompatActivity() {
             }
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                pageError = ""
                 injectHook()
+            }
+
+            override fun onReceivedError(
+                view: WebView?,
+                request: WebResourceRequest?,
+                error: WebResourceError?
+            ) {
+                if (request?.isForMainFrame == true) {
+                    pageError = "${error?.errorCode}: ${error?.description}"
+                    updateStatus()
+                }
+            }
+
+            override fun onReceivedHttpError(
+                view: WebView?,
+                request: WebResourceRequest?,
+                errorResponse: WebResourceResponse?
+            ) {
+                if (request?.isForMainFrame == true) {
+                    pageError = "HTTP ${errorResponse?.statusCode}"
+                    updateStatus()
+                }
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
@@ -181,6 +208,7 @@ class SniffActivity : AppCompatActivity() {
         autoPlayed = false
         firstSeenAt = 0L
         ticks = 0
+        pageError = ""
         binding.tvStatus.text = getString(R.string.sniffer_running)
         binding.rvCandidates.visibility = View.GONE
         binding.pb.visibility = View.VISIBLE
@@ -270,10 +298,11 @@ class SniffActivity : AppCompatActivity() {
 
     private fun updateStatus() {
         val n = candidates.size
-        binding.tvStatus.text = if (n == 0) {
-            getString(R.string.sniffer_none)
-        } else {
-            getString(R.string.sniffer_found, n)
+        binding.tvStatus.text = when {
+            n > 0 -> getString(R.string.sniffer_found, n)
+            pageError.isNotBlank() -> getString(R.string.sniffer_page_error, pageError)
+            ticks > 20 -> getString(R.string.sniffer_timeout)
+            else -> getString(R.string.sniffer_none)
         }
         binding.pb.visibility = if (n == 0) View.VISIBLE else View.GONE
         val sorted = candidates.values.sortedWith(

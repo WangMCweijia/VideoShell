@@ -374,12 +374,14 @@ class PlayerActivity : AppCompatActivity() {
         currentUrl = url
         if (!fromRetry) autoSniffTried = false
 
+        // 连接超时收紧到 8s：连不通就尽早失败，交给下面的错误重试策略换一次连接 ——
+        // 比在一个连不上的地址上干等 15 秒强（手机网络下首次握手失败很常见）。
         val http = DefaultHttpDataSource.Factory()
             .setUserAgent(Http.UA)
             .setDefaultRequestProperties(headers)
             .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(15_000)
-            .setReadTimeoutMs(20_000)
+            .setConnectTimeoutMs(8_000)
+            .setReadTimeoutMs(15_000)
 
         // m3u8 规范化：解决"网页能播、壳子播不了"的扁平 TS playlist
         val ds = HlsFixDataSourceFactory(http)

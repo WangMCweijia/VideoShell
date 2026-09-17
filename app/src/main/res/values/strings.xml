@@ -53,6 +53,8 @@
     <string name="cat_load_failed">分类没能加载出来</string>
     <string name="cat_retry">重新加载</string>
     <string name="cat_only_home">未解析到分类，按「最新」浏览</string>
+    <string name="cat_loading">正在加载分类…</string>
+    <string name="cat_retrying">分类没拿到，正在重试（%1$d/2）…</string>
     <string name="detail_retry">重试</string>
 
     <string name="site_doctor">自检</string>
@@ -66,6 +68,8 @@
     <string name="sniffer_running">正在嗅探视频地址，请在网页中点击播放…</string>
     <string name="sniffer_found">已捕获 %1$d 个候选地址</string>
     <string name="sniffer_none">尚未捕获到视频地址</string>
+    <string name="sniffer_page_error">网页加载失败：%1$s</string>
+    <string name="sniffer_timeout">长时间没抓到视频地址 —— 网页可能需要登录，或需手动点击页面上的播放按钮</string>
     <string name="sniffer_show_web">显示网页</string>
     <string name="sniffer_hide_web">隐藏网页</string>
     <string name="sniffer_retry">重新嗅探</string>

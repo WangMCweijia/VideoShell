@@ -31,6 +31,7 @@ import com.videoshell.databinding.ActivitySiteBinding
 import com.videoshell.ui.adapter.CategoryAdapter
 import com.videoshell.ui.adapter.VideoAdapter
 import com.videoshell.util.toast
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** 站点浏览页：分类浏览 + 搜索 */
@@ -120,21 +121,34 @@ class SiteActivity : AppCompatActivity() {
     private fun loadCategories() {
         binding.pb.visibility = View.VISIBLE
         showState(null)
-        binding.catHintRow.visibility = View.GONE
+        binding.tvCatHint.text = getString(R.string.cat_loading)
+        binding.catHintRow.visibility = View.VISIBLE
         lifecycleScope.launch {
             val a = adapter ?: return@launch
-            val res = runCatching { a.categories() }
-            val list = res.getOrElse { emptyList() }
+            var list: List<Category> = emptyList()
+            var why = ""
+            // 手机网络下"每个新域名的第一次请求"很容易抖一下（DNS 慢 / 首次握手超时）。
+            // 旧实现一抖整条分类栏就消失，只能靠用户手动点"重新加载"。这里自动补两轮
+            // （退避 1.5s / 3s），抖动就自愈了 —— 用户不该为这种事点第二次。
+            for (round in 0 until 3) {
+                if (round > 0) {
+                    binding.tvCatHint.text = getString(R.string.cat_retrying, round)
+                    delay(if (round == 1) 1_500L else 3_000L)
+                }
+                val res = runCatching { a.categories() }
+                list = res.getOrElse { emptyList() }
+                if (list.isNotEmpty()) break
+                // 优先报真实异常（比"首页请求失败"这种笼统描述有用得多），否则用适配器给的诊断
+                why = res.exceptionOrNull()
+                    ?.let { it.javaClass.simpleName + ": " + it.message }
+                    ?.takeIf { it.isNotBlank() }
+                    ?: a.lastDiag.ifBlank { NetLog.lastFailure() }
+            }
             binding.pb.visibility = View.GONE
             val all = listOf(Category("", getString(R.string.cat_latest))) + list
             catAdapter.submit(all)
             // 解析不到分类时不禁用浏览 —— 至少"最新"还能用，同时给出重试入口与原因
             if (list.isEmpty()) {
-                // 优先报真实异常（比"首页请求失败"这种笼统描述有用得多），否则用适配器给的诊断
-                val why = res.exceptionOrNull()
-                    ?.let { it.javaClass.simpleName + ": " + it.message }
-                    ?.takeIf { it.isNotBlank() }
-                    ?: a.lastDiag.ifBlank { NetLog.lastFailure() }
                 binding.tvCatHint.text =
                     if (why.isBlank()) getString(R.string.cat_only_home)
                     else getString(R.string.cat_only_home) + "（" + why + "）"

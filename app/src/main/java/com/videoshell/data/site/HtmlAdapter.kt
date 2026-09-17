@@ -45,6 +45,9 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
     private var diag: String = ""
     override val lastDiag: String get() = diag
 
+    /** 最近一次抓取失败的具体原因（异常文本），分类为空时并进 [diag] 一起展示 */
+    private var lastFetchErr: String = ""
+
     /** 当前浏览目标的已见影片 id，用于分页去重 */
     private val seenIds = HashSet<String>()
     private var seenKey = ""
@@ -110,7 +113,10 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
             }
             diag = "首页 ${home.length} 字，分类 ${list.size} 个"
         }
-        if (sawHome == 0) diag = "首页请求失败" + if (lastErr.isBlank()) "" else "：$lastErr"
+        if (sawHome == 0) {
+            val why = lastErr.ifBlank { lastFetchErr }
+            diag = "首页请求失败：" + site.baseUrl + if (why.isBlank()) "" else "（$why）"
+        }
 
         // 2) 兜底：有的站首页是纯 JS 渲染（导航藏在脚本里），但列表页有静态导航。
         //    用列表模板探一遍，能拿到就用，拿不到也不影响"最新"浏览。
@@ -150,10 +156,19 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
         return out.filter { it.length > 8 }.toList()
     }
 
-    /** 带一次重试的抓取：首屏分类偶发超时会直接让分类栏消失，这里补一次 */
+    /**
+     * 抓取页面。
+     *
+     * [Http.get] 内部已带重试与退避（手机网络下"新域名首次请求"很容易抖一下），
+     * 这里只负责把失败原因留下来 —— 分类为空时提示条要能说清是**哪个地址、什么错**。
+     */
     private suspend fun fetch(url: String): String? {
-        Http.getOrNull(url, referer = site.baseUrl)?.let { return it }
-        return Http.getOrNull(url, referer = site.baseUrl)
+        val r = runCatching { Http.get(url, referer = site.baseUrl) }
+        r.getOrNull()?.let { return it }
+        lastFetchErr = r.exceptionOrNull()?.let { e ->
+            e.javaClass.simpleName + ": " + (e.message ?: "").take(100)
+        }.orEmpty()
+        return null
     }
 
     /** 从首页 DOM 里解析分类标签（独立成函数便于离线校验） */

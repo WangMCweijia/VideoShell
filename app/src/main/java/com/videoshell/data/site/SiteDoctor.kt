@@ -1,5 +1,6 @@
 package com.videoshell.data.site
 
+import com.videoshell.App
 import com.videoshell.data.model.MediaSource
 import com.videoshell.data.model.SiteConfig
 import com.videoshell.data.net.Http
@@ -27,6 +28,7 @@ object SiteDoctor {
         val L: (String) -> Unit = { sb.append(it).append('\n') }
 
         L("========== 站点自检 ==========")
+        L("版本：v${appVersion()}")
         L("名称：${site.name.ifBlank { "(未命名)" }}")
         L("首页：${site.baseUrl}")
         L("模式：${site.apiMode}" + if (site.apiUrl.isBlank()) "（无采集接口 → HTML 适配）" else "，接口 ${site.apiUrl}")
@@ -41,6 +43,9 @@ object SiteDoctor {
         L("[1] 首页请求")
         L("    HTTP $hst")
         if (hinfo.isNotBlank()) L("    $hinfo")
+        if (hst < 200 || hst > 399) {
+            L("    → 这一步就没通，后面的分类/列表必然为空；先解决这一环（网络/DNS/WAF）")
+        }
 
         // 2) 分类
         L("")
@@ -148,6 +153,12 @@ object SiteDoctor {
         appendNetLog(L)
         return sb.toString()
     }
+
+    /** 报告头带上版本号：免得"装的到底是哪个包"来回扯不清 */
+    private fun appVersion(): String = runCatching {
+        val c = App.instance
+        c.packageManager.getPackageInfo(c.packageName, 0).versionName.orEmpty()
+    }.getOrDefault("?")
 
     private fun appendNetLog(L: (String) -> Unit) {
         L("")
