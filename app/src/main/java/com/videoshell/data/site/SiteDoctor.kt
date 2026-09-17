@@ -4,6 +4,7 @@ import com.videoshell.data.model.MediaSource
 import com.videoshell.data.model.SiteConfig
 import com.videoshell.data.net.Http
 import com.videoshell.data.net.NetLog
+import com.videoshell.util.resolveUrl
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -15,7 +16,7 @@ import java.util.Locale
  * 无法判断是 DNS/超时/403 还是解析不出东西。这份报告把判断依据直接摆出来，
  * 用户截个图就能定位 —— 不用再靠"猜哪一环断了"。
  *
- * 跑的顺序：首页 → 分类 → 列表 → 详情 → 选集 → 播放地址 → 媒体请求。
+ * 跑的顺序：首页 → 分类 → 列表 → 详情 → 选集 → 播放地址 → 媒体请求 → 首个分片。
  */
 object SiteDoctor {
 
@@ -121,6 +122,20 @@ object SiteDoctor {
                 val (mst, minfo) = Http.probe(ms.url, site.baseUrl, "bytes=0-1023")
                 L("    HTTP $mst")
                 if (minfo.isNotBlank()) L("    $minfo")
+
+                // 7) 首个分片 —— "能解析却放不出来"的最后一个盲区：
+                //    playlist 拿 200 不代表分片也能下（分片常被单独做防盗链、或落在另一个 CDN）。
+                L("")
+                L("[7] 首个分片")
+                val seg = runCatching { firstSegment(ms.url, site.baseUrl, 0) }.getOrNull()
+                if (seg == null) {
+                    L("    没能从 playlist 里解析出分片地址")
+                } else {
+                    val (sst, sinfo) = Http.probe(seg, site.baseUrl, "bytes=0-1023")
+                    L("    HTTP $sst")
+                    L("    ${seg.take(140)}")
+                    if (sinfo.isNotBlank()) L("    $sinfo")
+                }
             }
             is MediaSource.Sniff -> {
                 L("    HTML 抠不到直链 → 需要网页嗅探（第 6 步跳过）")
@@ -138,5 +153,22 @@ object SiteDoctor {
         L("")
         L("---------- HTTP 记录 ----------")
         L(NetLog.report())
+    }
+
+    /**
+     * 从 playlist 里取**第一个分片**地址；遇到 master 清单（`#EXT-X-STREAM-INF`）先下沉一层。
+     * 返回 null 表示拿不到（网络失败 / 不是 m3u8 / 只有标签没有分片）。
+     */
+    private suspend fun firstSegment(url: String, referer: String, depth: Int): String? {
+        if (depth > 2) return null
+        val text = Http.getOrNull(url, referer) ?: return null
+        if (!text.contains("#EXTM3U")) return null
+        val first = text.lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.isNotBlank() && !it.startsWith("#") }
+            ?: return null
+        val child = resolveUrl(url, first)
+        if (child.isBlank()) return null
+        return if (text.contains("#EXT-X-STREAM-INF")) firstSegment(child, url, depth + 1) else child
     }
 }

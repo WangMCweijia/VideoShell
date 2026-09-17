@@ -226,6 +226,70 @@ object HtmlExtractor {
         ".module-tab-item, .playlist-title, .play-source-tab, .stui-pannel__head h3, " +
             ".stui-pannel__head h4, .source-name, .line-name, .play-title, h3, .title"
 
+    /**
+     * 「线路/播放源」类标签：`线路1080P`、`播放源2`、`片源`、`来源1`…
+     * 这类文字描述的是**播放源**，不是第几集。
+     */
+    private val LINE_LABEL = Regex(
+        "线路|播放源|片源|片\\s*源|来源|源\\s*\\d+|line\\s*\\d+",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** 纯清晰度标签：`1080P`、`4K`、`HD中字`、`超清`、`蓝光`…（整串就是它本身） */
+    private val QUALITY_LABEL = Regex(
+        "^\\s*(?:\\d{3,4}\\s*[pPiI]|4K|8K|HD|BD|TS|TC|超清|高清|蓝光|标清|原画|国语|粤语|HD中字)\\s*$",
+        RegexOption.IGNORE_CASE
+    )
+
+    private fun isLineLabel(t: String): Boolean {
+        val s = t.trim()
+        if (s.isEmpty()) return false
+        return LINE_LABEL.containsMatchIn(s) || QUALITY_LABEL.matches(s)
+    }
+
+    /** 分组名清洗：去掉页面里带过来的分隔符尾巴（`肖申克的救赎|` → `肖申克的救赎`） */
+    private fun cleanGroupName(raw: String): String {
+        val t = raw.replace(Regex("\\s+"), " ").trim()
+            .trim('|', '｜', '-', '—', '_', '·', ':', '：', ',', '，', '/', '\\', ' ')
+        if (t.isBlank()) return ""
+        return if (t.length > 16) t.take(16) else t
+    }
+
+    /**
+     * 容器里的 `<a>` 是否**全是「线路按钮」**（是则返回它们，否则 null）。
+     *
+     * 厂长资源这类 WordPress 影视站的详情页**根本没有分集列表**：`.paly_list_btn` 里每个
+     * `<a>` 是一条独立线路（`/v_play/{base64}.html`，解码后 `mv_849-nm_1` / `mv_849-nm_2`），
+     * 标签还都叫「线路1080P」。按分集去理解，一部电影会变成「2 集」，
+     * 点「第2集」实际跳到另一条线路 —— 线路数与集数全错。
+     *
+     * 判据（命中其一即认为是线路按钮）：
+     * 1) 每个标签都是线路/清晰度词汇；
+     * 2) 两个以上锚点且标签**完全相同** —— 分集不可能同名。
+     */
+    private fun asLineButtons(c: Element, base: String): List<Pair<String, Episode>>? {
+        // 注意：Elements 自带 filter(NodeFilter) 成员方法，会挡住 Kotlin 的 Iterable.filter，
+        // 所以必须先 toList() 转成普通 List 再用扩展函数。
+        val anchors = c.select("a[href]").toList().filter {
+            HtmlTemplates.isEpisodeLink(it.attr("href").trim())
+        }
+        if (anchors.size < 2) return null
+        val labels = anchors.map { episodeName(it) }
+        val allLine = labels.all { isLineLabel(it) }
+        val sameLabel = labels.all { it.isNotBlank() } && labels.distinct().size == 1
+        if (!allLine && !sameLabel) return null
+
+        val seen = HashSet<String>()
+        val out = ArrayList<Pair<String, Episode>>()
+        for (i in anchors.indices) {
+            val u = resolveUrl(base, anchors[i].attr("href").trim())
+            if (u.isBlank() || !seen.add(u)) continue
+            val lb = labels[i]
+            out.add(lb to Episode(lb.ifBlank { "第${out.size + 1}集" }, u))
+        }
+        return if (out.size >= 2) out else null
+    }
+
     fun parseGroups(doc: Document, base: String): List<PlayGroup> {
         // 1) tab 标题映射：href="#playlist2" -> "极速播放"（顺序也按 tab 来）
         val idNames = LinkedHashMap<String, String>()
@@ -246,10 +310,23 @@ object HtmlExtractor {
 
         val out = ArrayList<PlayGroup>()
         for (c in containers) {
+            // 先判「线路按钮式播放区」：这类容器的每个 <a> 是一条线路，不是一个分集
+            val lines = asLineButtons(c, base)
+            if (lines != null) {
+                val used = HashMap<String, Int>()
+                for ((label, ep) in lines) {
+                    val lb = label.ifBlank { "线路" }
+                    val n = (used[lb] ?: 0) + 1
+                    used[lb] = n
+                    out.add(PlayGroup(if (n > 1) "$lb ($n)" else lb, listOf(ep)))
+                }
+                continue
+            }
             val eps = collectEpisodes(c, base)
             if (eps.isEmpty()) continue
             var name = idNames[c.id()].orEmpty()
             if (name.isBlank()) name = nearestTitle(c)
+            name = cleanGroupName(name)
             if (name.isBlank()) name = "线路 ${out.size + 1}"
             out.add(PlayGroup(name, eps))
         }
