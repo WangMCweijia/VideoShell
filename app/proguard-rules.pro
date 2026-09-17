@@ -1,0 +1,6 @@
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-dontwarn org.jsoup.**
+-keep class com.videoshell.data.model.** { *; }
+-keep class org.jsoup.** { *; }
+-dontwarn org.jetbrains.annotations.**

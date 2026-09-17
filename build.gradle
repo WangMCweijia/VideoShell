@@ -1,0 +1,24 @@
+// 视频壳 VideoShell - 空壳视频客户端
+// 输入网址 -> 自动识别 CMS/接口类型 -> 自动适配为原生客户端 -> 嗅探播放
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.1.4'
+        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22'
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+tasks.register('clean', Delete) {
+    delete rootProject.buildDir
+}

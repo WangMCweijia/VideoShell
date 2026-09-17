@@ -1,0 +1,49 @@
+<resources>
+    <string name="app_name">视频壳</string>
+    <string name="back">返回</string>
+    <string name="source">播放源</string>
+
+    <string name="hint_url">输入视频站网址，例如 https://www.example.com</string>
+    <string name="btn_detect">识别并适配</string>
+    <string name="btn_play_direct">直接播放该直链</string>
+    <string name="btn_sniff">用网页嗅探打开</string>
+    <string name="btn_add_manual">手动添加为网页站点</string>
+    <string name="title_sites">已保存的站点</string>
+    <string name="empty_sites">还没有站点。在上方输入一个视频站网址，点「识别并适配」试试。</string>
+    <string name="detecting">正在识别站点类型…</string>
+    <string name="delete">删除</string>
+    <string name="delete_confirm">确定删除该站点？</string>
+    <string name="cancel">取消</string>
+    <string name="ok">确定</string>
+
+    <string name="search_hint">搜索影片 / 剧集</string>
+    <string name="cat_latest">最新</string>
+    <string name="loading">加载中…</string>
+    <string name="no_more">没有更多了</string>
+    <string name="no_result">没有找到结果</string>
+    <string name="search">搜索</string>
+
+    <string name="detail_summary">剧情简介</string>
+    <string name="detail_info">影片信息</string>
+    <string name="episode_count">共 %1$d 集</string>
+    <string name="source_line">线路 %1$d</string>
+
+    <string name="player_speed">倍速</string>
+    <string name="player_episodes">选集</string>
+    <string name="player_rotate">旋转</string>
+    <string name="hud_speed">%1$sx</string>
+
+    <string name="sniffer_running">正在嗅探视频地址，请在网页中点击播放…</string>
+    <string name="sniffer_found">已捕获 %1$d 个候选地址</string>
+    <string name="sniffer_none">尚未捕获到视频地址</string>
+    <string name="sniffer_show_web">显示网页</string>
+    <string name="sniffer_hide_web">隐藏网页</string>
+    <string name="sniffer_retry">重新嗅探</string>
+    <string name="sniffer_play">播放</string>
+    <string name="sniffer_title">嗅探中</string>
+    <string name="sniffer_manual">手动输入播放地址</string>
+
+    <string name="err_network">网络请求失败：%1$s</string>
+    <string name="err_no_video_site">未能识别为视频站。可尝试「用网页嗅探打开」或手动添加。</string>
+    <string name="err_empty_url">请先输入网址</string>
+</resources>
