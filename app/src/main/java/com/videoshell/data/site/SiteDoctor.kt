@@ -93,10 +93,19 @@ object SiteDoctor {
         val dRes = runCatching { a.detail(id) }
         val d = dRes.getOrNull()
         dRes.exceptionOrNull()?.let {
-            L("    异常：${it.javaClass.simpleName}: ${it.message}")
+            // 只报异常第一行；详细清单由下面的「解析过程」给出，避免同一份内容出现两遍
+            L("    异常：${it.javaClass.simpleName}: " +
+                it.message.orEmpty().lineSequence().firstOrNull().orEmpty())
+        }
+        // 适配器记下的「试过哪些地址、各自什么结果」—— 详情失败时这一节就是答案本身
+        val dTrace = a.lastDiag
+        if (dTrace.isNotBlank()) {
+            L("    解析过程：")
+            dTrace.lines().take(24).forEach { line -> L("      $line") }
         }
         if (d == null) {
             L("    结果：失败")
+            L("    → 把这份报告整体发回即可定位（上面已列出每个试过的地址与结果）")
             appendTail(L, site)
             return sb.toString()
         }

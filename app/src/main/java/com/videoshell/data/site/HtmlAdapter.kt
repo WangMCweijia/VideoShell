@@ -82,7 +82,29 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
 
     /** 分类为空时把原因带出去，让 UI 能显示出来（不然只能靠猜） */
     private var diag: String = ""
-    override val lastDiag: String get() = diag
+
+    /**
+     * 详情解析的「试过什么」记录（v1.0.15）。
+     *
+     * 为什么需要：用户报「校准后拿不到分集列表」时，`detail()` 只会抛一句
+     * "HTML 模板不匹配" —— 试了哪些地址、每个地址是连不上、404、还是拿到了页面但
+     * 一个分集锚点都没有，全被吞掉了。没有这层记录就只能靠猜，而这一版已经证明了
+     * 「猜」是最慢的排查方式（同一份配方在别的机器上明明跑得通）。
+     */
+    private var detailTrace: String = ""
+
+    private val traceBuf = ArrayList<String>()
+
+    private fun tr(s: String) {
+        if (traceBuf.size < 24) traceBuf += s
+    }
+
+    /**
+     * 分类为空时是分类的原因；分类没问题但详情失败时给出**详情试过的地址清单**。
+     * 两条都为空才算"没话说"。
+     */
+    override val lastDiag: String
+        get() = diag.ifBlank { detailTrace }
 
     /** 最近一次抓取失败的具体原因（异常文本），分类为空时并进 [diag] 一起展示 */
     private var lastFetchErr: String = ""
@@ -423,6 +445,12 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
     // ------------------------------------------------------------------ 详情
 
     override suspend fun detail(id: String): VideoDetail {
+        // 记录这一轮试过什么 —— 失败时随异常一起抛给 UI，自检报告里也会列出
+        traceBuf.clear()
+        detailTrace = ""
+        tr("影片 id=$id")
+        tr("配方：详情模板=" + (detailTpl ?: "—") + "　播放模板=" + (playTpl ?: "—"))
+
         // 1) 配方 / 学到的模板优先。**关键**：它们来自磁盘，所以进详情页那个新 Activity
         //    也能直接用 —— 这正是修掉「分类列表都能出、一点详情就失败」的地方。
         for (tpl in listOfNotNull(detailTpl, learnedDetailTpl).distinct()) {
@@ -445,16 +473,29 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
         //    用 play 模板探一次，从中把分集捞出来。
         detailFromPlayPage(id)?.let { return it }
 
-        throw IOException("未能解析该影片详情（HTML 模板不匹配，可尝试网页嗅探播放）")
+        detailTrace = traceBuf.joinToString("\n")
+        throw IOException(
+            "未能解析该影片详情（HTML 模板不匹配，可尝试网页嗅探播放）\n" +
+                "试过这些地址：\n" + traceBuf.takeLast(9).joinToString("\n")
+        )
     }
 
     /** 用一条模板真抓详情页并解析分集；成功就把模板固化进配方 */
     private suspend fun hitDetail(tpl: String, id: String): VideoDetail? {
-        val html = fetch(build(tpl, id = id)) ?: return null
+        val url = build(tpl, id = id)
+        val html = fetch(url)
+        if (html == null) {
+            tr("✗ $url → " + lastFetchErr.ifBlank { "请求失败" })
+            return null
+        }
         val doc = Jsoup.parse(html, site.baseUrl)
         rememberShape(doc)
         val groups = HtmlExtractor.parseGroups(doc, site.baseUrl)
-        if (groups.isEmpty()) return null
+        if (groups.isEmpty()) {
+            tr("✗ $url → 页面 ${html.length} 字，但一个分集锚点都没认出来")
+            return null
+        }
+        tr("✓ $url → ${groups.sumOf { it.episodes.size }} 集")
         if (detailTpl != tpl) {
             detailTpl = tpl
             RecipeStore.update(site.baseUrl) { it.copy(detailTpl = tpl) }
@@ -465,13 +506,20 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
 
     /** 回首页抓一次，从卡片链接现学详情页模板（整个 Adapter 生命周期内只做一次） */
     private suspend fun learnFromHome(): Boolean {
-        if (homeLearned) return false
+        if (homeLearned) return learnedDetailTpl != null
         homeLearned = true
-        val html = Http.getOrNull(root, referer = root) ?: return false
+        val html = Http.getOrNull(root, referer = root)
+        if (html == null) {
+            tr("✗ 回首页现学：首页抓不到（$root）")
+            return false
+        }
         val doc = Jsoup.parse(html, root)
         rememberShape(doc)
         learnDetailTpl(doc)
-        return learnedDetailTpl != null
+        val t = learnedDetailTpl
+        if (t == null) tr("✗ 回首页现学：首页 ${html.length} 字，但没找到可学的详情链接")
+        else tr("· 回首页现学：学到详情模板 $t")
+        return t != null
     }
 
     private fun buildDetail(id: String, doc: Document, groups: List<PlayGroup>): VideoDetail {
@@ -488,11 +536,21 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
     }
 
     private suspend fun detailFromPlayPage(id: String): VideoDetail? {
+        if (playTpl.isNullOrBlank()) tr("· 播放页兜底：没有播放模板，只能盲试通用候选")
         for (tpl in orderPlay(HtmlTemplates.playCandidates(root))) {
-            val html = fetch(build(tpl, id = id)) ?: continue
+            val url = build(tpl, id = id)
+            val html = fetch(url)
+            if (html == null) {
+                tr("✗ $url → " + lastFetchErr.ifBlank { "请求失败" })
+                continue
+            }
             val doc = Jsoup.parse(html, site.baseUrl)
             val groups = HtmlExtractor.parseGroups(doc, site.baseUrl)
-            if (groups.isEmpty()) continue
+            if (groups.isEmpty()) {
+                tr("✗ $url → 页面 ${html.length} 字，但一个分集锚点都没认出来")
+                continue
+            }
+            tr("✓ $url（播放页兜底）→ ${groups.sumOf { it.episodes.size }} 集")
             if (playTpl != tpl) {
                 playTpl = tpl
                 RecipeStore.update(site.baseUrl) { it.copy(playTpl = tpl) }
