@@ -231,7 +231,9 @@ object HtmlExtractor {
      * 这类文字描述的是**播放源**，不是第几集。
      */
     private val LINE_LABEL = Regex(
-        "线路|播放源|片源|片\\s*源|来源|源\\s*\\d+|line\\s*\\d+",
+        "线路|播放源|片源|片\\s*源|来源|源\\s*\\d+|line\\s*\\d+" +
+            "|云播|云\\s*[一二三四五六七八九十\\d]+|节点\\s*[一二三四五六七八九十\\d]*" +
+            "|秒播|快播|极速源|超清源|高清源|蓝光源|原画源",
         RegexOption.IGNORE_CASE
     )
 
@@ -249,9 +251,17 @@ object HtmlExtractor {
 
     /** 分组名清洗：去掉页面里带过来的分隔符尾巴（`肖申克的救赎|` → `肖申克的救赎`） */
     private fun cleanGroupName(raw: String): String {
-        val t = raw.replace(Regex("\\s+"), " ").trim()
+        var t = raw.replace(Regex("\\s+"), " ").trim()
             .trim('|', '｜', '-', '—', '_', '·', ':', '：', ',', '，', '/', '\\', ' ')
         if (t.isBlank()) return ""
+        // 相邻重复词压掉：`云播四 云播四 云播四` -> `云播四`。
+        // 来源是 nearestTitle() 往祖先链上取文本时，同一段 tab 文本被重复取了几次。
+        val parts = t.split(' ').filter { it.isNotBlank() }
+        if (parts.size > 1) {
+            val uniq = ArrayList<String>(parts.size)
+            for (p in parts) if (uniq.isEmpty() || uniq.last() != p) uniq.add(p)
+            t = uniq.joinToString(" ")
+        }
         return if (t.length > 16) t.take(16) else t
     }
 
@@ -293,8 +303,12 @@ object HtmlExtractor {
     fun parseGroups(doc: Document, base: String): List<PlayGroup> {
         // 1) tab 标题映射：href="#playlist2" -> "极速播放"（顺序也按 tab 来）
         val idNames = LinkedHashMap<String, String>()
-        for (a in doc.select("a[href^=#], [data-toggle=tab]")) {
-            val target = a.attr("href").trim().removePrefix("#")
+        for (a in doc.select("a[href^=#], a[id^=#], [data-toggle=tab]")) {
+            val href = a.attr("href").trim()
+            // tab 目标有两种写法：写在 `href`（标准），或写在**元素自己的 `id` 属性**里。
+            // 后者看着怪但真实存在 —— 金牌影视：<a href="javascript:void(0);" id="#con_playlist_2">云播四</a>
+            // 只认 href 的话，线路名会整片落回 nearestTitle 去拼，拼出「云播四 云播四 云播四」这种名字。
+            val target = (if (href.startsWith("#")) href else a.attr("id").trim()).removePrefix("#")
             if (target.isBlank()) continue
             val t = a.text().trim().ifBlank { a.attr("data-title").trim() }
             if (t.isNotBlank() && t.length <= 16) idNames.putIfAbsent(target, t)

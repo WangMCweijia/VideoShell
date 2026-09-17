@@ -37,7 +37,11 @@ object HtmlTemplates {
         Regex("/vod/play"),
         Regex("play/id/"),
         Regex("/watch/"),
-        Regex("/episode/")
+        Regex("/episode/"),
+        // 「形状」判据：不依赖目录名叫什么。maccms 的播放页永远是 `/{目录}/{id}-{sid}-{nid}.html`，
+        // 站点常把目录名改掉（金牌影视用 `/bspvp/`、厂长用 `/v_play/`），
+        // 列举目录名永远举不全，不如直接认形状。
+        Regex("/[A-Za-z][\\w_\\-]*/\\d+-\\d+-\\d+\\.html")
     )
 
     /**
@@ -131,6 +135,34 @@ object HtmlTemplates {
         val g = SLUG_CATEGORY.find(h)?.groupValues?.getOrNull(1) ?: return false
         // 纯数字段不是分类（多半是分页）
         return g.any { !it.isDigit() }
+    }
+
+    /**
+     * 「带后缀的目录式分类」：`/bspvt/dianying.html`、`/vodtype/dongzuo.html`…
+     *
+     * 和 [isSlugCategory] 是同一件事，区别只是 maccms 后台把「分类别名」配成了带 `.html` 的形式。
+     * 实测站点：金牌影视（`bolyship.com`）—— `bspvt` / `bspvd` / `bspvs` / `bspvp`
+     * 四个目录名全被改过（分别对应 maccms 的 vodtype / voddetail / vodshow / vodplay）。
+     *
+     * **形状天然可分**：分类是 `/{目录}/{字母开头的别名}.html`，
+     * 详情是 `/{目录}/{纯数字}.html`（数字开头直接不匹配），所以不会把详情页收成分类。
+     * 与 [isSlugCategory] 一样，只允许调用方**限制在导航容器内**使用。
+     */
+    private val SLUG_DIR =
+        Regex("^/?([A-Za-z][A-Za-z0-9_\\-]{0,24})/([A-Za-z][A-Za-z0-9_\\-]{0,24})\\.html$")
+
+    fun isSlugDirCategory(href: String): Boolean {
+        val h = href.trim()
+        if (h.isEmpty() || h.startsWith("http") || h.startsWith("//")) return false
+        if (h.startsWith("#") || h.startsWith("javascript") || h.startsWith("mailto")) return false
+        if (h.contains('?')) return false
+        val m = SLUG_DIR.find(h) ?: return false
+        val dir = m.groupValues[1]
+        val slug = m.groupValues[2]
+        // maccms 的「筛选/列表页」是 `/vodshow/1--------1---.html` 这种连续连字符占位，
+        // 别名里出现 3 个以上连字符基本就是它，不是分类标签。
+        if (slug.contains("---") || dir.contains("---")) return false
+        return slug.any { !it.isDigit() } && dir.any { !it.isDigit() }
     }
 
     /**

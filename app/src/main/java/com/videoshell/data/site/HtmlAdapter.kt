@@ -215,12 +215,18 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
                 for (a in box.select("a[href]")) {
                     if (a.selectFirst("img") != null) continue
                     val href = a.attr("href").trim()
-                    if (!HtmlTemplates.isSlugCategory(href)) continue
+                    // 两种写法都认：`/riju`（无后缀）与 `/bspvt/dianying.html`（带 .html）。
+                    // maccms 后台的「分类别名」两种写法都常见，只认一种就会整站没有分类。
+                    if (!HtmlTemplates.isSlugCategory(href) && !HtmlTemplates.isSlugDirCategory(href)) continue
 
                     val name = a.text().replace(Regex("\\s+"), " ").trim()
                     if (name.isBlank() || name.length > 10) continue
                     if (name in catBlacklist) continue
                     if (catBadWords.any { name.contains(it) }) continue
+                    // 同名去重：同一个分类常同时出现在主菜单、二级面板与底部导航里，
+                    // URL 可能各不相同（`/bspvt/dianshiju.html` vs `/bspvs/dianshiju-----.html`），
+                    // 只按 URL 去重会在分类栏里出现一串重复标签。
+                    if (out.values.any { it.name == name }) continue
 
                     val url = abs(href)
                     if (host.isNotBlank() && !hostOf(url).equals(host, true)) continue
