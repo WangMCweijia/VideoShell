@@ -55,6 +55,14 @@
     <string name="cat_only_home">未解析到分类，按「最新」浏览</string>
     <string name="detail_retry">重试</string>
 
+    <string name="site_doctor">自检</string>
+    <string name="site_doctor_running">正在自检，请稍候…</string>
+    <string name="site_doctor_title">站点自检报告</string>
+    <string name="site_doctor_close">关闭</string>
+    <string name="site_doctor_copy">复制</string>
+    <string name="site_doctor_copied">报告已复制到剪贴板</string>
+    <string name="err_prefix">失败：%1$s</string>
+
     <string name="sniffer_running">正在嗅探视频地址，请在网页中点击播放…</string>
     <string name="sniffer_found">已捕获 %1$d 个候选地址</string>
     <string name="sniffer_none">尚未捕获到视频地址</string>

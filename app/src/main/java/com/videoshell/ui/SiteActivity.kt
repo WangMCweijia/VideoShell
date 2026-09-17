@@ -1,12 +1,19 @@
 package com.videoshell.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.graphics.Typeface
 import android.os.Bundle
 import android.view.View
 import android.view.inputmethod.EditorInfo
+import android.widget.ScrollView
+import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -16,8 +23,10 @@ import com.videoshell.data.Store
 import com.videoshell.data.model.Category
 import com.videoshell.data.model.SiteConfig
 import com.videoshell.data.model.VideoItem
+import com.videoshell.data.net.NetLog
 import com.videoshell.data.site.AdapterFactory
 import com.videoshell.data.site.SiteAdapter
+import com.videoshell.data.site.SiteDoctor
 import com.videoshell.databinding.ActivitySiteBinding
 import com.videoshell.ui.adapter.CategoryAdapter
 import com.videoshell.ui.adapter.VideoAdapter
@@ -103,6 +112,7 @@ class SiteActivity : AppCompatActivity() {
             } else false
         }
         binding.btnCatRetry.setOnClickListener { loadCategories() }
+        binding.btnDoctor.setOnClickListener { runDoctor() }
 
         loadCategories()
     }
@@ -113,13 +123,18 @@ class SiteActivity : AppCompatActivity() {
         binding.catHintRow.visibility = View.GONE
         lifecycleScope.launch {
             val a = adapter ?: return@launch
-            val list = runCatching { a.categories() }.getOrDefault(emptyList())
+            val res = runCatching { a.categories() }
+            val list = res.getOrElse { emptyList() }
             binding.pb.visibility = View.GONE
             val all = listOf(Category("", getString(R.string.cat_latest))) + list
             catAdapter.submit(all)
             // 解析不到分类时不禁用浏览 —— 至少"最新"还能用，同时给出重试入口与原因
             if (list.isEmpty()) {
-                val why = a.lastDiag
+                // 优先报真实异常（比"首页请求失败"这种笼统描述有用得多），否则用适配器给的诊断
+                val why = res.exceptionOrNull()
+                    ?.let { it.javaClass.simpleName + ": " + it.message }
+                    ?.takeIf { it.isNotBlank() }
+                    ?: a.lastDiag.ifBlank { NetLog.lastFailure() }
                 binding.tvCatHint.text =
                     if (why.isBlank()) getString(R.string.cat_only_home)
                     else getString(R.string.cat_only_home) + "（" + why + "）"
@@ -130,6 +145,46 @@ class SiteActivity : AppCompatActivity() {
             onCategory(0, all[0])
         }
     }
+
+    // ------------------------------------------------------------------ 站点自检
+
+    private fun runDoctor() {
+        if (adapter == null) return
+        toast(getString(R.string.site_doctor_running))
+        binding.pb.visibility = View.VISIBLE
+        lifecycleScope.launch {
+            val report = runCatching { SiteDoctor.run(site) }
+                .getOrElse { "自检本身出错：${it.javaClass.simpleName}: ${it.message}" }
+            binding.pb.visibility = View.GONE
+            showReport(report)
+        }
+    }
+
+    private fun showReport(text: String) {
+        val tv = TextView(this).apply {
+            setTextIsSelectable(true)
+            typeface = Typeface.MONOSPACE
+            textSize = 11f
+            setTextColor(ContextCompat.getColor(this@SiteActivity, R.color.text_primary))
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            this.text = text
+        }
+        val sv = ScrollView(this).apply { addView(tv) }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.site_doctor_title)
+            .setView(sv)
+            .setPositiveButton(R.string.site_doctor_copy) { _, _ ->
+                runCatching {
+                    val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("videoshell-doctor", text))
+                    toast(getString(R.string.site_doctor_copied))
+                }
+            }
+            .setNegativeButton(R.string.site_doctor_close, null)
+            .show()
+    }
+
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
     private fun onCategory(index: Int, c: Category) {
         catAdapter.select(index)
@@ -164,18 +219,25 @@ class SiteActivity : AppCompatActivity() {
         loading = true
 
         lifecycleScope.launch {
-            val items = runCatching {
+            val res = runCatching {
                 if (mode == MODE_SEARCH) a.search(keyword, p) else a.browse(currentType, p)
-            }.getOrDefault(emptyList())
+            }
+            val items = res.getOrElse { emptyList() }
 
             loading = false
             binding.pb.visibility = View.GONE
 
             if (items.isEmpty()) {
                 if (!append) {
+                    val why = res.exceptionOrNull()?.let { it.javaClass.simpleName + ": " + it.message }
+                    val net = NetLog.lastFailure()
                     showState(
-                        if (mode == MODE_SEARCH) getString(R.string.no_result)
-                        else "暂无数据，可换个分类试试"
+                        when {
+                            !why.isNullOrBlank() -> getString(R.string.err_prefix, why)
+                            net.isNotBlank() -> "暂无数据（$net）"
+                            mode == MODE_SEARCH -> getString(R.string.no_result)
+                            else -> "暂无数据，可换个分类试试"
+                        }
                     )
                 } else {
                     toast(getString(R.string.no_more))

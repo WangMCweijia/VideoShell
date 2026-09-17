@@ -91,18 +91,26 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
         diag = ""
 
         // 1) 首页导航 —— 最理想，直接就是站点自己的分类标签
-        val home = fetch(site.baseUrl)
-        if (home == null) {
-            diag = "首页请求失败"
-        } else {
-            val doc = Jsoup.parse(home, site.baseUrl)
-            val list = categoriesFrom(doc)
+        //    多地址重试：http/https、www/裸域 都试一遍（有的站在某些网络上只认其中一种）
+        var lastErr = ""
+        var sawHome = 0
+        for (base in baseCandidates()) {
+            val home = fetch(base)
+            if (home == null) continue
+            sawHome = home.length
+            val list = try {
+                categoriesFrom(Jsoup.parse(home, base))
+            } catch (e: Exception) {
+                lastErr = e.javaClass.simpleName + ": " + e.message
+                emptyList()
+            }
             if (list.size >= 2) {
                 cachedCats = list
                 return list
             }
             diag = "首页 ${home.length} 字，分类 ${list.size} 个"
         }
+        if (sawHome == 0) diag = "首页请求失败" + if (lastErr.isBlank()) "" else "：$lastErr"
 
         // 2) 兜底：有的站首页是纯 JS 渲染（导航藏在脚本里），但列表页有静态导航。
         //    用列表模板探一遍，能拿到就用，拿不到也不影响"最新"浏览。
@@ -118,6 +126,28 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
         }
         if (diag.isBlank()) diag = "首页与候选列表页都没解析到分类"
         return emptyList()
+    }
+
+    /**
+     * 首页地址候选：原地址 → 换 www/裸域 → 换协议。
+     * 有些站在特定网络下只认其中一种，多试一次成本很低，却能救回整个站。
+     */
+    private fun baseCandidates(): List<String> {
+        val b = site.baseUrl.trimEnd('/')
+        val out = LinkedHashSet<String>()
+        out.add(b)
+        val host = hostOf(b)
+        if (host.isNotBlank()) {
+            val alt = when {
+                host.startsWith("www.") -> host.removePrefix("www.")
+                else -> "www.$host"
+            }
+            out.add(b.replaceFirst(host, alt))
+        }
+        val swapped = if (b.startsWith("https://")) b.replaceFirst("https://", "http://")
+        else b.replaceFirst("http://", "https://")
+        out.add(swapped)
+        return out.filter { it.length > 8 }.toList()
     }
 
     /** 带一次重试的抓取：首屏分类偶发超时会直接让分类栏消失，这里补一次 */

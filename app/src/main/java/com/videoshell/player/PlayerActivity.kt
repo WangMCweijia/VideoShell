@@ -108,6 +108,9 @@ class PlayerActivity : AppCompatActivity() {
     private var fallbackPage = ""
     private var retried = false
 
+    /** 已经自动降级到嗅探过一次（防止反复跳转） */
+    private var autoSniffTried = false
+
     private val sp: SharedPreferences by lazy { getSharedPreferences(SP, Context.MODE_PRIVATE) }
     private val handler = Handler(Looper.getMainLooper())
     private val hideHud = Runnable { binding.tvHud.visibility = View.GONE }
@@ -243,7 +246,7 @@ class PlayerActivity : AppCompatActivity() {
         })
 
         // 底部控制条会盖住手势层，把它的高度告诉手势层让事件穿透
-        binding.bottomBar.addOnLayoutChangeListener { v, _, top, _, bottom, _, _, _, _ ->
+        binding.bottomBar.addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
             binding.gesture.bottomBlockHeight = if (controllerVisible) bottom - top else 0
         }
 
@@ -369,6 +372,7 @@ class PlayerActivity : AppCompatActivity() {
         val p = player ?: return
         if (url.isBlank()) return
         currentUrl = url
+        if (!fromRetry) autoSniffTried = false
 
         val http = DefaultHttpDataSource.Factory()
             .setUserAgent(Http.UA)
@@ -597,6 +601,36 @@ class PlayerActivity : AppCompatActivity() {
         binding.diagPanel.visibility = View.VISIBLE
         binding.ivPlay.setImageResource(R.drawable.ic_play)
         if (!controllerVisible) setBarsVisible(true)
+
+        // 直链播不了（CDN 404 / 超时 / 拒绝）就自动改走网页嗅探 ——
+        // 用户不必自己判断"是源挂了还是解析错了"，换条路能把片放出来才是目的。
+        if (shouldAutoSniff(error)) {
+            autoSniffTried = true
+            val page = fallbackPage
+            showHud("直链不可用，正在改用网页嗅探…")
+            handler.postDelayed({
+                startActivity(SniffActivity.intent(this, page, currentTitle, headers))
+                finish()
+            }, 1200)
+        }
+    }
+
+    /**
+     * 是否值得自动降级到嗅探。
+     * 只对**网络/HTTP 层**错误降级（这些换条路往往能成）；
+     * 解码器/格式错误降级也没用，就别折腾用户了。
+     */
+    private fun shouldAutoSniff(error: PlaybackException): Boolean {
+        if (autoSniffTried) return false
+        if (fallbackPage.isBlank()) return false
+        var c: Throwable? = error
+        var depth = 0
+        while (c != null && depth++ < 8) {
+            if (c is HttpDataSource.InvalidResponseCodeException) return true
+            if (c is java.io.IOException) return true
+            c = c.cause
+        }
+        return false
     }
 
     // ------------------------------------------------------------------ HUD / 进度记忆

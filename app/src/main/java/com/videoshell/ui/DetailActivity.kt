@@ -16,6 +16,7 @@ import com.videoshell.data.model.Episode
 import com.videoshell.data.model.MediaSource
 import com.videoshell.data.model.VideoDetail
 import com.videoshell.data.model.VideoItem
+import com.videoshell.data.net.NetLog
 import com.videoshell.data.site.AdapterFactory
 import com.videoshell.data.site.SiteAdapter
 import com.videoshell.databinding.ActivityDetailBinding
@@ -106,10 +107,16 @@ class DetailActivity : AppCompatActivity() {
         showState(null)
         lifecycleScope.launch {
             val a = adapter ?: return@launch
-            val d = runCatching { a.detail(id) }.getOrNull()
+            val res = runCatching { a.detail(id) }
+            val d = res.getOrNull()
             binding.pb.visibility = View.GONE
             if (d == null) {
-                showState("获取影片详情失败（可返回列表换一部，或该站需要嗅探播放）")
+                val why = res.exceptionOrNull()?.message?.takeIf { it.isNotBlank() }
+                    ?: NetLog.lastFailure()
+                showState(
+                    if (why.isBlank()) "获取影片详情失败（可返回列表换一部，或该站需要嗅探播放）"
+                    else "获取影片详情失败：$why"
+                )
                 return@launch
             }
             detail = d
