@@ -117,8 +117,16 @@ class SiteActivity : AppCompatActivity() {
             binding.pb.visibility = View.GONE
             val all = listOf(Category("", getString(R.string.cat_latest))) + list
             catAdapter.submit(all)
-            // 解析不到分类时不禁用浏览 —— 至少"最新"还能用，同时给出重试入口
-            binding.catHintRow.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+            // 解析不到分类时不禁用浏览 —— 至少"最新"还能用，同时给出重试入口与原因
+            if (list.isEmpty()) {
+                val why = a.lastDiag
+                binding.tvCatHint.text =
+                    if (why.isBlank()) getString(R.string.cat_only_home)
+                    else getString(R.string.cat_only_home) + "（" + why + "）"
+                binding.catHintRow.visibility = View.VISIBLE
+            } else {
+                binding.catHintRow.visibility = View.GONE
+            }
             onCategory(0, all[0])
         }
     }

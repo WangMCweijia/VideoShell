@@ -50,6 +50,7 @@ object HtmlExtractor {
         ".vodtag",
         ".v-note",
         ".note",
+        ".jidi",
         ".time-title"
     )
 
@@ -61,34 +62,64 @@ object HtmlExtractor {
 
     // ------------------------------------------------------------------ 列表
 
+    /** 单张卡片 */
+    private data class Card(
+        val id: String,
+        val href: String,
+        val name: String,
+        val pic: String,
+        val remarks: String
+    )
+
     fun parseList(doc: Document, base: String, vodIsCategory: Boolean = false): List<VideoItem> {
         val out = LinkedHashMap<String, VideoItem>()
         for (a in doc.select("a[href]")) {
-            val href = a.attr("href").trim()
-            if (href.isEmpty()) continue
-            if (href.startsWith("javascript") || href.startsWith("#") || href.startsWith("mailto")) continue
-
-            val id = HtmlTemplates.videoIdOf(href, vodIsCategory) ?: continue
-            if (out.containsKey(id)) continue
-
-            val img = pickImage(a)
-            var pic = img?.let { picOf(it) }.orEmpty()
-            // 有些主题把懒加载图放在 <a> 自身（stui: a[data-original]），也认
-            if (pic.isBlank()) pic = picOf(a)
-            // 没图的必须是「强详情链接」才认，否则一律视为导航/功能链接
-            if (pic.isBlank() && !HtmlTemplates.isStrongDetail(href)) continue
-
-            val name = pickName(a, img) ?: continue
-            if (name in BAD_NAMES) continue
-
-            out[id] = VideoItem(
-                id = id,
-                name = name,
-                pic = resolveUrl(base, pic),
-                remarks = pickRemarks(a)
+            val c = card(a, vodIsCategory) ?: continue
+            if (out.containsKey(c.id)) continue
+            out[c.id] = VideoItem(
+                id = c.id,
+                name = c.name,
+                pic = resolveUrl(base, c.pic),
+                remarks = c.remarks
             )
         }
         return out.values.toList()
+    }
+
+    /**
+     * 列表页学一条详情页模板：拿第一张真实卡片的链接，把其中的影片 id 换成 `{id}`。
+     *
+     * 「站点用哪个路径前缀放详情页」只有它自己的列表页知道（`/detail/`、`/movie/`、`/watch/`…），
+     * 穷举模板永远会漏，学一条最稳。
+     */
+    fun detailTplHint(doc: Document, base: String, vodIsCategory: Boolean): String? {
+        for (a in doc.select("a[href]")) {
+            val c = card(a, vodIsCategory) ?: continue
+            val tpl = HtmlTemplates.detailTplFrom(resolveUrl(base, c.href), c.id)
+            if (tpl != null) return tpl
+        }
+        return null
+    }
+
+    /** 判定一条 `<a>` 是不是影片卡片；不是返回 null。卡片必须自带图片（见类注释）。 */
+    private fun card(a: Element, vodIsCategory: Boolean): Card? {
+        val href = a.attr("href").trim()
+        if (href.isEmpty()) return null
+        if (href.startsWith("javascript") || href.startsWith("#") || href.startsWith("mailto")) return null
+
+        val id = HtmlTemplates.videoIdOf(href, vodIsCategory) ?: return null
+
+        val img = pickImage(a)
+        var pic = img?.let { picOf(it) }.orEmpty()
+        // 有些主题把懒加载图放在 <a> 自身（stui: a[data-original]），也认
+        if (pic.isBlank()) pic = picOf(a)
+        // 没图的必须是「强详情链接」才认，否则一律视为导航/功能链接
+        if (pic.isBlank() && !HtmlTemplates.isStrongDetail(href)) return null
+
+        val name = pickName(a, img) ?: return null
+        if (name in BAD_NAMES) return null
+
+        return Card(id, href, name, pic, pickRemarks(a))
     }
 
     /**
@@ -181,6 +212,11 @@ object HtmlExtractor {
         ".video-playlist",
         ".num-list",
         ".ep-list",
+        // WordPress 系（厂长资源）：<div class="mi_paly_box"><div class="paly_list_btn"><a…>
+        ".paly_list_btn",
+        ".mi_paly_box",
+        "[class*=paly_list]",
+        "[class*=play_list]",
         "#playlist",
         "dl"
     )

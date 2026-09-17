@@ -10,10 +10,12 @@
 |---|---|
 | 站点识别 | 输入网址 → 并发探测苹果CMS/海洋CMS 的 JSON、XML 采集接口（`/api.php/provide/vod/` 等 8 个候选路径）；都不通则启用通用 HTML 适配 |
 | 自动适配 | 识别结果落成一份 `SiteConfig`（站点类型 / 接口地址 / 固定参数），下次直接可用；同一个站只需适配一次 |
-| 分类浏览 | 分类项直接携带站点自己的真实 URL（不再靠猜模板），横向标签栏 + 网格列表 + 滚动翻页（按已见 id 去重，站点无分页时自动收尾） |
+| 分类浏览 | 分类项直接携带站点自己的真实 URL（不再靠猜模板），横向标签栏 + 网格列表 + 滚动翻页（按已见 id 去重，站点无分页时自动收尾）。分类识别覆盖四层：导航容器的模板式分类（`/vodshow/id/6.html` 等）→ **目录式分类**（WordPress 系的 `/meijutt`、`/riju`，且会扫遍顶部/二级/底部**所有**导航容器）→ 全文档兜底 → 「把 `/vod/{id}.html` 强行当分类」的安全网 |
+| 列表卡片 | 详情链接支持 `/detail/{id}.html`、`/vod/{id}.html`，以及通用的 `/{单段}/{id}.html`（`/movie/`、`/film/`、`/watch/`…）；海报支持 `data-original` / `data-src` / `background-image` 等**懒加载**写法（占位 `blank.gif` 不会被当海报） |
+| 详情页模板 | **从列表页学一条**：拿第一张真实卡片的链接反推 `{id}` 模板（`/movie/{id}.html`），比穷举模板可靠；学不到才回落到内置候选列表 |
 | 搜索 | 走接口 `ac=detail&wd=`；HTML 站逐个试常见搜索模板（含 `/vodsearch/wd/{kw}.html`） |
-| 选集 | 解析 `vod_play_from` / `vod_play_url`；HTML 站支持 `.tab-content > .tab-pane` 等结构，线路名按 tab 的 `href="#playlistN"` 映射（不靠 DOM 顺序猜），支持多线路（播放源）+ 剧集网格 |
-| 播放解析 | 三级策略：① 本身就是 m3u8/mp4 → 直用；② 播放页 → 从 HTML 里抠 `player_aaaa` 的真实地址（不用开网页）；③ 抠不到 → 网页嗅探 |
+| 选集 | 解析 `vod_play_from` / `vod_play_url`；HTML 站支持 `.tab-content > .tab-pane`、`.paly_list_btn` 等结构，线路名按 tab 的 `href="#playlistN"` 映射（不靠 DOM 顺序猜），播放页链接覆盖 `/play/`、`/v_play/`、`/watch/`、`vodplay/` 等写法，支持多线路（播放源）+ 剧集网格 |
+| 播放解析 | 三级策略：① 本身就是 m3u8/mp4 → 直用；② 播放页 → 从 HTML 里抠 `player_aaaa` 的真实地址（不用开网页）；③ 抠不到 → 网页嗅探。抠取时会**完整还原 JSON 转义**（`\uXXXX` 等），中文路径（`…/第01集/index.m3u8`）不会再变成 `\u7b2c01\u96c6` 而 404 |
 | HLS 兼容层 | 拦截 m3u8 做**规范化**再喂播放器：分片路径绝对化、`#EXT-X-TARGETDURATION` 按实际最大分片修正、剔除跨目录插播广告分片（`/adjump/` 等）及其 `#EXT-X-DISCONTINUITY`。解决"网页能播、壳里播不了"的扁平 TS 清单（见下文说明） |
 | 网页嗅探 | WebView 钩住 XHR/fetch/video 事件 + `shouldInterceptRequest` 拦截媒体请求，按 HLS>DASH>MP4>FLV 打分排序，捕获到 HLS 自动跳转播放 |
 | 内置播放器 | Media3 ExoPlayer，支持 HLS；自定义请求头（User-Agent / Referer） |
@@ -33,6 +35,16 @@
 浏览器的 hls.js 对这些都是"能忍则忍"，ExoPlayer 更严格，于是出现**网页能播、壳子里播不了**。
 `player/HlsFix.kt` 在数据源层面拦下 playlist 响应并规范化（分片绝对化 + TARGETDURATION 修正 +
 剔除插播广告段），分片请求则原样透传、不缓冲。master playlist 与直播流会被识别并跳过处理。
+
+### 为什么播放地址要做 JSON 转义还原
+
+很多站的播放页把真实地址放在 `player_aaaa={...}` 里，那是**序列化过的 JSON**：
+斜杠写成 `\/`，中文写成 `\uXXXX`。例如 `…/video/bianshuiwangshi/第01集/index.m3u8`
+在源码里是 `…\/video\/bianshuiwangshi\/\u7b2c01\u96c6\/index.m3u8`。
+
+只还原 `\/` 而不管 `\uXXXX`，就会把 `\u7b2c01\u96c6` 原样丢给播放器 —— CDN 自然回 404。
+`Media.unescape()` 现在按 JSON 字符串规则完整还原（`\uXXXX` 含代理对，以及 `\n`/`\t`/`\"` 等），
+于是「同一个站有些集能播、有些集 404」这类问题会消失（能不能播取决于该集路径里有没有中文）。
 
 
 ## 技术栈

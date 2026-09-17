@@ -45,8 +45,63 @@ object Media {
             u.contains(".ts", true)
     }
 
-    private fun unescape(s: String): String =
-        s.replace("\\/", "/").replace("\\u0026", "&").replace("\\u003d", "=").replace("&amp;", "&")
+    /**
+     * 还原 JSON / JS 字符串里的转义。
+     *
+     * 关键：**必须支持通用 `\uXXXX`**。
+     * 很多站的 `player_aaaa` 是 JSON 序列化出来的，路径里的中文会被写成 `\uXXXX`
+     * （例如 `/video/bianshuiwangshi/\u7b2c01\u96c6/index.m3u8` 实际是 `…/第01集/index.m3u8`）。
+     * 旧实现只解 `\/ \u0026 \u003d`，于是把 `\u7b2c01\u96c6` 原样丢给播放器 → CDN 返回 404。
+     */
+    fun unescape(s: String): String {
+        if (s.indexOf('\\') < 0 && !s.contains("&amp;")) return s
+        val sb = StringBuilder(s.length)
+        var i = 0
+        while (i < s.length) {
+            val c = s[i]
+            if (c != '\\' || i == s.length - 1) {
+                sb.append(c)
+                i++
+                continue
+            }
+            when (s[i + 1]) {
+                'u', 'U' -> {
+                    val cp = hex4(s, i + 2)
+                    if (cp < 0) {
+                        sb.append(c)
+                        i++
+                    } else {
+                        // 逐 UTF-16 单元追加：代理对（\uD83D\uDE00）也能拼回完整字符
+                        sb.append(cp.toChar())
+                        i += 6
+                    }
+                }
+                '/' -> { sb.append('/'); i += 2 }
+                '\\' -> { sb.append('\\'); i += 2 }
+                '"' -> { sb.append('"'); i += 2 }
+                '\'' -> { sb.append('\''); i += 2 }
+                'b' -> { sb.append('\b'); i += 2 }
+                'f' -> { sb.append('\u000C'); i += 2 }
+                'n' -> { sb.append('\n'); i += 2 }
+                'r' -> { sb.append('\r'); i += 2 }
+                't' -> { sb.append('\t'); i += 2 }
+                else -> { sb.append(c); i++ }
+            }
+        }
+        return sb.toString().replace("&amp;", "&")
+    }
+
+    /** 读 4 位十六进制，失败返回 -1 */
+    private fun hex4(s: String, from: Int): Int {
+        if (from + 4 > s.length) return -1
+        var v = 0
+        for (k in 0 until 4) {
+            val d = Character.digit(s[from + k], 16)
+            if (d < 0) return -1
+            v = v * 16 + d
+        }
+        return v
+    }
 
     /** 从播放页 HTML 里挖出真实媒体地址 */
     fun extractFromHtml(html: String?): String? {

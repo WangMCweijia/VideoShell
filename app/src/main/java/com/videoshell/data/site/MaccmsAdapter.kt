@@ -24,12 +24,26 @@ class MaccmsAdapter(site: SiteConfig) : SiteAdapter(site) {
         throw IOException("接口返回不是有效 JSON")
     }
 
+    private var diag: String = ""
+    override val lastDiag: String get() = diag
+
     override suspend fun categories(): List<Category> {
-        val j = load(mapOf("ac" to "list"))
-        val tops = MaccmsKit.topCategories(j.optJSONArray("class"))
-        if (tops.isNotEmpty()) return tops
-        val j2 = load(mapOf("ac" to "detail", "pg" to "1"))
-        return MaccmsKit.topCategories(j2.optJSONArray("class"))
+        diag = ""
+        val j1 = runCatching { load(mapOf("ac" to "list")) }.getOrNull()
+        if (j1 != null) {
+            val tops = MaccmsKit.topCategories(j1.optJSONArray("class"))
+            if (tops.isNotEmpty()) return tops
+        } else {
+            diag = "采集接口无响应"
+        }
+        val j2 = runCatching { load(mapOf("ac" to "detail", "pg" to "1")) }.getOrNull()
+        if (j2 == null) {
+            if (diag.isBlank()) diag = "采集接口无响应"
+            return emptyList()
+        }
+        val tops = MaccmsKit.topCategories(j2.optJSONArray("class"))
+        if (tops.isEmpty()) diag = "接口未返回分类"
+        return tops
     }
 
     override suspend fun browse(typeId: String, page: Int): List<VideoItem> {

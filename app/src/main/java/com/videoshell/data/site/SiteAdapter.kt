@@ -19,6 +19,12 @@ abstract class SiteAdapter(val site: SiteConfig) {
 
     abstract suspend fun detail(id: String): VideoDetail
 
+    /**
+     * 上一次「分类解析失败」的原因（空串 = 无法给出原因或解析成功）。
+     * 分类栏空着却没头绪时，把它显示出来，用户一眼就知道是网络还是解析问题。
+     */
+    open val lastDiag: String get() = ""
+
     fun playHeaders(): Map<String, String> = mapOf(
         "User-Agent" to Http.UA,
         "Referer" to site.baseUrl

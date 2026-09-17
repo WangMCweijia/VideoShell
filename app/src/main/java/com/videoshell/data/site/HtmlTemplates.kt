@@ -23,9 +23,16 @@ object HtmlTemplates {
         Regex("/vodplay/[\\w-]*-\\d+-\\d+")
     )
 
-    /** 播放页链接：用于判断站点是否走「详情页 + 播放页」结构 */
+    /**
+     * 播放页链接：用于判断站点是否走「详情页 + 播放页」结构。
+     * `(?:^|[/_\-])play[/_\-]` 覆盖 `/play/`、`/v_play/`、`-play-`、`_play/` 等各家写法
+     * （厂长资源用的是 `/v_play/{base64}.html`）。
+     */
     private val PLAY = listOf(
         Regex("/play/"),
+        Regex("/v_play/"),
+        Regex("vplay/"),
+        Regex("(?:^|[/_\\-])play[/_\\-]"),
         Regex("vodplay/"),
         Regex("/vod/play"),
         Regex("play/id/"),
@@ -47,6 +54,16 @@ object HtmlTemplates {
         Regex("vod/(\\d+)\\.html"),
         Regex("/vod/(\\d+)$")
     )
+
+    /**
+     * 通用「单段路径 + 数字 + .html」详情页：`/movie/23804.html`、`/film/123.html`、`/tv/45.html`…
+     *
+     * 与 [WEAK_DETAIL] 的区别：这类路径**和分类页形状不冲突**（分类页是 `/vodshow/id/6.html`
+     * 那种多段带前缀的），所以不依赖 `vodIsCategory` 的判断，任何时候都能认。
+     * 唯一的重叠是 `/vod/{id}.html`，但它作为分类页时是**导航链接、没有海报**，
+     * 会被抽取器的「卡片必须自带图片」挡掉。
+     */
+    private val GENERIC_DETAIL = Regex("/[A-Za-z][A-Za-z0-9_\\-]{1,20}/(\\d+)\\.html")
 
     /** 分类（列表）页链接 */
     private val CATEGORY = listOf(
@@ -82,6 +99,7 @@ object HtmlTemplates {
     /** 影片 id（拿不到返回 null） */
     fun videoIdOf(href: String, vodIsCategory: Boolean = false): String? {
         firstGroup(STRONG_DETAIL, href)?.let { return it }
+        firstGroup(listOf(GENERIC_DETAIL), href)?.let { return it }
         if (!vodIsCategory) firstGroup(WEAK_DETAIL, href)?.let { return it }
         return null
     }
@@ -95,6 +113,44 @@ object HtmlTemplates {
 
     fun isCategoryHref(href: String, vodIsCategory: Boolean): Boolean =
         typeIdOf(href, vodIsCategory) != null
+
+    /**
+     * 「目录式分类」：`/meijutt`、`/riju`、`/gcj`、`/zuixindianying` 这类**单段路径**。
+     *
+     * WordPress 系（厂长资源那类）导航用自定义分类别名做分类页，URL 里既没有 `vodshow`
+     * 也没有数字，靠 [CATEGORY] 那套模板一条都认不出来。所以这里单独放一条判据，
+     * 由调用方**限制在导航容器内**使用（不然会误收 `/gbook`、`/label` 这类功能页）。
+     */
+    private val SLUG_CATEGORY = Regex("^/?([A-Za-z][A-Za-z0-9_\\-]{1,24})/?$")
+
+    fun isSlugCategory(href: String): Boolean {
+        val h = href.trim()
+        if (h.isEmpty() || h.startsWith("http") || h.startsWith("//")) return false
+        if (h.startsWith("#") || h.startsWith("javascript") || h.startsWith("mailto")) return false
+        if (h.contains('.') || h.contains('?') || h.contains('=')) return false
+        val g = SLUG_CATEGORY.find(h)?.groupValues?.getOrNull(1) ?: return false
+        // 纯数字段不是分类（多半是分页）
+        return g.any { !it.isDigit() }
+    }
+
+    /**
+     * 从一条真实的卡片详情链接反推详情页模板：`/movie/23804.html` + id=`23804`
+     * -> `/movie/{id}.html`。
+     *
+     * 站点用什么路径前缀（`/detail/`、`/movie/`、`/watch/`…）只有它的列表页知道，
+     * 与其穷举模板，不如从列表里学一条。
+     */
+    fun detailTplFrom(url: String, id: String): String? {
+        val u = url.trim()
+        val k = id.trim()
+        if (u.isEmpty() || k.isEmpty()) return null
+        val idx = u.lastIndexOf(k)
+        if (idx <= 0) return null
+        // 只认「数字紧跟在 `/` 或 `-` 后」的位置，避免把域名/目录里的数字也换掉
+        val prev = u[idx - 1]
+        if (prev != '/' && prev != '-') return null
+        return u.substring(0, idx) + "{id}" + u.substring(idx + k.length)
+    }
 
     fun listCandidates(base: String): List<String> = listOf(
         "$base/vodshow/{id}--------{page}---.html",
@@ -115,7 +171,11 @@ object HtmlTemplates {
         "$base/index.php/vod/detail/id/{id}.html",
         "$base/voddetail/{id}/",
         "$base/index.php/vod/detail/{id}.html",
-        "$base/vod/{id}.html"
+        "$base/vod/{id}.html",
+        // WordPress 系常见路径（列表页学不到模板时的兜底）
+        "$base/movie/{id}.html",
+        "$base/film/{id}.html",
+        "$base/video/{id}.html"
     )
 
     /**
