@@ -15,3 +15,4 @@ _tmp/
 _*.py
 _*.log
 _*.txt
+_*.json
