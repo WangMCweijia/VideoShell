@@ -49,6 +49,8 @@
     <string name="player_error_close">关闭</string>
     <string name="player_error_retry">重试</string>
     <string name="player_error_sniff">改用网页嗅探</string>
+    <string name="player_error_next">换下一个源</string>
+    <string name="player_error_back_candidates">返回候选列表</string>
 
     <string name="cat_load_failed">分类没能加载出来</string>
     <string name="cat_retry">重新加载</string>
@@ -75,6 +77,11 @@
     <string name="sniffer_show_web">显示网页</string>
     <string name="sniffer_hide_web">隐藏网页</string>
     <string name="sniffer_retry">重新嗅探</string>
+    <string name="sniffer_scanning">已捕获 %1$d 个候选，正在识别正片…</string>
+    <string name="sniffer_ambiguous">找到 %1$d 个候选，没识别出唯一正片 —— 请点选一个</string>
+    <string name="sniffer_playing">已选第 %1$d/%2$d 个候选，播不出来会自动换下一个</string>
+    <string name="sniffer_login_wall">播放页要求登录（%1$s）—— 该站不给未登录用户下发播放地址</string>
+    <string name="sniffer_copied">候选报告已复制（粘贴即可反馈）</string>
     <string name="sniffer_play">播放</string>
     <string name="sniffer_title">嗅探中</string>
     <string name="sniffer_manual">手动输入播放地址</string>

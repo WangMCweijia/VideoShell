@@ -28,7 +28,9 @@ class CandidateAdapter(
     inner class VH(private val b: ItemCandidateBinding) : RecyclerView.ViewHolder(b.root) {
         fun bind(c: SniffCandidate) {
             b.tvName.text = c.url
-            b.tvType.text = c.type
+            // 徽标写清"这个候选是什么"：类型 + 正片/疑似广告 + 时长或分片数，
+            // 让用户点之前就能看出该选哪个，而不是靠猜文件名。
+            b.tvType.text = c.display()
             b.root.setOnClickListener { onClick(c) }
         }
     }

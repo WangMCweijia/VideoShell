@@ -1,6 +1,8 @@
 package com.videoshell.player
 
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -16,6 +18,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
@@ -24,12 +27,24 @@ import com.videoshell.data.net.Http
 import com.videoshell.databinding.ActivitySniffBinding
 import com.videoshell.ui.adapter.CandidateAdapter
 import com.videoshell.util.toast
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONTokener
 
 /**
  * 网页嗅探：用 WebView 打开播放页，拦截 / 钩住页面发出的媒体请求（m3u8、mp4…），
  * 拿到真实播放地址后交给内置播放器。默认网页可见，方便手动点一下页面上的播放按钮触发请求。
+ *
+ * 关于「怎么知道该播哪一个」：一个播放页跑起来往往会产生**多个**媒体请求
+ * （正片 + 预roll 广告 + 埋点 + 预加载的其它线路）。旧实现只按文件类型打分，
+ * 广告 m3u8 与正片 m3u8 分数相同，平局看命中次数 —— 于是**广告经常赢**，
+ * 而且挑完就 `finish()` 跳走，候选清单没了，播错只能从头再来。
+ *
+ * 现在：
+ *  - 排序交给 [SniffRank]（URL 层剔除广告/埋点 + **内容层真实探测 playlist**）
+ *  - 只有"首选明确是正片"或"只有一个候选"才自动播；判不出来就停在列表让用户点
+ *  - 候选清单通过 [SniffQueue] 交给播放器，**播不出来能直接换下一个源**
+ *  - 本页不再 `finish()` 自己 —— 从播放器返回即可重新挑
  */
 class SniffActivity : AppCompatActivity() {
 
@@ -37,6 +52,17 @@ class SniffActivity : AppCompatActivity() {
         private const val EXTRA_URL = "page_url"
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_HEADERS = "headers"
+
+        /** 首个候选出现后先等一会儿再动手：让页面把该发的请求都发出来，免得"先到的广告"被当成唯一选项 */
+        private const val SETTLE_MS = 2_500L
+
+        /** 最多真正探测几个候选的 playlist（每次探测一个网络请求，不宜贪多） */
+        private const val MAX_PROBE = 4
+
+        /** 最多重新探测两轮（页面可能陆续吐出更多候选） */
+        private const val MAX_PROBE_ROUNDS = 2
+
+        private const val MAX_TICKS = 240
 
         fun intent(context: Context, pageUrl: String, title: String, headers: Map<String, String>): Intent =
             Intent(context, SniffActivity::class.java).apply {
@@ -54,8 +80,15 @@ class SniffActivity : AppCompatActivity() {
     private var title: String = ""
     private var pageHeaders: Map<String, String> = emptyMap()
 
+    /** 播放页地址里的视频 id —— 候选地址含它时是很强的正面信号 */
+    private var videoId: String = ""
+
     private val candidates = LinkedHashMap<String, SniffCandidate>()
-    private val candidateAdapter = CandidateAdapter { c -> startPlayer(c.url) }
+
+    /** 每个目录下观测到的 .ts 分片请求数：正片目录会被打几百次，广告目录只有十几次 */
+    private val tsHits = HashMap<String, Int>()
+
+    private val candidateAdapter = CandidateAdapter { c -> startPlayer(c) }
 
     private val handler = Handler(Looper.getMainLooper())
     private var polling = false
@@ -67,28 +100,25 @@ class SniffActivity : AppCompatActivity() {
     /** 主文档加载失败的原因；有值时状态栏直接显示，不再让用户对着空白页猜 */
     private var pageError = ""
 
-    private val autoPlayTask = Runnable {
-        if (autoPlayed) return@Runnable
-        val best = bestCandidate() ?: return@Runnable
-        if (best.type == "HLS" || best.type == "DASH") {
-            autoPlayed = true
-            startPlayer(best.url)
-        }
-    }
+    /** 页面要求登录（这类站根本不会下发播放地址，嗅探必然扑空） */
+    private var loginWall = false
+    private var loginWords = ""
+
+    private var probeRounds = 0
+    private var probing = false
+    private var textProbed = false
 
     private val pollTask = object : Runnable {
         override fun run() {
             if (!polling) return
             ticks++
-            if (ticks > 150) {
+            if (ticks > MAX_TICKS) {
                 polling = false
                 updateStatus()
                 return
             }
             collectJs()
-            if (!autoPlayed && firstSeenAt > 0 && System.currentTimeMillis() - firstSeenAt > 3500) {
-                handler.post(autoPlayTask)
-            }
+            maybeProbeAndAutoPlay()
             handler.postDelayed(this, 1000)
         }
     }
@@ -101,6 +131,7 @@ class SniffActivity : AppCompatActivity() {
 
         pageUrl = intent.getStringExtra(EXTRA_URL).orEmpty()
         title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
+        videoId = Regex("(\\d{4,})").find(pageUrl.substringBefore('?'))?.value.orEmpty()
         pageHeaders = runCatching {
             val t = object : TypeToken<Map<String, String>>() {}.type
             Gson().fromJson<Map<String, String>>(intent.getStringExtra(EXTRA_HEADERS), t)
@@ -111,6 +142,8 @@ class SniffActivity : AppCompatActivity() {
             finish()
             return
         }
+
+        SniffQueue.clear()
 
         binding.tvTitle.text = title.ifBlank { "嗅探中" }
         binding.btnBack.setOnClickListener { finish() }
@@ -125,6 +158,9 @@ class SniffActivity : AppCompatActivity() {
                 getString(if (webVisible) R.string.sniffer_hide_web else R.string.sniffer_show_web)
         }
         binding.btnRetry.setOnClickListener { restart() }
+
+        // 状态栏点一下就把候选报告复制走 —— 排查"到底抓到了什么"时比截图有用
+        binding.tvStatus.setOnClickListener { copyReport() }
 
         setupWebView()
         loadPage()
@@ -204,10 +240,17 @@ class SniffActivity : AppCompatActivity() {
 
     private fun restart() {
         candidates.clear()
+        tsHits.clear()
         candidateAdapter.submit(emptyList())
+        SniffQueue.clear()
         autoPlayed = false
         firstSeenAt = 0L
         ticks = 0
+        probeRounds = 0
+        probing = false
+        textProbed = false
+        loginWall = false
+        loginWords = ""
         pageError = ""
         binding.tvStatus.text = getString(R.string.sniffer_running)
         binding.rvCandidates.visibility = View.GONE
@@ -258,67 +301,194 @@ class SniffActivity : AppCompatActivity() {
     private fun offer(raw: String) {
         if (raw.isBlank() || raw.startsWith("blob:") || raw.startsWith("data:")) return
         if (!raw.startsWith("http")) return
-        val type = classify(raw) ?: return
+        val type = SniffRank.classify(raw) ?: return
         runOnUiThread {
-            val c = candidates[raw]
-            if (c == null) {
-                candidates[raw] = SniffCandidate(raw, type, 1)
-                if (firstSeenAt == 0L) firstSeenAt = System.currentTimeMillis()
+            if (type == "TS") {
+                // 分片本身不是播放入口（真点了也只会播 2 秒），但它证明"这个目录确实在被播放"，
+                // 而这个证据正好可以用来给同目录下的 m3u8 加分 —— 比凭关键词猜可靠得多。
+                val d = SniffRank.dirOf(raw)
+                if (d.isNotBlank()) tsHits[d] = (tsHits[d] ?: 0) + 1
             } else {
-                c.hits++
+                val c = candidates[raw]
+                if (c == null) {
+                    candidates[raw] = SniffCandidate(
+                        raw, type, 1, suspect = SniffRank.isSuspect(raw)
+                    )
+                    if (firstSeenAt == 0L) firstSeenAt = System.currentTimeMillis()
+                } else {
+                    c.hits++
+                }
+                updateStatus()
             }
+        }
+    }
+
+    // ------------------------------------------------------------------ 排序 / 探测 / 自动播放
+
+    private fun ranked(): List<SniffCandidate> =
+        SniffRank.rank(candidates.values, videoId, tsHits)
+
+    private fun maybeProbeAndAutoPlay() {
+        if (autoPlayed) return
+        if (candidates.isEmpty()) {
+            maybeDetectLoginWall()
+            return
+        }
+        if (firstSeenAt == 0L) return
+        if (System.currentTimeMillis() - firstSeenAt < SETTLE_MS) return
+        if (probing || probeRounds >= MAX_PROBE_ROUNDS) return
+        probing = true
+        probeRounds++
+        lifecycleScope.launch {
+            runCatching { probeTopCandidates() }
+            probing = false
             updateStatus()
+            tryAutoPlay()
         }
     }
 
-    private fun classify(url: String): String? {
-        val u = url.lowercase()
-        return when {
-            u.contains("m3u8") -> "HLS"
-            u.contains(".mpd") -> "DASH"
-            u.contains(".mp4") -> "MP4"
-            u.contains(".flv") -> "FLV"
-            u.contains(".ts") -> "TS"
-            else -> null
+    /**
+     * 真的把候选的 playlist 拉下来看它是什么 —— 这是整轮排序里唯一**不靠猜**的一步。
+     * 正片几百上千个分片（几十分钟），广告十几个（几十秒），`SniffRank.verdict()` 就是据此刻的。
+     */
+    private suspend fun probeTopCandidates() {
+        val referer = pageHeaders.entries
+            .firstOrNull { it.key.equals("Referer", true) }?.value ?: pageUrl
+        var n = 0
+        for (c in ranked()) {
+            if (n >= MAX_PROBE) break
+            if (c.type != "HLS" && c.type != "DASH") continue
+            if (c.suspect) continue                  // 已知广告嫌疑，不值得再花一个请求
+            n++
+            val text = Http.getPlaylistOnce(c.url, referer) ?: continue
+            c.content = SniffRank.verdict(text)
+            c.note = SniffRank.describe(text)
         }
     }
 
-    private fun score(c: SniffCandidate): Int = when (c.type) {
-        "HLS" -> 100
-        "DASH" -> 70
-        "MP4" -> 60
-        "FLV" -> 50
-        else -> 10
+    private fun tryAutoPlay() {
+        if (autoPlayed) return
+        val pick = SniffRank.autoPick(ranked(), probed = probeRounds > 0) ?: return
+        autoPlayed = true
+        startPlayer(pick)
     }
-
-    private fun bestCandidate(): SniffCandidate? =
-        candidates.values.sortedWith(
-            compareByDescending<SniffCandidate> { score(it) }.thenByDescending { it.hits }
-        ).firstOrNull()
 
     private fun updateStatus() {
         val n = candidates.size
         binding.tvStatus.text = when {
-            n > 0 -> getString(R.string.sniffer_found, n)
-            pageError.isNotBlank() -> getString(R.string.sniffer_page_error, pageError)
-            ticks > 20 -> getString(R.string.sniffer_timeout)
-            else -> getString(R.string.sniffer_none)
+            n == 0 && loginWall -> getString(R.string.sniffer_login_wall, loginWords)
+            n == 0 && pageError.isNotBlank() -> getString(R.string.sniffer_page_error, pageError)
+            n == 0 && ticks > 25 -> getString(R.string.sniffer_timeout)
+            n == 0 -> getString(R.string.sniffer_none)
+            autoPlayed -> getString(
+                R.string.sniffer_playing, SniffQueue.index + 1, n
+            )
+            probeRounds > 0 -> getString(R.string.sniffer_ambiguous, n)
+            else -> getString(R.string.sniffer_scanning, n)
         }
         binding.pb.visibility = if (n == 0) View.VISIBLE else View.GONE
-        val sorted = candidates.values.sortedWith(
-            compareByDescending<SniffCandidate> { score(it) }.thenByDescending { it.hits }
-        )
-        candidateAdapter.submit(sorted)
+        candidateAdapter.submit(ranked())
         binding.rvCandidates.visibility = if (n == 0) View.GONE else View.VISIBLE
     }
 
-    private fun startPlayer(url: String) {
+    private val LOGIN_WORDS = listOf(
+        "登录后即可观看", "登录后播放", "请先登录", "请登录", "立即登录",
+        "开通会员", "购买后", "会员专享"
+    )
+
+    /** 长时间一个候选都没有：看看页面是不是在要求登录 —— 这类站嗅探必然扑空，得如实告诉用户 */
+    private fun maybeDetectLoginWall() {
+        if (textProbed || ticks < 8) return
+        textProbed = true
+        runCatching {
+            binding.webView.evaluateJavascript(TEXT_JS) { v ->
+                val t = jsonString(v)
+                val hit = LOGIN_WORDS.filter { t.contains(it) }
+                if (hit.isNotEmpty()) {
+                    loginWall = true
+                    loginWords = hit.first()
+                    updateStatus()
+                }
+            }
+        }
+    }
+
+    private fun jsonString(v: String?): String {
+        if (v.isNullOrBlank() || v == "null") return ""
+        return runCatching { (JSONTokener(v).nextValue() as? String).orEmpty() }.getOrDefault("")
+    }
+
+    private fun copyReport() {
+        val sb = StringBuilder()
+        sb.appendLine("===== 嗅探报告 =====")
+        sb.appendLine("版本：v${appVersion()}")
+        sb.appendLine("标题：$title")
+        sb.appendLine("播放页：$pageUrl")
+        sb.appendLine("视频 id：${videoId.ifBlank { "(未识别)" }}")
+        sb.appendLine("页面错误：${pageError.ifBlank { "无" }}")
+        sb.appendLine("登录墙：${if (loginWall) loginWords else "未检测到"}")
+        sb.appendLine("候选 ${candidates.size} 个（含排序依据）：")
+        ranked().forEachIndexed { i, c ->
+            sb.appendLine("  [${i + 1}] ${c.display()}   分数=${c.score}")
+            sb.appendLine("      ${c.url}")
+        }
+        if (candidates.isEmpty()) sb.appendLine("  （无）")
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("嗅探报告", sb.toString()))
+        toast(getString(R.string.sniffer_copied))
+    }
+
+    private fun appVersion(): String = runCatching {
+        packageManager.getPackageInfo(packageName, 0).versionName.orEmpty()
+    }.getOrDefault("")
+
+    private fun startPlayer(c: SniffCandidate) {
         if (isFinishing) return
+        // 无论自动还是手点，一旦交棒给播放器就置位 —— 否则用户从播放器返回时
+        // 轮询会再次"自动挑一个"把人跳走，非常突然。
+        autoPlayed = true
+        val list = ranked()
+        val at = list.indexOfFirst { it.url == c.url }.coerceAtLeast(0)
+        // 把整份候选清单交出去：播放器那边播不出来会自动换下一个，不用回来重新嗅探
+        SniffQueue.set(list, at)
+
         val h = HashMap<String, String>()
         h.putAll(pageHeaders)
         if (h.keys.none { it.equals("Referer", true) } && pageUrl.isNotBlank()) h["Referer"] = pageUrl
-        startActivity(PlayerActivity.intent(this, url, title.ifBlank { "播放" }, h))
-        finish()
+
+        startActivity(
+            PlayerActivity.intent(
+                this, c.url, title.ifBlank { "播放" }, h,
+                pageUrl = pageUrl, fromSniff = true
+            )
+        )
+        // 刻意**不** finish()：候选清单留在返回栈里，播不出来时返回就能换一个源。
+        // 同时停掉轮询，别在后台继续往网页里灌脚本。
+        polling = false
+        handler.removeCallbacks(pollTask)
+    }
+
+    // ------------------------------------------------------------------ 生命周期
+
+    override fun onStart() {
+        super.onStart()
+        runCatching {
+            binding.webView.onResume()
+            binding.webView.resumeTimers()
+        }
+        // 从播放器返回时继续收集：候选清单保持"活着"，注解（时长/分片数）也会继续更新。
+        // 不会再自动跳走 —— 见 startPlayer() 里的 autoPlayed 置位。
+        startPolling()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        polling = false
+        handler.removeCallbacks(pollTask)
+        runCatching {
+            binding.webView.onPause()
+            binding.webView.pauseTimers()
+        }
     }
 
     override fun onDestroy() {
@@ -375,4 +545,8 @@ class SniffActivity : AppCompatActivity() {
 
     private val COLLECT_JS =
         "(function(){var a=window.__vsFound||[];window.__vsFound=[];return JSON.stringify(a);})()"
+
+    /** 页面可见文字（截断）—— 只在"一个候选都没有"时用，判断是不是登录墙 */
+    private val TEXT_JS =
+        "(function(){try{return document.body?document.body.innerText.slice(0,1200):''}catch(e){return ''}})()"
 }

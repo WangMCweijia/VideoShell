@@ -62,6 +62,9 @@ class PlayerActivity : AppCompatActivity() {
         private const val EXTRA_HEADERS = "headers"
         private const val EXTRA_PAGE = "page_url"
 
+        /** 本次播放来自嗅探页 —— 意味着 [SniffQueue] 里有一份候选清单可以换源 */
+        private const val EXTRA_FROM_SNIFF = "from_sniff"
+
         private val SPEEDS = listOf(1.0f, 1.25f, 1.5f, 2.0f, 0.75f, 0.5f)
         private const val LONG_PRESS_SPEED = 2.5f
 
@@ -79,11 +82,13 @@ class PlayerActivity : AppCompatActivity() {
             url: String,
             title: String,
             headers: Map<String, String>,
-            pageUrl: String = ""
+            pageUrl: String = "",
+            fromSniff: Boolean = false
         ): Intent = Intent(context, PlayerActivity::class.java).apply {
             putExtra(EXTRA_URL, url)
             putExtra(EXTRA_TITLE, title)
             putExtra(EXTRA_PAGE, pageUrl)
+            putExtra(EXTRA_FROM_SNIFF, fromSniff)
             putExtra(
                 EXTRA_HEADERS,
                 Gson().toJson(headers, object : TypeToken<Map<String, String>>() {}.type)
@@ -110,6 +115,12 @@ class PlayerActivity : AppCompatActivity() {
 
     /** 已经自动降级到嗅探过一次（防止反复跳转） */
     private var autoSniffTried = false
+
+    /** 本次播放是否来自嗅探页 —— 是的话失败时可以自动换下一个候选源 */
+    private var fromSniff = false
+
+    /** 已经为哪个地址换过一次源（同一个源重复报错不能反复切） */
+    private var lastSwitchedFrom = ""
 
     private val sp: SharedPreferences by lazy { getSharedPreferences(SP, Context.MODE_PRIVATE) }
     private val handler = Handler(Looper.getMainLooper())
@@ -151,6 +162,7 @@ class PlayerActivity : AppCompatActivity() {
 
         currentTitle = intent.getStringExtra(EXTRA_TITLE).orEmpty()
         fallbackPage = intent.getStringExtra(EXTRA_PAGE).orEmpty()
+        fromSniff = intent.getBooleanExtra(EXTRA_FROM_SNIFF, false)
         binding.tvTitle.text = currentTitle
 
         bright = window.attributes.screenBrightness.let { if (it > 0f) it else 0.5f }
@@ -259,8 +271,19 @@ class PlayerActivity : AppCompatActivity() {
                 playUrl(currentUrl, fromRetry = true)
             }
         }
+        // 「换源」：嗅探到的候选不止一个时，手动切到下一个（自动换源失败后还有得选）
+        binding.btnDiagNext.visibility = View.GONE
+        binding.btnDiagNext.setOnClickListener {
+            binding.diagPanel.visibility = View.GONE
+            if (!nextSniffSource()) toast("没有更多候选源了")
+        }
         binding.btnDiagSniff.setOnClickListener {
             binding.diagPanel.visibility = View.GONE
+            if (fromSniff && SniffQueue.candidates.isNotEmpty()) {
+                // 嗅探页还在返回栈里活着（候选清单也在），直接回去重挑，不用再嗅一遍
+                finish()
+                return@setOnClickListener
+            }
             val page = fallbackPage.ifBlank { currentUrl }
             if (page.isBlank()) {
                 toast("没有可嗅探的页面地址")
@@ -549,6 +572,10 @@ class PlayerActivity : AppCompatActivity() {
     private fun playEpisode(index: Int) {
         val ep = PlayQueue.episodes().getOrNull(index) ?: return
         PlayQueue.episodeIndex = index
+        // 换了集，上一集的嗅探候选就作废了
+        SniffQueue.clear()
+        fromSniff = false
+        lastSwitchedFrom = ""
         episodeAdapter.select(index)
         binding.episodePanel.visibility = View.GONE
         currentTitle = "${PlayQueue.title} ${ep.name}".trim()
@@ -605,6 +632,18 @@ class PlayerActivity : AppCompatActivity() {
         sb.append("地址：").append(currentUrl.take(140))
         if (retried) sb.append("\n（已重试过一次）")
         binding.tvDiag.text = sb.toString()
+        binding.tvDiagTitle.text = if (fromSniff && SniffQueue.candidates.isNotEmpty()) {
+            getString(R.string.player_error_title) +
+                "（源 ${SniffQueue.index + 1}/${SniffQueue.candidates.size}）"
+        } else {
+            getString(R.string.player_error_title)
+        }
+        binding.btnDiagNext.visibility =
+            if (fromSniff && SniffQueue.hasNext()) View.VISIBLE else View.GONE
+        binding.btnDiagSniff.text = getString(
+            if (fromSniff && SniffQueue.candidates.isNotEmpty()) R.string.player_error_back_candidates
+            else R.string.player_error_sniff
+        )
         binding.diagPanel.visibility = View.VISIBLE
         binding.ivPlay.setImageResource(R.drawable.ic_play)
         if (!controllerVisible) setBarsVisible(true)
@@ -617,8 +656,21 @@ class PlayerActivity : AppCompatActivity() {
             error
         )
 
-        // 直链播不了（CDN 404 / 超时 / 拒绝）就自动改走网页嗅探 ——
-        // 用户不必自己判断"是源挂了还是解析错了"，换条路能把片放出来才是目的。
+        // ① 来自嗅探：先自动换下一个候选源。
+        //    一个播放页往往同时产出正片/广告/预加载线路等多个媒体地址，排序不可能永远对 ——
+        //    换一个的成本远低于"退回嗅探页再嗅一次"，这正是"播错了文件"最实用的兜底。
+        if (fromSniff && SniffQueue.hasNext() && currentUrl != lastSwitchedFrom) {
+            lastSwitchedFrom = currentUrl
+            val at = "${SniffQueue.index + 2}/${SniffQueue.candidates.size}"
+            showHud("该源不可用，正在换下一个源（$at）…")
+            handler.postDelayed({
+                if (!isFinishing) nextSniffSource()
+            }, 900)
+            return
+        }
+
+        // ② 直链播不了（CDN 404 / 超时 / 拒绝）就自动改走网页嗅探 ——
+        //    用户不必自己判断"是源挂了还是解析错了"，换条路能把片放出来才是目的。
         if (shouldAutoSniff(error)) {
             autoSniffTried = true
             val page = fallbackPage
@@ -628,6 +680,16 @@ class PlayerActivity : AppCompatActivity() {
                 finish()
             }, 1200)
         }
+    }
+
+    /** 换到下一个嗅探候选源；没有更多候选就返回 false */
+    private fun nextSniffSource(): Boolean {
+        val next = SniffQueue.advance() ?: return false
+        retried = false
+        autoSniffTried = false
+        lastSwitchedFrom = ""
+        playUrl(next.url)
+        return true
     }
 
     /**

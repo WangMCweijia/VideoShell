@@ -27,5 +27,4 @@ object PlayQueue {
     }
 }
 
-/** 嗅探到的候选媒体地址 */
-data class SniffCandidate(val url: String, val type: String, var hits: Int = 1)
+// 嗅探候选（SniffCandidate）与候选队列（SniffQueue）见 SniffRank.kt

@@ -205,4 +205,33 @@ object Http {
                 -1 to (e.javaClass.simpleName + ": " + e.message).orEmpty()
             }
         }
+
+    /**
+     * 取 m3u8 正文用于**内容判断**（嗅探候选排序用）。
+     *
+     * 刻意只尝试一次、走短超时的 [fastClient]：这是排序过程中的一个探测动作，
+     * 卡住一个候选就会拖慢整轮排序 —— 相对地，"正片还是广告"这个结论
+     * 值得一次快速尝试，不值得三次重试。
+     * 用 `peekBody` 限制读取量，避免遇到超大直播清单时把内存吃掉。
+     */
+    suspend fun getPlaylistOnce(url: String, referer: String? = null): String? =
+        withContext(Dispatchers.IO) {
+            val b = Request.Builder().url(url)
+                .header("User-Agent", UA)
+                .header("Accept", "*/*")
+            if (!referer.isNullOrBlank()) b.header("Referer", referer)
+            val t0 = System.currentTimeMillis()
+            try {
+                fastClient.newCall(b.build()).execute().use { resp ->
+                    NetLog.record(url, resp.code, System.currentTimeMillis() - t0)
+                    if (!resp.isSuccessful) return@use null
+                    // peekBody：最多取 1MB，够看几千个分片的清单，也不会被超大清单拖死
+                    resp.peekBody(1L shl 20).string()
+                }
+            } catch (e: Exception) {
+                NetLog.record(url, -1, System.currentTimeMillis() - t0,
+                    e.javaClass.simpleName + ": " + e.message)
+                null
+            }
+        }
 }
