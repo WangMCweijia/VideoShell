@@ -14,7 +14,14 @@ object NetLog {
 
     private const val MAX = 80
 
-    data class Entry(val url: String, val status: Int, val ms: Long, val err: String?)
+    data class Entry(
+        val url: String,
+        val status: Int,
+        val ms: Long,
+        val err: String?,
+        /** 来源标注，如 `播放器` —— 用于在报告里区分"这条是播放器发的"还是"自检发的" */
+        val tag: String? = null
+    )
 
     private val buf = ArrayDeque<Entry>()
 
@@ -22,11 +29,15 @@ object NetLog {
     @Volatile
     var verbose: Boolean = false
 
+    /**
+     * @param tag 来源标注（如 `播放器`）。带 tag 的记录**不受 [verbose] 限制**：
+     *            播放器发出的请求本来就是排查的核心，永远要留痕。
+     */
     @Synchronized
-    fun record(url: String, status: Int, ms: Long, err: String? = null) {
+    fun record(url: String, status: Int, ms: Long, err: String? = null, tag: String? = null) {
         val ok = err == null && status in 200..399
-        if (ok && !verbose) return
-        buf.addLast(Entry(short(url), status, ms, err))
+        if (ok && !verbose && tag == null) return
+        buf.addLast(Entry(short(url), status, ms, err, tag))
         while (buf.size > MAX) buf.removeFirst()
     }
 
@@ -57,8 +68,9 @@ object NetLog {
         if (buf.isEmpty()) return "（无网络请求记录）"
         return buf.joinToString("\n") { e ->
             val st = if (e.status < 0) "ERR" else e.status.toString()
+            val tag = if (e.tag.isNullOrBlank()) "" else " [${e.tag}]"
             val tail = if (e.err.isNullOrBlank()) "" else "  ${e.err}"
-            "[$st] ${e.ms}ms  ${e.url}$tail"
+            "[$st]$tag ${e.ms}ms  ${e.url}$tail"
         }
     }
 

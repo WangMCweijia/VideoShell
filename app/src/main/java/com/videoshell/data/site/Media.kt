@@ -177,31 +177,70 @@ object Media {
         return v
     }
 
+    /**
+     * 取「最内层」的媒体地址。
+     *
+     * ## 为什么必须有这一步（厂长资源播放失败的原因）
+     *
+     * 很多站的播放页不直接把 m3u8 写出来，而是嵌一层**代理播放器**，把真地址当参数塞进去：
+     *
+     * ```html
+     * <iframe src="https://plaa.py1080p.com:8181/player/py.php?code=cs&if=1&url=https://m3hlsm3.py1080p.com:907/hls3/hls/峡谷.m3u8">
+     * ```
+     *
+     * 旧实现的正则 `https?://[^"'<>\s]+?\.(?:m3u8|mp4…)` 从**第一个** `https://` 开始匹配，
+     * 而这一整串里没有空白和引号，于是它贪婪地一路吃到结尾的 `.m3u8`，
+     * 把**外层代理页**当成了媒体地址。结果：
+     *  - `isHls()` 因为串里有 "m3u8" 而返回 true → 按 HLS 播；
+     *  - 播放器去请求 `py.php?...`，拿回来的是 `text/html`；
+     *  - 解析失败，用户看到"播放失败"，而自检 [5] 打印的地址看着"完全正常"。
+     *
+     * 修法：若候选串里还嵌着 `?url=` / `&url=`（或 URL 编码后的 `%3Dhttp`），
+     * 就递归取最后那一层；只有拆出来的东西**仍然像媒体地址**才采用，避免误伤正常 URL。
+     */
+    fun innermost(raw: String): String {
+        val u = raw.trim()
+        if (u.isEmpty()) return u
+
+        // 明文嵌套：...&url=https://real/x.m3u8
+        val i = u.lastIndexOf("=http", ignoreCase = true)
+        if (i >= 0) {
+            val inner = u.substring(i + 1)
+            if (inner != u && looksLikeMedia(inner)) return innermost(inner)
+        }
+
+        // URL 编码嵌套：url=https%3A%2F%2Freal%2Fx.m3u8
+        if (u.contains("%3a%2f%2f", true)) {
+            val dec = runCatching { java.net.URLDecoder.decode(u, "UTF-8") }.getOrDefault("")
+            if (dec.isNotBlank() && dec != u) {
+                val j = dec.lastIndexOf("=http", ignoreCase = true)
+                val inner = if (j >= 0) dec.substring(j + 1) else dec
+                if (inner != u && looksLikeMedia(inner)) return innermost(inner)
+            }
+        }
+        return u
+    }
+
+    /** 抽出一个候选地址并做"最内层 + 反转义"处理；不是媒体地址就返回 null */
+    private fun pick(re: Regex, src: String): String? {
+        val g = re.find(src)?.groupValues?.getOrNull(1) ?: return null
+        val u = innermost(unescape(g))
+        return if (looksLikeMedia(u)) u else null
+    }
+
     /** 从播放页 HTML 里挖出真实媒体地址 */
     fun extractFromHtml(html: String?): String? {
         if (html.isNullOrBlank()) return null
 
         PLAYER_JSON.find(html)?.let { m ->
             val body = m.groupValues[1]
-            KEY_URL.find(body)?.groupValues?.get(1)?.let {
-                val u = unescape(it)
-                if (looksLikeMedia(u)) return u
-            }
-            KEY_URL2.find(body)?.groupValues?.get(1)?.let {
-                val u = unescape(it)
-                if (looksLikeMedia(u)) return u
-            }
+            pick(KEY_URL, body)?.let { return it }
+            pick(KEY_URL2, body)?.let { return it }
         }
-        KEY_URL.find(html)?.groupValues?.get(1)?.let {
-            val u = unescape(it)
-            if (looksLikeMedia(u)) return u
-        }
-        QUOTED_MEDIA.find(html)?.groupValues?.get(1)?.let {
-            val u = unescape(it)
-            if (looksLikeMedia(u)) return u
-        }
+        pick(KEY_URL, html)?.let { return it }
+        pick(QUOTED_MEDIA, html)?.let { return it }
         BARE_MEDIA.find(html)?.let {
-            val u = unescape(it.value)
+            val u = innermost(unescape(it.value))
             if (looksLikeMedia(u)) return u
         }
         return null

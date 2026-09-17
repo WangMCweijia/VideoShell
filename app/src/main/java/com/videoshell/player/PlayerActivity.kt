@@ -1,5 +1,7 @@
 package com.videoshell.player
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -21,7 +23,6 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
@@ -36,6 +37,7 @@ import com.videoshell.R
 import com.videoshell.data.Store
 import com.videoshell.data.model.MediaSource
 import com.videoshell.data.net.Http
+import com.videoshell.data.net.NetLog
 import com.videoshell.data.site.AdapterFactory
 import com.videoshell.data.site.Media
 import com.videoshell.databinding.ActivityPlayerBinding
@@ -121,6 +123,9 @@ class PlayerActivity : AppCompatActivity() {
 
     /** 已经为哪个地址换过一次源（同一个源重复报错不能反复切） */
     private var lastSwitchedFrom = ""
+
+    /** 本次播放是否已经记过"就绪"（换源/重试后要允许再记一次） */
+    private var readyLogged = false
 
     private val sp: SharedPreferences by lazy { getSharedPreferences(SP, Context.MODE_PRIVATE) }
     private val handler = Handler(Looper.getMainLooper())
@@ -264,6 +269,9 @@ class PlayerActivity : AppCompatActivity() {
 
         binding.diagPanel.visibility = View.GONE
         binding.btnDiagClose.setOnClickListener { binding.diagPanel.visibility = View.GONE }
+        // 「复制」：错误面板内容能一键拿走。以前只能长按选中，手机横屏下基本选不全，
+        // 结果是每轮回访都缺最关键的那句错 —— 这次把它做成一个按钮。
+        binding.btnDiagCopy.setOnClickListener { copyDiag() }
         binding.btnDiagRetry.setOnClickListener {
             binding.diagPanel.visibility = View.GONE
             if (currentUrl.isNotBlank()) {
@@ -356,8 +364,9 @@ class PlayerActivity : AppCompatActivity() {
     // ------------------------------------------------------------------ 播放器
 
     private fun setupPlayer() {
+        // 缓冲放宽：不少源是"扁平 TS + 单码率"，链路一抖就得等；给足缓冲比尽快报错更友好。
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(20_000, 60_000, 2_000, 4_000)
+            .setBufferDurationsMs(30_000, 90_000, 2_500, 5_000)
             .build()
         val p = ExoPlayer.Builder(this).setLoadControl(loadControl).build()
         player = p
@@ -367,7 +376,13 @@ class PlayerActivity : AppCompatActivity() {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 binding.pbBuffering.visibility =
                     if (playbackState == Player.STATE_BUFFERING) View.VISIBLE else View.GONE
-                if (playbackState == Player.STATE_READY) resetErrorState()
+                if (playbackState == Player.STATE_READY) {
+                    resetErrorState()
+                    if (!readyLogged) {
+                        readyLogged = true
+                        PlayLog.record("✓ 播放就绪 ${shorten(currentUrl)}")
+                    }
+                }
                 if (playbackState == Player.STATE_ENDED && PlayQueue.hasNext()) {
                     playEpisode(PlayQueue.episodeIndex + 1)
                 }
@@ -402,18 +417,17 @@ class PlayerActivity : AppCompatActivity() {
         if (url != rawUrl) android.util.Log.w("VideoShell", "playUrl 非 ASCII 已编码：$rawUrl -> $url")
         if (!fromRetry) autoSniffTried = false
 
-        // 连接超时收紧到 8s：连不通就尽早失败，交给下面的错误重试策略换一次连接 ——
-        // 比在一个连不上的地址上干等 15 秒强（手机网络下首次握手失败很常见）。
-        val http = DefaultHttpDataSource.Factory()
-            .setUserAgent(Http.UA)
-            .setDefaultRequestProperties(headers)
-            .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(8_000)
-            .setReadTimeoutMs(15_000)
+        readyLogged = false
+        PlayLog.newSession()
+        PlayLog.record("▶ 开始播放 ${shorten(url)}" + if (headers.isEmpty()) "" else "  头=${headers.keys.joinToString(",")}")
 
-        // m3u8 规范化：解决"网页能播、壳子播不了"的扁平 TS playlist
-        val ds = HlsFixDataSourceFactory(http)
-        val policy = DefaultLoadErrorHandlingPolicy(if (fromRetry) 12 else 8)
+        // ⚠️ 数据源用 OkHttp，**不用** ExoPlayer 自带的 DefaultHttpDataSource。
+        // 后者底层是 HttpURLConnection，与 App 其它部分（自检/解析/嗅探都用 OkHttp）
+        // 是两套网络栈：DNS 顺序、连接池、超时重试、Cookie 全不一样 —— 这正是
+        // 「自检全绿、播放打不开」唯一说得通的解释。换成一套之后两边不复存在差异。
+        val factory = OkHttpDataSourceFactory(Http.mediaClient, Http.UA, headers)
+        val ds = HlsFixDataSourceFactory(factory)
+        val policy = DefaultLoadErrorHandlingPolicy(if (fromRetry) 12 else 10)
 
         val source = if (Media.isHls(url)) {
             HlsMediaSource.Factory(ds)
@@ -619,18 +633,20 @@ class PlayerActivity : AppCompatActivity() {
     private fun showDiag(error: PlaybackException) {
         val chain = generateSequence(error.cause) { it.cause }
         val root = chain.last()
-        val sb = StringBuilder()
-        sb.append("错误码：").append(error.errorCodeName).append(" (").append(error.errorCode).append(")\n")
-        generateSequence(error.cause) { it.cause }
+        val httpCode = generateSequence(error.cause) { it.cause }
             .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
             .firstOrNull()
-            ?.let { sb.append("HTTP ").append(it.responseCode).append('\n') }
+            ?.responseCode
+        val sb = StringBuilder()
+        sb.append("错误码：").append(error.errorCodeName).append(" (").append(error.errorCode).append(")\n")
+        if (httpCode != null) sb.append("HTTP ").append(httpCode).append('\n')
         val detail = listOfNotNull(root.message, root.javaClass.simpleName)
             .joinToString(" / ")
             .take(220)
         if (detail.isNotBlank()) sb.append("原因：").append(detail).append('\n')
         sb.append("地址：").append(currentUrl.take(140))
         if (retried) sb.append("\n（已重试过一次）")
+        sb.append("\n数据源：OkHttp（与自检同栈）")
         binding.tvDiag.text = sb.toString()
         binding.tvDiagTitle.text = if (fromSniff && SniffQueue.candidates.isNotEmpty()) {
             getString(R.string.player_error_title) +
@@ -647,6 +663,15 @@ class PlayerActivity : AppCompatActivity() {
         binding.diagPanel.visibility = View.VISIBLE
         binding.ivPlay.setImageResource(R.drawable.ic_play)
         if (!controllerVisible) setBarsVisible(true)
+
+        // 落一份「播放记录」：用户下次跑站点自检时，报告末尾会自动带上它 ——
+        // 这是唯一能把"播放器自己说的那句话"带回来的通道（错误面板只能截图，又长又碎）。
+        PlayLog.record(
+            "✗ 播放失败 ${error.errorCodeName}(${error.errorCode})" +
+                (if (httpCode != null) " HTTP$httpCode" else "") +
+                " 原因=" + detail.replace('\n', ' ').take(120) +
+                " 地址=" + shorten(currentUrl)
+        )
 
         // 同时打进 logcat（`adb logcat -s VideoShell`）：界面只摘要根因那一行，
         // 日志里有完整 cause 链，排查"到底卡在哪一层"更准。
@@ -681,6 +706,39 @@ class PlayerActivity : AppCompatActivity() {
             }, 1200)
         }
     }
+
+    // ------------------------------------------------------------------ 诊断复制
+
+    /** 把当前播放诊断 + 网络记录 + 播放记录一起复制走 */
+    private fun copyDiag() {
+        val sb = StringBuilder()
+        sb.appendLine("===== 播放诊断 =====")
+        sb.appendLine("版本：v${appVersion()}")
+        sb.appendLine("来源：${if (fromSniff) "网页嗅探（候选 ${SniffQueue.candidates.size} 个）" else "直链/解析"}")
+        sb.appendLine("播放页：${fallbackPage.ifBlank { "-" }}")
+        sb.appendLine("本次已重试：$retried")
+        sb.appendLine("--- 错误面板 ---")
+        sb.appendLine(binding.tvDiag.text)
+        sb.appendLine()
+        sb.appendLine("---------- HTTP 记录 ----------")
+        sb.appendLine(NetLog.report())
+        sb.appendLine()
+        sb.appendLine("---------- 播放记录 ----------")
+        sb.appendLine(PlayLog.report())
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("播放诊断", sb.toString()))
+        toast(getString(R.string.player_diag_copied))
+    }
+
+    private fun appVersion(): String = runCatching {
+        packageManager.getPackageInfo(packageName, 0).versionName.orEmpty()
+    }.getOrDefault("?")
+
+    /** 地址太长会撑爆错误面板与记录，中段省略 */
+    private fun shorten(u: String): String =
+        if (u.length <= 110) u else u.take(70) + "…" + u.takeLast(30)
+
+    // ------------------------------------------------------------------ 换源
 
     /** 换到下一个嗅探候选源；没有更多候选就返回 false */
     private fun nextSniffSource(): Boolean {

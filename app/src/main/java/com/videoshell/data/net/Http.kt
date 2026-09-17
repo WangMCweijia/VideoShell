@@ -91,6 +91,26 @@ object Http {
             .build()
     }
 
+    /**
+     * 播放器专用客户端。
+     *
+     * 与 [client] 共享 DNS / CookieJar / 连接池，但两处必须改：
+     *  - **`callTimeout` 关掉（0 = 不限）**：它管的是"整个请求从发出到读完 body"的总时长，
+     *    对下载一整个分片、甚至一路播下去的场景，22 秒会把正常的慢速下载直接掐死。
+     *  - `readTimeout` 放到 20s：这是**单次读**的间隔上限，链路抖一下不至于立刻判死。
+     *
+     * 播放器走这一套（而不是 ExoPlayer 自带的 DefaultHttpDataSource）是有意为之：
+     * 自检/解析/嗅探都用 OkHttp，只有播放器用 HttpURLConnection 的话，
+     * 「自检全绿、播放打不开」这类问题永远查不清 —— 详见 OkHttpDataSource 的注释。
+     */
+    val mediaClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .callTimeout(0, TimeUnit.MILLISECONDS)
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .build()
+    }
+
     /** 探测用短超时客户端：识别站点时并发打多个接口，不能让一个坏接口拖死整轮 */
     val fastClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -205,6 +225,48 @@ object Http {
                 -1 to (e.javaClass.simpleName + ": " + e.message).orEmpty()
             }
         }
+
+    /**
+     * 真下一段数据并计时，返回 `(状态码, 实际字节数, 毫秒)`。
+     *
+     * 自检里原来的"首个分片"只请求 `bytes=0-1023` —— 1KB 在任何链路上都是秒回，
+     * 于是它只能证明"地址存在"，**证明不了"这条链路扛得住播放"**。
+     * 一个分片动辄几百 KB，链路若只有三五十 KB/s，播放器就会一直转圈。
+     * 这里老老实实下 [maxBytes] 并把速度算出来。
+     */
+    suspend fun sample(
+        url: String,
+        referer: String? = null,
+        maxBytes: Long = 512 * 1024
+    ): Triple<Int, Long, Long> = withContext(Dispatchers.IO) {
+        val b = Request.Builder().url(url)
+            .header("User-Agent", UA)
+            .header("Accept", "*/*")
+        if (!referer.isNullOrBlank()) b.header("Referer", referer)
+        val t0 = System.currentTimeMillis()
+        try {
+            mediaClient.newCall(b.build()).execute().use { resp ->
+                var n = 0L
+                val buf = ByteArray(32 * 1024)
+                resp.body?.byteStream()?.use { src ->
+                    while (n < maxBytes) {
+                        val want = minOf(buf.size.toLong(), maxBytes - n).toInt()
+                        if (want <= 0) break
+                        val r = src.read(buf, 0, want)
+                        if (r < 0) break
+                        n += r
+                    }
+                }
+                val ms = System.currentTimeMillis() - t0
+                NetLog.record(url, resp.code, ms)
+                Triple(resp.code, n, ms)
+            }
+        } catch (e: Exception) {
+            val ms = System.currentTimeMillis() - t0
+            NetLog.record(url, -1, ms, e.javaClass.simpleName + ": " + e.message)
+            Triple(-1, 0L, ms)
+        }
+    }
 
     /**
      * 取 m3u8 正文用于**内容判断**（嗅探候选排序用）。

@@ -24,6 +24,7 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.videoshell.R
 import com.videoshell.data.net.Http
+import com.videoshell.data.net.NetLog
 import com.videoshell.databinding.ActivitySniffBinding
 import com.videoshell.ui.adapter.CandidateAdapter
 import com.videoshell.util.toast
@@ -108,6 +109,9 @@ class SniffActivity : AppCompatActivity() {
     private var probing = false
     private var textProbed = false
 
+    /** 「没抓到候选」的原因只记一次，别把播放记录刷满 */
+    private var loggedOneShot = false
+
     private val pollTask = object : Runnable {
         override fun run() {
             if (!polling) return
@@ -159,7 +163,9 @@ class SniffActivity : AppCompatActivity() {
         }
         binding.btnRetry.setOnClickListener { restart() }
 
-        // 状态栏点一下就把候选报告复制走 —— 排查"到底抓到了什么"时比截图有用
+        // 顶栏的「复制报告」按钮 —— 之前只能点状态栏文字（界面上没有任何提示，
+        // 用户反馈"嗅探页无法复制报告"），现在做成明确可见的按钮
+        binding.btnCopy.setOnClickListener { copyReport() }
         binding.tvStatus.setOnClickListener { copyReport() }
 
         setupWebView()
@@ -252,6 +258,7 @@ class SniffActivity : AppCompatActivity() {
         loginWall = false
         loginWords = ""
         pageError = ""
+        loggedOneShot = false
         binding.tvStatus.text = getString(R.string.sniffer_running)
         binding.rvCandidates.visibility = View.GONE
         binding.pb.visibility = View.VISIBLE
@@ -389,6 +396,18 @@ class SniffActivity : AppCompatActivity() {
         binding.pb.visibility = if (n == 0) View.VISIBLE else View.GONE
         candidateAdapter.submit(ranked())
         binding.rvCandidates.visibility = if (n == 0) View.GONE else View.VISIBLE
+
+        // 嗅探失败的原因也写进播放记录：自检报告会带上它，
+        // 省得"嗅探页无法复制报告"时这条线索直接丢掉。
+        if (n == 0 && !loggedOneShot && (loginWall || pageError.isNotBlank() || ticks > 25)) {
+            loggedOneShot = true
+            val why = when {
+                loginWall -> "页面要求登录（$loginWords）"
+                pageError.isNotBlank() -> "页面加载失败 $pageError"
+                else -> "超时且一个媒体请求都没抓到"
+            }
+            PlayLog.record("✗ 嗅探失败：$why  页=${PlayLog.shortenPublic(pageUrl)}")
+        }
     }
 
     private val LOGIN_WORDS = listOf(
@@ -433,6 +452,12 @@ class SniffActivity : AppCompatActivity() {
             sb.appendLine("      ${c.url}")
         }
         if (candidates.isEmpty()) sb.appendLine("  （无）")
+        sb.appendLine("分片命中目录 " + tsHits.size + " 个（正片目录会被打很多次）：")
+        tsHits.entries.sortedByDescending { it.value }.take(5)
+            .forEach { sb.appendLine("  ${it.value} 次  ${it.key}") }
+        sb.appendLine()
+        sb.appendLine("---------- HTTP 记录 ----------")
+        sb.appendLine(NetLog.report())
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("嗅探报告", sb.toString()))
         toast(getString(R.string.sniffer_copied))
@@ -451,6 +476,10 @@ class SniffActivity : AppCompatActivity() {
         val at = list.indexOfFirst { it.url == c.url }.coerceAtLeast(0)
         // 把整份候选清单交出去：播放器那边播不出来会自动换下一个，不用回来重新嗅探
         SniffQueue.set(list, at)
+        PlayLog.record(
+            "嗅探候选 ${list.size} 个，选第 ${at + 1}：${c.display()}  " +
+                PlayLog.shortenPublic(c.url)
+        )
 
         val h = HashMap<String, String>()
         h.putAll(pageHeaders)

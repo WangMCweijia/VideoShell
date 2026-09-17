@@ -41,6 +41,19 @@
             android:textSize="15sp" />
 
         <TextView
+            android:id="@+id/btnCopy"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/bg_chip"
+            android:gravity="center"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:text="@string/sniffer_copy"
+            android:textColor="@color/brand"
+            android:textSize="13sp" />
+
+        <TextView
             android:id="@+id/btnToggleWeb"
             android:layout_width="wrap_content"
             android:layout_height="36dp"

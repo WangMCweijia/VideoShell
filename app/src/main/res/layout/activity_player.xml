@@ -351,9 +351,23 @@
                 android:visibility="gone" />
 
             <TextView
+                android:id="@+id/btnDiagCopy"
+                android:layout_width="wrap_content"
+                android:layout_height="32dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_chip"
+                android:gravity="center"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:text="@string/player_error_copy"
+                android:textColor="@color/brand"
+                android:textSize="13sp" />
+
+            <TextView
                 android:id="@+id/btnDiagClose"
                 android:layout_width="wrap_content"
                 android:layout_height="32dp"
+                android:layout_marginStart="8dp"
                 android:background="?android:attr/selectableItemBackground"
                 android:gravity="center"
                 android:paddingStart="14dp"

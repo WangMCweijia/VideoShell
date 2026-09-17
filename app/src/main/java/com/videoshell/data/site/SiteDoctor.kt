@@ -5,6 +5,9 @@ import com.videoshell.data.model.MediaSource
 import com.videoshell.data.model.SiteConfig
 import com.videoshell.data.net.Http
 import com.videoshell.data.net.NetLog
+import com.videoshell.player.HlsFixDataSource
+import com.videoshell.player.OkHttpDataSource
+import com.videoshell.player.PlayLog
 import com.videoshell.util.resolveUrl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -79,7 +82,7 @@ object SiteDoctor {
         if (items.isEmpty()) {
             L("")
             L("→ 列表为空，后续步骤无法继续。请把以上内容截图反馈。")
-            appendNetLog(L)
+            appendTail(L)
             return sb.toString()
         }
 
@@ -94,7 +97,7 @@ object SiteDoctor {
         }
         if (d == null) {
             L("    结果：失败")
-            appendNetLog(L)
+            appendTail(L)
             return sb.toString()
         }
         L("    名称：${d.name}")
@@ -108,7 +111,7 @@ object SiteDoctor {
         if (ep == null) {
             L("")
             L("→ 没有可用剧集，后续步骤无法继续。")
-            appendNetLog(L)
+            appendTail(L)
             return sb.toString()
         }
 
@@ -141,16 +144,19 @@ object SiteDoctor {
 
                 // 7) 首个分片 —— "能解析却放不出来"的最后一个盲区：
                 //    playlist 拿 200 不代表分片也能下（分片常被单独做防盗链、或落在另一个 CDN）。
+                //    这里**真的下一段**（512KB）并计时：旧实现只取 `bytes=0-1023`，
+                //    1KB 在任何链路上都是秒回，只能证明"地址存在"，证明不了"扛得住播放"。
                 L("")
-                L("[7] 首个分片")
+                L("[7] 首个分片（真下 512KB 测速）")
                 val seg = runCatching { firstSegment(ms.url, site.baseUrl, 0) }.getOrNull()
                 if (seg == null) {
                     L("    没能从 playlist 里解析出分片地址")
                 } else {
-                    val (sst, sinfo) = Http.probe(seg, site.baseUrl, "bytes=0-1023")
-                    L("    HTTP $sst")
                     L("    ${seg.take(140)}")
-                    if (sinfo.isNotBlank()) L("    $sinfo")
+                    val (sst, sbytes, sms) = Http.sample(seg, site.baseUrl, 512L * 1024)
+                    val kbps = if (sms > 0) sbytes * 1000.0 / sms / 1024.0 else 0.0
+                    L("    HTTP $sst   实际下载 ${sbytes / 1024}KB / ${sms}ms ≈ ${"%.0f".format(kbps)} KB/s")
+                    L("    " + speedVerdict(kbps, sbytes))
                 }
 
                 // 8) 请求栈对照 —— 本次问题的关键证据。
@@ -171,6 +177,23 @@ object SiteDoctor {
                     L("    HttpURLConnection 未编码: HTTP $hucRaw   ← 修复前播放器发的就是这个形式")
                     L("    解读：未编码那一行若是 404/-1，说明中文被原样塞进请求行，CDN 找不到资源。")
                 }
+
+                // 9) 播放器栈实测 —— 直接用播放器那套 DataSource 跑一遍。
+                //    "自检绿、播放挂"本质上是"两条栈不一样"。v1.0.9 起播放器也走 OkHttp，
+                //    所以这里的结果**就是**播放器会看到的结果，两边再也不会分叉。
+                L("")
+                L("[9] 播放器栈实测（与播放器同一个 OkHttpDataSource）")
+                val head = ms.headers
+                val pl = withContext(Dispatchers.IO) { playStackProbe(ms.url, head, 0L) }
+                L("    playlist : ${pl.first}   ${pl.second}")
+                if (seg != null) {
+                    val sg = withContext(Dispatchers.IO) {
+                        playStackProbe(seg, head, 512L * 1024)
+                    }
+                    L("    分片     : ${sg.first}   ${sg.second}")
+                }
+                L("    说明：上面两行若是 200/206，说明**播放器那一侧的网络层是通的**；")
+                L("         若这样还播不出来，原因就在解码/格式，而不是地址或链路。")
             }
             is MediaSource.Sniff -> {
                 L("    HTML 抠不到直链 → 需要网页嗅探（第 6 步跳过）")
@@ -180,7 +203,7 @@ object SiteDoctor {
             null -> L("    失败：未返回结果")
         }
 
-        appendNetLog(L)
+        appendTail(L)
         return sb.toString()
     }
 
@@ -190,10 +213,76 @@ object SiteDoctor {
         c.packageManager.getPackageInfo(c.packageName, 0).versionName.orEmpty()
     }.getOrDefault("?")
 
+    /**
+     * 速度判语。
+     * 经验阈值：单码率 HLS 的分片约 3~5 秒、300KB~1MB，要跟上播放至少得 ~100KB/s。
+     */
+    private fun speedVerdict(kbps: Double, bytes: Long): String = when {
+        bytes <= 0L -> "→ 一个字节都没下下来：分片 CDN 可能被单独做了防盗链"
+        kbps >= 800 -> "→ 链路充裕"
+        kbps >= 300 -> "→ 够播（高清单码率约需 150~300KB/s）"
+        kbps >= 100 -> "→ 偏慢，高码率片源会卡"
+        kbps >= 30 -> "→ 很慢，播放大概率一直转圈"
+        else -> "→ 极慢，基本等于连不通"
+    }
+
+    /**
+     * 用**播放器同一套 DataSource**（`OkHttpDataSource` + `HlsFixDataSource`）真开一次地址。
+     *
+     * 这一步的意义：以前自检走 OkHttp、播放器走 HttpURLConnection，"自检绿、播放挂"
+     * 无法在报告里复现。现在两边同栈，这里的结果就是播放器会看到的结果。
+     */
+    private fun playStackProbe(
+        url: String,
+        headers: Map<String, String>,
+        maxBytes: Long
+    ): Pair<String, String> {
+        val ds = HlsFixDataSource(OkHttpDataSource(Http.mediaClient, Http.UA, headers))
+        return try {
+            val t0 = System.currentTimeMillis()
+            val reported = ds.open(androidx.media3.datasource.DataSpec(android.net.Uri.parse(url)))
+            // playlist 给 64KB 上限就够（够看全整份清单结构）；分片按调用方给的上限
+            val cap = if (maxBytes > 0L) maxBytes else 64L * 1024
+            val buf = ByteArray(32 * 1024)
+            var n = 0L
+            while (n < cap) {
+                val want = minOf(buf.size.toLong(), cap - n).toInt()
+                if (want <= 0) break
+                val r = ds.read(buf, 0, want)
+                if (r < 0) break
+                n += r
+            }
+            val ms = System.currentTimeMillis() - t0
+            runCatching { ds.close() }
+            "OK（open 报 ${reported}B）" to "读到 ${n / 1024}KB / ${ms}ms"
+        } catch (e: Exception) {
+            val code = generateSequence<Throwable>(e) { it.cause }
+                .filterIsInstance<androidx.media3.datasource.HttpDataSource
+                    .InvalidResponseCodeException>()
+                .firstOrNull()?.responseCode
+            val msg = (if (code != null) "HTTP $code " else "") +
+                e.javaClass.simpleName + ": " + (e.message ?: "").take(150)
+            msg to "（未读到数据）"
+        }
+    }
+
     private fun appendNetLog(L: (String) -> Unit) {
         L("")
         L("---------- HTTP 记录 ----------")
         L(NetLog.report())
+    }
+
+    /**
+     * 报告尾部：HTTP 记录 + 播放记录。
+     *
+     * 播放记录是这一版新加的通道 —— 播放器/嗅探自己失败的细节以前带不回来
+     * （错误面板只能截图，嗅探页报告又复制不出来），现在随自检报告一起走。
+     */
+    private fun appendTail(L: (String) -> Unit) {
+        appendNetLog(L)
+        L("")
+        L("---------- 播放记录（播放器 / 嗅探自己写的） ----------")
+        L(PlayLog.report())
     }
 
     /** 把 URL 里的 `%XX` 还原回字节再按 UTF-8 解释：用于看"这条地址原本长什么样" */
