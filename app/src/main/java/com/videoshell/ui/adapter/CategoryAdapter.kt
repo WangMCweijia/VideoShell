@@ -47,7 +47,7 @@ class CategoryAdapter(
             b.tvName.setTextColor(
                 ContextCompat.getColor(
                     b.root.context,
-                    if (isSelected) R.color.white else R.color.text_primary
+                    if (isSelected) R.color.white else R.color.text_secondary
                 )
             )
             b.root.setOnClickListener { onClick(bindingAdapterPosition, c) }

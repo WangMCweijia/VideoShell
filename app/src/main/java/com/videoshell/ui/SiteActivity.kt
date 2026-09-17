@@ -121,6 +121,7 @@ class SiteActivity : AppCompatActivity() {
 
     private fun onCategory(index: Int, c: Category) {
         catAdapter.select(index)
+        binding.rvCats.smoothScrollToPosition(index)
         mode = MODE_CATEGORY
         currentType = c.id
         reload()

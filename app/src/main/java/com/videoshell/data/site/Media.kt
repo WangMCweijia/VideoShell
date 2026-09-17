@@ -8,8 +8,9 @@ object Media {
         RegexOption.IGNORE_CASE
     )
 
+    /** 播放页里的 player_aaaa = {...}：结尾可能接 `;`、也可能直接跟 </script>，两种都要吃 */
     private val PLAYER_JSON = Regex(
-        "(?:player_[A-Za-z0-9_]+)\\s*=\\s*(\\{[\\s\\S]*?\\})\\s*;",
+        "player_[A-Za-z0-9_]+\\s*=\\s*(\\{[\\s\\S]*?\\})\\s*(?:;|</script)",
         RegexOption.IGNORE_CASE
     )
 

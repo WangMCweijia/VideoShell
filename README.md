@@ -10,9 +10,9 @@
 |---|---|
 | 站点识别 | 输入网址 → 并发探测苹果CMS/海洋CMS 的 JSON、XML 采集接口（`/api.php/provide/vod/` 等 8 个候选路径）；都不通则启用通用 HTML 适配 |
 | 自动适配 | 识别结果落成一份 `SiteConfig`（站点类型 / 接口地址 / 固定参数），下次直接可用；同一个站只需适配一次 |
-| 分类浏览 | 从接口拿顶层分类，横向切换 + 网格列表 + 滚动翻页 |
-| 搜索 | 走接口 `ac=detail&wd=`；HTML 站逐个试常见搜索模板 |
-| 选集 | 解析 `vod_play_from` / `vod_play_url`，支持多线路（播放源）+ 剧集网格 |
+| 分类浏览 | 分类项直接携带站点自己的真实 URL（不再靠猜模板），横向标签栏 + 网格列表 + 滚动翻页（按已见 id 去重，站点无分页时自动收尾） |
+| 搜索 | 走接口 `ac=detail&wd=`；HTML 站逐个试常见搜索模板（含 `/vodsearch/wd/{kw}.html`） |
+| 选集 | 解析 `vod_play_from` / `vod_play_url`；HTML 站支持 `.tab-content > .tab-pane` 等结构，线路名按 tab 的 `href="#playlistN"` 映射（不靠 DOM 顺序猜），支持多线路（播放源）+ 剧集网格 |
 | 播放解析 | 三级策略：① 本身就是 m3u8/mp4 → 直用；② 播放页 → 从 HTML 里抠 `player_aaaa` 的真实地址（不用开网页）；③ 抠不到 → 网页嗅探 |
 | 网页嗅探 | WebView 钩住 XHR/fetch/video 事件 + `shouldInterceptRequest` 拦截媒体请求，按 HLS>DASH>MP4>FLV 打分排序，捕获到 HLS 自动跳转播放 |
 | 内置播放器 | Media3 ExoPlayer，支持 HLS；自定义请求头（User-Agent / Referer）；手势：单击显隐控件、双击播放暂停、横向拖动快进退、左半屏调亮度、右半屏调音量；倍速、选集面板、自动下一集、吸附式横竖屏切换 |
@@ -70,7 +70,19 @@ app/src/main/java/com/videoshell/
 CI（GitHub Actions）：推 `main` 自动编译 debug + release 并上传 artifact；推 `v*` tag 会自动创建 Release 并附上 release APK。
 
 ```bash
-git tag v1.0.0 && git push origin v1.0.0
+git tag v1.0.1 && git push origin v1.0.1
+```
+
+## 离线校验（HTML 适配回归）
+
+HTML 适配是「按主题猜 DOM」，改动容易踩到别的站。`D:\TRAE\releases\.tools\videoshell_verify\` 里有一套
+离线校验：把抓下来的真实页面当输入，直接调用**刚编译出的 Kotlin 类**跑分类 / 列表 / 选集 / 播放地址抽取，
+无需真机与网络。改了 `Html*` 之后先跑它。
+
+```bash
+cd D:/TRAE/视频壳 && python _build.py :app:assembleDebug
+cd D:/TRAE/releases/.tools/videoshell_verify && python verify.py D:/TRAE/视频壳
+# 期望末行：ALL CHECKS PASSED
 ```
 
 ## 签名
