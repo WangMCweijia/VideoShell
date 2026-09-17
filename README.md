@@ -194,8 +194,9 @@ app/src/main/java/com/videoshell/
 │       ├── MaccmsXmlAdapter.kt      苹果CMS/海洋CMS XML 接口
 │       ├── MaccmsKit.kt             URL 拼装 / 剧集串解析 / 分类层级
 │       ├── HtmlAdapter.kt           通用 HTML 适配（运行时试模板，命中即记住）
-│       ├── HtmlTemplates.kt         URL 模板候选 + 链接 ID 提取 + 分类形状（catTpl）
+│       ├── HtmlTemplates.kt         URL 模板候选 + 链接 ID 提取 + 分类形状（catTpl / 尾斜杠目录式）
 │       ├── HtmlExtractor.kt         列表 / 播放列表抽取（含分集名去剧名前缀）
+│       ├── SsrPayload.kt            ★ 从页面内嵌 JSON 抽分集（devalue 扁平数组 / 普通 JSON）
 │       ├── SiteRecipe.kt            ★ 站点配方：学到的规则落盘，跨 Activity / 跨启动复用
 │       ├── SiteCalib.kt             ★ 校准模式的纯逻辑：形状判据 + 分类容器反推
 │       └── Media.kt                 媒体地址识别 + 播放页地址抠取
@@ -243,7 +244,7 @@ HTML 适配是「按主题猜 DOM」，HLS 规范化又直接决定播不播得�
 ```bash
 cd D:/TRAE/视频壳 && python _build.py :app:assembleDebug
 cd D:/TRAE/releases/.tools/videoshell_verify && python runall.py
-# 期望末行：==== 合计 PASS=264  FAIL=0 ====
+# 期望末行：==== 合计 PASS=281  FAIL=0 ====
 ```
 
 各套件：`runverify3`（HTML 适配 54 条）、`runlive2`（真实 suspend 链路 + SiteDoctor 20 条）、
@@ -252,6 +253,7 @@ cd D:/TRAE/releases/.tools/videoshell_verify && python runall.py
 `runextract2`（**取最内层地址，19 条**：合成用例 + 真实播放页）、
 `runbs`（**金牌影视 15 条**：分类判据 / 线路名 / 详情与播放页选集）、
 `runbs3`（**跨实例 16 条**：每个步骤都新建 adapter，复现真机 Activity 边界）、
+`runyg`（**自研 SSR 站 40 条**：尾斜杠目录式分类 + 集合级聚类判据 + `SsrPayload` 分集提取）、
 `runbs4`（**分集名 + 校准逻辑 60 条**：剧名前缀剥离、分类形状、容器反推、配方优先级与失效自愈、
 点击定性「只提示不拦人」、**校准配方压过 apiMode**）。
 
@@ -295,7 +297,7 @@ cd D:/TRAE/releases/.tools/videoshell_verify && python runall.py
 `SiteDetector` 会先并发探 8 个采集接口路径；全不通就落到 HTML 适配。**这一步不要怀疑它判错** ——
 探测失败的站点本来就应该走 HTML 适配。
 
-### 四条原则（都是从踩坑里换来的）
+### 五条原则（都是从踩坑里换来的）
 
 **1. 认形状，不认目录名。**
 
@@ -331,6 +333,36 @@ cd D:/TRAE/releases/.tools/videoshell_verify && python runall.py
 **要从那次点击里抽出 URL 形状（`/bspvt/{slug}.html`），而不是记住"他在哪个容器里点的"**。
 金牌影视实测：同一个站的分类散在主菜单 / 二级面板 / 底部导航三个容器里，
 只认点击的那个容器只能拿到 **5 个**分类，认形状能拿回 **40 个**。
+
+**5. 单条判据宁可漏收，不可错收 —— 判据也分"单条形状"和"集合统计"两级。**
+
+自研 SSR 站（Nuxt 3 / Vue SSR）是另一套形态：URL 全是**尾斜杠目录式**
+（`/tag/{别名}/`、`/drama/detail/{id}/`、`/drama/video/{id}/`），既不是 maccms 的 `.html` 后缀，
+也不是「单段 slug」。实测站点（`capable.fzchosdi.cc`）里**真分类和页脚功能页形状完全一样**：
+
+| | 真分类 | 页脚功能页 |
+|---|---|---|
+| 形状 | `/tag/{别名}/` | `/contact/`、`/search/`、`/about/`… |
+| 只有形状判据 | ✅ 但页脚也命中 | ❌ 被误收 |
+
+单靠"形状"分不开，于是分两级：
+
+1. **形状级**：`/结尾的目录式路径` → 见 `HtmlTemplates.slashDirOf` / `slashCatTplFrom`。
+2. **集合级（关键）**：**同一目录下"不同别名 ≥2 且不同名称 ≥2"才算分类目录** ——
+   真分类目录（`/tag/` 下几十个别名）一眼可分，而 `/rank/drama/`、`/explore/drama/`
+   这种"形状相同但只有 1 个别名"的被排除。
+3. 再叠一层**封闭功能页词表**（about / contact / search / faq / privacy / terms / help…）挡住页脚。
+
+**为什么"错收"比"漏收"严重**：旧实现里 `collectSlugCategories` 排在前面，
+一命中就 `return` —— 页脚功能页被收下之后，**真分类整段被挡在门外**，
+自检显示「5 个分类、点进去 0 条」。这就是「错收会连锁让正确结果拿不到」的实例。
+
+同理，**分集也要认"数据在哪"，而不是只认"DOM 里有没有锚点"**。同一站详情页的
+`episode-list` 容器只有 1 个锚点（前端路由，href 全一样），但播放页内嵌的
+`__NUXT_DATA__` 里有完整分集数组、每集自带独立 `video_url`。所以新增 `SsrPayload`：
+从页面内嵌 JSON 抽分集（支持 devalue 扁平数组与普通嵌套 JSON 两种编码），
+**按"每项都是对象且都带像媒体地址的 URL"的元素形态挑数组，不按键名猜**。
+取不到就返回空、不抛异常，DOM 层判据照旧兜底。
 
 ### 加一个新站的最短路径
 
@@ -514,8 +546,11 @@ python D:/TRAE/releases/.tools/videoshell_verify/runsign.py --expect 1.0.13
 
 - **只做适配，不提供任何内容源**。站点可用性、内容合法性由使用者自行判断。
 - HTML 通用适配靠 **URL 形状 + DOM 语义**推断（而不是穷举模板），对 maccms 系
-  （含把目录名全改过的那批）覆盖较好；对**完全自研前端**（Vue/React 运行时渲染、接口加密）的站
-  仍然要看具体情况，这类站优先用嗅探播放。见上面「通配性」一节。
+  （含把目录名全改过的那批）覆盖较好；对**自研 SSR 站**（Nuxt 3 / Vue SSR 服务端渲染、
+  尾斜杠目录式 URL、分集走前端路由）也已支持 —— 分类走「尾斜杠目录 + 集合级聚类」判据，
+  分集走**页面内嵌 JSON**（`SsrPayload`）。但对**纯客户端渲染 + 接口加密**的站
+  （首屏 HTML 里什么都没有，数据全靠运行时加密接口取）仍然覆盖不到，这类站优先用嗅探播放。
+  见上面「通配性」一节。
 - 需要 JS 解密 / 对接专门解析接口（jx）的站不在当前支持范围。
 - 嗅探依赖页面真实发出媒体请求：若页面需要点击、或走加密接口，需在嗅探页手动操作一下。
 - **确实要求登录的站播不了**，这不是适配问题：页面正文就是「登录后即可观看」、

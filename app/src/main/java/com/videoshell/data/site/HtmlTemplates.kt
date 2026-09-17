@@ -210,8 +210,90 @@ object HtmlTemplates {
     private val PLAY_SHAPE = Regex("/([A-Za-z][\\w_\\-]*)/(\\d+)-(\\d+)-(\\d+)\\.html")
 
     /**
+     * 「尾斜杠目录式分类」：`/tag/AI%E7%9F%AD%E5%89%A7/`、`/drama/rec-hot-drama/`。
+     *
+     * 自研 SSR 站（Nuxt / Next / Vue Router）的分页路由习惯写成 `/{目录}/{别名}/`：
+     * 没有后缀、带尾斜杠，别名还常常是 **URL 编码的中文**。
+     * 实测野果短剧（`capable.fzchosdi.cc`）的真分类就是 `/tag/{slug}/`，
+     * 而 [isSlugCategory] 只认单段、[isSlugDirCategory] 要求 `.html` —— **两条都认不出**，
+     * 于是分类栏里只剩页脚功能页（`/search/`、`/contact/`、`/protocol/`…），
+     * 点进任何一个列表都是空的。
+     *
+     * ⚠️ 这条判据本身**不够**，必须配「同目录下别名足够多」的聚类（见 `HtmlAdapter`）：
+     * `/rank/drama/`、`/explore/drama/` 这类功能页形状与它完全一样，
+     * 靠白名单永远追不上站点改版，靠数量才能分开。
+     */
+    private val SLASH_DIR = Regex("^/?([A-Za-z][A-Za-z0-9_\\-]{0,24})/([^/?#]+)/$")
+
+    fun isSlashDirCategory(href: String): Boolean = slashDirOf(href) != null
+
+    /** 尾斜杠分类链接的 `目录 to 别名`；不是该形状返回 null */
+    fun slashDirOf(href: String): Pair<String, String>? {
+        val h = href.trim()
+        if (h.isEmpty() || h.startsWith("http") || h.startsWith("//")) return null
+        if (h.startsWith("#") || h.startsWith("javascript") || h.startsWith("mailto")) return null
+        if (h.contains('?') || h.contains('#')) return null
+        val m = SLASH_DIR.find(h) ?: return null
+        val dir = m.groupValues[1]
+        val slug = m.groupValues[2]
+        if (dir.isBlank() || slug.isBlank()) return null
+        if (dir.contains("---") || slug.contains("---")) return null   // maccms 筛选页占位
+        if (slug.all { it.isDigit() }) return null                     // 纯数字段是详情 id，不是别名
+        return dir to slug
+    }
+
+    /** 从一条真实尾斜杠分类链接抽形状：`/tag/AI%E7%9F%AD%E5%89%A7/` -> `/tag/{slug}/` */
+    fun slashCatTplFrom(url: String): String? {
+        val p = pathOf(url) ?: return null
+        if (!p.endsWith("/")) return null
+        val d = slashDirOf(p) ?: return null
+        return "/${d.first}/{slug}/"
+    }
+
+    /** 这条分类形状是不是尾斜杠形态（`/tag/{slug}/`） */
+    fun isSlashCatTpl(tpl: String): Boolean {
+        val t = tpl.trim()
+        return t.endsWith("/") && t.contains("/{slug}/")
+    }
+
+    /** 尾斜杠分类形状里的目录名（`/tag/{slug}/` -> `tag`）；不是该形状返回 null */
+    fun dirOfSlashCatTpl(tpl: String): String? {
+        if (!isSlashCatTpl(tpl)) return null
+        return tpl.trim().substringBefore("/{slug}/").trim('/').takeIf { it.isNotBlank() }
+    }
+
+    /** [slashCatTplFrom] 的逆运算 */
+    fun matchesSlashCatTpl(href: String, tpl: String): Boolean {
+        val dir = dirOfSlashCatTpl(tpl) ?: return false
+        val p = pathOf(href) ?: return false
+        val d = slashDirOf(p) ?: return false
+        return d.first.equals(dir, true)
+    }
+
+    /**
+     * 通用「把 URL 里的数字段换成 `{id}`」，用于自研站的尾斜杠路由：
+     * `/drama/video/3381/` -> `/drama/video/{id}/`。
+     *
+     * 与 [detailTplFrom] / [playTplFrom] 是一回事（**记形状，不记位置**），
+     * 但那两条判据是给 maccms 用的（要求 `.html` 结尾 / `{id}-{sid}-{nid}` 形状），
+     * 对 Nuxt 系站点一条都匹配不上。
+     */
+    fun tplFromNumericSegment(url: String): String? {
+        val p = pathOf(url) ?: return null
+        if (!p.endsWith("/")) return null
+        val seg = p.trim('/').split('/').filter { it.isNotBlank() }
+        if (seg.size < 2) return null
+        val idx = seg.indexOfFirst { s -> s.isNotEmpty() && s.all { it.isDigit() } }
+        if (idx <= 0) return null
+        val head = seg.take(idx)
+        if (head.any { it.isBlank() }) return null
+        // 只保留「目录…/{id}/」，丢掉 id 之后的部分（`/drama/video/3381/ep-4/` 也归一到同一形状）
+        return "/" + (head + "{id}").joinToString("/") + "/"
+    }
+
+    /**
      * 从一条真实分类链接反推「分类页 URL 形状」：
-     * `/bspvt/dianying.html` -> `/bspvt/{slug}.html`。
+     * `/bspvt/dianying.html` -> `/bspvt/{slug}.html`；`/tag/熟女/` -> `/tag/{slug}/`。
      *
      * 这是调试校准模式第一步的产物 —— 用户点一个分类，我们学到的是**形状**而不是
      * 「他在哪个容器里点的」。
@@ -225,6 +307,8 @@ object HtmlTemplates {
      */
     fun catTplFrom(url: String): String? {
         val p = pathOf(url) ?: return null
+        // 尾斜杠形态（自研 SSR 站）先分流：它没有后缀，下面的 `.html` 判据会直接否掉
+        if (p.endsWith("/")) return slashCatTplFrom(p)
         val seg = p.trim('/').split('/')
         if (seg.size != 2) return null                 // 只认 `/{目录}/{别名}.html`
         val dir = seg[0]
@@ -239,6 +323,7 @@ object HtmlTemplates {
 
     /** [catTplFrom] 的逆运算：这条链接是不是「这条形状」下的分类页 */
     fun matchesCatTpl(href: String, tpl: String): Boolean {
+        if (isSlashCatTpl(tpl)) return matchesSlashCatTpl(href, tpl)
         val t = tpl.trim()
         if (!t.endsWith(".html", true) || !t.contains("/{slug}")) return false
         val dir = t.substringBefore("/{slug}").trim('/')
