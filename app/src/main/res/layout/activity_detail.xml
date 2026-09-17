@@ -30,6 +30,21 @@
             android:layout_marginStart="4dp"
             android:layout_weight="1"
             android:textSize="17sp" />
+
+        <!-- 校准入口在这一页也放一个：用户看到「分集名 / 选集不对」时就在这一页，
+             就地能教 App 学本站，比让他返回到站点页再找要顺。 -->
+        <TextView
+            android:id="@+id/btnCalib"
+            android:layout_width="wrap_content"
+            android:layout_height="28dp"
+            android:layout_marginEnd="2dp"
+            android:background="@drawable/bg_chip"
+            android:gravity="center"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:text="@string/calib"
+            android:textColor="@color/brand"
+            android:textSize="12sp" />
     </LinearLayout>
 
     <FrameLayout

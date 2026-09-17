@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
@@ -50,9 +51,15 @@ class DetailActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityDetailBinding
     private lateinit var siteKey: String
+    private var videoId: String = ""
     private var adapter: SiteAdapter? = null
     private var detail: VideoDetail? = null
     private var groupIndex = 0
+
+    /** 校准页回来：站点配方可能变了（也可能顺带切成了 HTML 模式）⇒ 丢旧 Adapter，重新解析 */
+    private val calibLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { reload() }
 
     private val groupAdapter = CategoryAdapter { index, _ -> switchGroup(index) }
     private val episodeAdapter = EpisodeAdapter { index, ep -> playEpisode(index, ep) }
@@ -64,6 +71,7 @@ class DetailActivity : AppCompatActivity() {
 
         siteKey = intent.getStringExtra(EXTRA_KEY).orEmpty()
         val id = intent.getStringExtra(EXTRA_ID).orEmpty()
+        videoId = id
         val name = intent.getStringExtra(EXTRA_NAME).orEmpty()
         val pic = intent.getStringExtra(EXTRA_PIC).orEmpty()
         val remarks = intent.getStringExtra(EXTRA_REMARKS).orEmpty()
@@ -90,6 +98,9 @@ class DetailActivity : AppCompatActivity() {
             }
         }
         binding.btnBack.setOnClickListener { finish() }
+        binding.btnCalib.setOnClickListener {
+            calibLauncher.launch(CalibrateActivity.intent(this, siteKey))
+        }
 
         val span = if (resources.configuration.orientation ==
             android.content.res.Configuration.ORIENTATION_LANDSCAPE
@@ -100,6 +111,20 @@ class DetailActivity : AppCompatActivity() {
         binding.rvEpisodes.adapter = episodeAdapter
 
         loadDetail(id)
+    }
+
+    /**
+     * 丢旧 Adapter 重新走一遍详情。
+     *
+     * 必须**换一个新实例**：配方是 `HtmlAdapter.init` 时读进字段的，老实例手上还是旧模板。
+     * （v1.0.11 那条「每个页面各自 new 一个 Adapter，状态活在实例里」的教训，这里正向用一次。）
+     */
+    private fun reload() {
+        val site = Store.find(this, siteKey) ?: return
+        adapter = AdapterFactory.create(site)
+        detail = null
+        groupIndex = 0
+        loadDetail(videoId)
     }
 
     private fun loadDetail(id: String) {

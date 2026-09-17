@@ -41,7 +41,7 @@
             android:paddingStart="10dp"
             android:paddingEnd="10dp"
             android:text="@string/calib"
-            android:textColor="@color/text_primary"
+            android:textColor="@color/brand"
             android:textSize="12sp" />
 
         <TextView

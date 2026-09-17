@@ -16,8 +16,8 @@ android {
         applicationId "com.videoshell"
         minSdk 21
         targetSdk 34
-        versionCode 12
-        versionName "1.0.12"
+        versionCode 13
+        versionName "1.0.13"
         vectorDrawables.useSupportLibrary = true
         resConfigs "zh", "en"
     }
@@ -34,6 +34,16 @@ android {
     }
 
     buildTypes {
+        // ⚠️ debug 必须与 release 用**同一把钥匙**签名。
+        // 默认 debug 走 Android 的调试密钥，于是 debug 包与 release 包**互相覆盖安装会失败**
+        // （「应用未安装：签名冲突」）。用户以为装了新版，实际还停在旧版 —— 现象是
+        // 「我明明装了，怎么还是老样子」，而任何代码排查都解释不通。
+        // 密钥本来就在库里，这里直接复用，彻底消掉这一类假故障。
+        debug {
+            if (keystorePropsFile.exists()) {
+                signingConfig signingConfigs.release
+            }
+        }
         release {
             minifyEnabled false
             shrinkResources false
