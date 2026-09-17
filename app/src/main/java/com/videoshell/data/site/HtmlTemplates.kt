@@ -204,8 +204,69 @@ object HtmlTemplates {
         return u.substring(0, dirStart) + dir + "/{id}-" + sid + "-" + nid + ".html"
     }
 
-    /** maccms 播放页的万能形状 `/{目录}/{id}-{sid}-{nid}.html`，与目录名叫什么无关 */
+    /**
+     * maccms 播放页的万能形状 `/{目录}/{id}-{sid}-{nid}.html`，与目录名叫什么无关
+     */
     private val PLAY_SHAPE = Regex("/([A-Za-z][\\w_\\-]*)/(\\d+)-(\\d+)-(\\d+)\\.html")
+
+    /**
+     * 从一条真实分类链接反推「分类页 URL 形状」：
+     * `/bspvt/dianying.html` -> `/bspvt/{slug}.html`。
+     *
+     * 这是调试校准模式第一步的产物 —— 用户点一个分类，我们学到的是**形状**而不是
+     * 「他在哪个容器里点的」。
+     *
+     * 为什么必须是形状：同一个站的分类常分散在主菜单 / 二级面板 / 底部导航里
+     * （金牌影视实测：只认点击的那个容器只能拿到 5 个分类，认形状能拿到 40 个）。
+     * 形状还附带一个好处 —— 目录名是站点自己配的，按它扫全文档是安全的，
+     * 不会像「任意目录」那样把 `/gbook`、`/label` 这类功能页也收进来。
+     *
+     * 只保留 path、丢掉域名，规则才能在同一站点的 http/https 之间复用。
+     */
+    fun catTplFrom(url: String): String? {
+        val p = pathOf(url) ?: return null
+        val seg = p.trim('/').split('/')
+        if (seg.size != 2) return null                 // 只认 `/{目录}/{别名}.html`
+        val dir = seg[0]
+        if (!seg[1].endsWith(".html", true)) return null
+        val slug = seg[1].removeSuffix("html").removeSuffix(".")
+        if (dir.isBlank() || slug.isBlank()) return null
+        if (!dir.any { !it.isDigit() }) return null     // 目录名不能是纯数字（那不是别名）
+        if (!slug.any { !it.isDigit() }) return null    // 别名不能是纯数字（那是详情页 id）
+        if (slug.contains("---") || dir.contains("---")) return null  // maccms 筛选页占位
+        return "/$dir/{slug}.html"
+    }
+
+    /** [catTplFrom] 的逆运算：这条链接是不是「这条形状」下的分类页 */
+    fun matchesCatTpl(href: String, tpl: String): Boolean {
+        val t = tpl.trim()
+        if (!t.endsWith(".html", true) || !t.contains("/{slug}")) return false
+        val dir = t.substringBefore("/{slug}").trim('/')
+        if (dir.isBlank()) return false
+        val p = pathOf(href) ?: return false
+        val seg = p.trim('/').split('/')
+        if (seg.size != 2) return false
+        if (!seg[0].equals(dir, true)) return false
+        if (!seg[1].endsWith(".html", true)) return false
+        val slug = seg[1].removeSuffix("html").removeSuffix(".")
+        if (slug.isBlank() || !slug.any { !it.isDigit() }) return false
+        return !slug.contains("---")
+    }
+
+    /** 取 URL 的 path 部分；相对地址原样取（去掉 query / fragment） */
+    private fun pathOf(url: String): String? {
+        val u = url.trim()
+        if (u.isEmpty() || u.startsWith("#") || u.startsWith("javascript") || u.startsWith("mailto")) {
+            return null
+        }
+        if (u.startsWith("http") || u.startsWith("//")) {
+            val n = if (u.startsWith("//")) "https:$u" else u
+            return runCatching { java.net.URI(n).path }.getOrNull()
+        }
+        val path = u.substringBefore('?').substringBefore('#')
+        if (path.isEmpty()) return null
+        return if (path.startsWith("/")) path else "/$path"
+    }
 
     fun listCandidates(base: String): List<String> = listOf(
         "$base/vodshow/{id}--------{page}---.html",

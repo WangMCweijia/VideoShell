@@ -34,6 +34,12 @@
             android:exported="false"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout" />
 
+        <!-- 调试校准模式：用 WebView 打开站点，引导用户点分类 / 影片 / 分集，把规则固化下来 -->
+        <activity
+            android:name=".ui.CalibrateActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize" />
+
         <activity
             android:name=".player.SniffActivity"
             android:exported="false"

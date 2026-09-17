@@ -39,8 +39,21 @@ data class SiteRecipe(
     val playTpl: String? = null,
     val listTpl: String? = null,
     val searchTpl: String? = null,
-    /** 学到的分类容器选择器（调试校准模式下可覆盖） */
+    /** 学到的分类容器选择器（调试校准模式下由用户点击推出来） */
     val navSel: String? = null,
+    /**
+     * 校准学到的**分类页 URL 形状**，形如 `/bspvt/{slug}.html`。
+     *
+     * 比 [navSel] 更本质：同一个站的分类常散落在多个导航容器里，
+     * 认形状才能一次全收（金牌影视实测：认容器只 5 个，认形状 40 个）。
+     */
+    val catTpl: String? = null,
+    /**
+     * 人工校准完成时间；> 0 表示这份配方是**校准模式**固化下来的。
+     */
+    val calibAt: Long = 0L,
+    /** 校准摘要（三步各自学到了什么），自检报告里展示，便于判断校准到了哪一步 */
+    val calibNote: String? = null,
     val updatedAt: Long = 0L
 ) {
     companion object {
@@ -49,7 +62,7 @@ data class SiteRecipe(
 
     val isEmpty: Boolean
         get() = detailTpl == null && playTpl == null && listTpl == null &&
-                searchTpl == null && navSel == null
+                searchTpl == null && navSel == null && catTpl == null
 }
 
 object RecipeStore {
@@ -110,11 +123,15 @@ object RecipeStore {
     fun describe(baseUrl: String): String {
         val r = load(baseUrl) ?: return "（尚未学到任何模板）"
         val lines = ArrayList<String>()
+        lines += "来源：      " + if (r.calibAt > 0) "调试校准模式（人工）" else "自动学习"
+        lines += "分类形状：  " + (r.catTpl ?: "—")
+        lines += "分类容器：  " + (r.navSel ?: "—")
         lines += "详情页模板：" + (r.detailTpl ?: "—")
         lines += "播放页模板：" + (r.playTpl ?: "—")
         lines += "列表页模板：" + (r.listTpl ?: "—")
         lines += "搜索页模板：" + (r.searchTpl ?: "—")
         lines += "站点结构：  " + if (r.vodIsCategory) "详情页 + 播放页分离" else "单页/未知"
+        r.calibNote?.takeIf { it.isNotBlank() }?.let { lines += "校准记录：" + it }
         if (r.updatedAt > 0) {
             lines += "更新时间：  " +
                     java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)

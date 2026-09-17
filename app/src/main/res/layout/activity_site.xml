@@ -32,6 +32,19 @@
             android:textSize="17sp" />
 
         <TextView
+            android:id="@+id/btnCalib"
+            android:layout_width="wrap_content"
+            android:layout_height="28dp"
+            android:layout_marginEnd="2dp"
+            android:background="@drawable/bg_chip"
+            android:gravity="center"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:text="@string/calib"
+            android:textColor="@color/text_primary"
+            android:textSize="12sp" />
+
+        <TextView
             android:id="@+id/btnDoctor"
             android:layout_width="wrap_content"
             android:layout_height="28dp"

@@ -61,8 +61,24 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
             listTpl = r.listTpl
             searchTpl = r.searchTpl
             if (r.vodIsCategory) vodIsCategory = true
+            // 校准模式固化的分类规则：形状 + 容器（人手点出来的）
+            manualCatTpl = r.catTpl?.takeIf { it.isNotBlank() }
+            manualNavSel = r.navSel?.takeIf { it.isNotBlank() }
+            calibrated = r.calibAt > 0
         }
     }
+
+    /** 校准固化的分类页 URL 形状（`/bspvt/{slug}.html`） */
+    @Volatile
+    private var manualCatTpl: String? = null
+
+    /** 调试校准模式固化下来的分类容器（形状认不出来时的退路） */
+    @Volatile
+    private var manualNavSel: String? = null
+
+    /** 本站是否经过人工校准（报告里要能看出来） */
+    @Volatile
+    private var calibrated = false
 
     /** 分类为空时把原因带出去，让 UI 能显示出来（不然只能靠猜） */
     private var diag: String = ""
@@ -200,6 +216,28 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
 
         val out = LinkedHashMap<String, Category>()
 
+        // 0) 校准模式固化的规则，优先于任何形状猜测。
+        //
+        //    顺序有讲究：**先认形状，再认容器**。
+        //    形状（`/bspvt/{slug}.html`）是"分类逻辑"本身 —— 分类会散落在主菜单、二级面板、
+        //    底部导航里，认形状才能一次全收；只用容器的话，金牌影视实测 40 个分类会掉到 5 个。
+        //    容器留给"形状认不出来"的站点（比如 `/meijutt` 这种无后缀别名，形状上等同于默认判据）。
+        //
+        //    两条都认不出来时不硬撑，继续走默认逻辑 —— 站点改版后不能让用户卡死。
+        manualCatTpl?.let { tpl ->
+            collectByCatTpl(doc, out, tpl)
+            if (out.size >= 2) return out.values.take(40).toList()
+            out.clear()
+        }
+        manualNavSel?.let { sel ->
+            if (doc.select(sel).isNotEmpty()) {
+                collectSlugCategories(doc, out, only = listOf(sel))
+                collectCategories(doc.select("$sel a"), out)
+                if (out.size >= 2) return out.values.take(40).toList()
+                out.clear()
+            }
+        }
+
         // 1) 优先在导航容器里找 —— 最贴近站点自身的分类标签
         for (sel in navSelectors) {
             val anchors = doc.select(sel)
@@ -229,11 +267,19 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
         return clean.values.take(40).toList()
     }
 
-    /** 目录式分类（`/meijutt`、`/riju`…）：只在导航容器内认，避免收进 `/gbook` 这类功能页 */
-    private fun collectSlugCategories(doc: Document, out: LinkedHashMap<String, Category>) {
+    /**
+     * 目录式分类（`/meijutt`、`/riju`…）：只在导航容器内认，避免收进 `/gbook` 这类功能页。
+     *
+     * [only] 非空时只扫这些容器 —— 「调试校准模式」固化的选择器就走这条路。
+     */
+    private fun collectSlugCategories(
+        doc: Document,
+        out: LinkedHashMap<String, Category>,
+        only: List<String>? = null
+    ) {
         val host = hostOf(site.baseUrl)
         // 遍历**全部**导航容器：同一个站的分类会分散在主导航/顶部栏/底部导航里，只取第一个必然漏
-        for (sel in slugNavContainers) {
+        for (sel in (only ?: slugNavContainers)) {
             for (box in doc.select(sel)) {
                 for (a in box.select("a[href]")) {
                     if (a.selectFirst("img") != null) continue
@@ -257,6 +303,38 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
                     out[url] = Category(url, name, "0")
                 }
             }
+        }
+    }
+
+    /**
+     * 按「校准固化的分类形状」扫全文档。
+     *
+     * 这是**唯一**允许全文档认分类的地方 —— 因为目录名是站点自己配的（金牌影视 `/bspvt/`），
+     * 比"任意目录"精确得多，不会像 [collectSlugCategories] 那样必须靠容器白名单兜着，
+     * 也就不会把 `/gbook`、`/label` 这类功能页收进来。
+     */
+    private fun collectByCatTpl(
+        doc: Document,
+        out: LinkedHashMap<String, Category>,
+        tpl: String
+    ) {
+        val host = hostOf(site.baseUrl)
+        for (a in doc.select("a[href]")) {
+            if (a.selectFirst("img") != null) continue
+            val href = a.attr("href").trim()
+            if (!HtmlTemplates.matchesCatTpl(href, tpl)) continue
+
+            val name = a.text().replace(Regex("\\s+"), " ").trim()
+            if (name.isBlank() || name.length > 10) continue
+            if (name in catBlacklist) continue
+            if (catBadWords.any { name.contains(it) }) continue
+            // 同一分类常在多处出现且 URL 各不相同，按名字去重（同 collectSlugCategories）
+            if (out.values.any { it.name == name }) continue
+
+            val url = abs(href)
+            if (host.isNotBlank() && !hostOf(url).equals(host, true)) continue
+            if (out.containsKey(url)) continue
+            out[url] = Category(url, name, "0")
         }
     }
 
@@ -396,14 +474,18 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
         return learnedDetailTpl != null
     }
 
-    private fun buildDetail(id: String, doc: Document, groups: List<PlayGroup>): VideoDetail =
-        VideoDetail(
+    private fun buildDetail(id: String, doc: Document, groups: List<PlayGroup>): VideoDetail {
+        val title = HtmlExtractor.parseTitle(doc)
+        return VideoDetail(
             id = id,
-            name = HtmlExtractor.parseTitle(doc),
+            name = title,
             pic = resolveUrl(site.baseUrl, HtmlExtractor.parsePic(doc)),
             summary = HtmlExtractor.parseSummary(doc),
-            groups = groups
+            // 分集名里若带着剧名前缀（`兰香如故第01集`），按剧名削掉 —— 一屏几十集都重复剧名
+            // 既挤又难扫，用户看到的就是「兰香如故 第01集」重复十几遍
+            groups = HtmlExtractor.stripTitlePrefix(groups, title)
         )
+    }
 
     private suspend fun detailFromPlayPage(id: String): VideoDetail? {
         for (tpl in orderPlay(HtmlTemplates.playCandidates(root))) {

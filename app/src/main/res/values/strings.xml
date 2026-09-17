@@ -73,6 +73,42 @@
     <string name="site_recipe_reset_done">已清空本站配方，正在重新学习…</string>
     <string name="err_prefix">失败：%1$s</string>
 
+    <!-- 调试校准模式 -->
+    <string name="calib">校准</string>
+    <string name="calib_restart">重来</string>
+    <string name="calib_title">调试校准 · 第 %1$d/3 步</string>
+    <string name="calib_title_done">校准完成</string>
+    <string name="calib_title_idle">调试校准</string>
+    <string name="calib_step1">① 点一个分类名</string>
+    <string name="calib_hint1">在下面的网页里点你要的「分类」（电影 / 电视剧 / 动漫…）。点完会记下分类所在的导航区域，以后就按它取分类。</string>
+    <string name="calib_step2">② 点一部影片</string>
+    <string name="calib_hint2">在列表里点一部影片的封面或标题，进入它的详情页。点完会记下「详情页链接的形状」。</string>
+    <string name="calib_step3">③ 点一集（分集）</string>
+    <string name="calib_hint3">在详情页的选集里点任意一集。点完会记下「播放页链接的形状」，并立刻解析 + 试播一次。</string>
+    <string name="calib_restarted">已重置，请重新点一个分类名</string>
+    <string name="calib_bad_cat">这看着不是分类链接 —— 请在导航区点一个分类名</string>
+    <string name="calib_bad_detail">这个链接里没有影片编号 —— 请点影片的封面或标题</string>
+    <string name="calib_bad_detail_is_play">这是播放页链接 —— 请先点影片进详情页，再点分集</string>
+    <string name="calib_bad_play">这看着不像分集链接 —— 请在选集列表里点一集</string>
+    <string name="calib_got_cat">已记下分类「%1$s」</string>
+    <string name="calib_cat_tpl">形状 %1$s</string>
+    <string name="calib_cat_tpl_none">形状未识别</string>
+    <string name="calib_nav_sel">容器 %1$s</string>
+    <string name="calib_nav_sel_none">容器未识别</string>
+    <string name="calib_got_detail">已记下详情页模板：%1$s</string>
+    <string name="calib_got_play">已记下播放页模板：%1$s</string>
+    <string name="calib_resolving">正在用这个分集试解析播放地址…</string>
+    <string name="calib_done_msg">分类形状：%1$s\n分类容器：%2$s\n详情页模板：%3$s\n播放页模板：%4$s\n\n规则已固化到本地 —— 下次进本站直接用，不再靠猜。</string>
+    <string name="calib_play">试播</string>
+    <string name="calib_finish">完成</string>
+    <string name="calib_keep_rules">仍然保存规则</string>
+    <string name="calib_resolve_failed">没能解析出播放地址：%1$s\n\n规则仍然值得保存，之后可以用网页嗅探播放。</string>
+    <string name="calib_saved">规则已固化</string>
+    <string name="calib_switch_html">本站原不是 HTML 模式，已切换为 HTML 模式（校准只针对网页结构）</string>
+    <string name="calib_resumed">校准已生效，正在重新加载分类…</string>
+    <string name="calib_page_failed">网页加载失败：%1$s</string>
+    <string name="calib_need_sniff">这一页要靠网页嗅探才能拿到地址 —— 规则已固化，点「试播」用嗅探打开。</string>
+
     <string name="sniffer_running">正在嗅探视频地址，请在网页中点击播放…</string>
     <string name="sniffer_found">已捕获 %1$d 个候选地址</string>
     <string name="sniffer_none">尚未捕获到视频地址</string>

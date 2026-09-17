@@ -403,10 +403,49 @@ object HtmlExtractor {
         return t
     }
 
+    /**
+     * 分集名。
+     *
+     * 同一个分集链接在 HTML 里往往有**两个**名字：
+     * - 可见文本 `a.text()`：通常就是集名本身（`第01集`）
+     * - `title` 属性：常常是「剧名 + 集名」拼成的一整串（`兰香如故第01集`），
+     *   但有时又比文本更精确（文本只有 `1`、`HD`，甚至是个图标）
+     *
+     * 旧实现无条件优先 `title`，于是详情页整列都成了「兰香如故第01集」这种带剧名的长名字
+     * （金牌影视实测）。这里的判据：**title 比文本长且以文本结尾时，说明 title 只是给文本
+     * 加了个前缀（多半就是剧名），此时取更短、更精确的文本**；其余情况仍以 title 为准。
+     */
     private fun episodeName(a: Element): String {
-        val t = a.attr("title").trim().ifBlank { a.text().trim() }
-        val c = t.replace(Regex("\\s+"), " ").trim()
+        val txt = a.text().replace(Regex("\\s+"), " ").trim()
+        val ttl = a.attr("title").replace(Regex("\\s+"), " ").trim()
+        val c = when {
+            txt.isBlank() -> ttl
+            ttl.isBlank() -> txt
+            ttl.length > txt.length && ttl.endsWith(txt) && txt.length >= 2 -> txt
+            else -> ttl
+        }
         return if (c.isBlank() || c.length > 20) "" else c
+    }
+
+    /**
+     * 削掉分集名里重复的**剧名**前缀。
+     *
+     * [episodeName] 只能处理「title 里含有可见文本」的情况。有些主题的 `title` 只有
+     * 剧名 + 集名、可见文本是空的（或就是个图标），那就只能拿详情页的剧名本身来削。
+     *
+     * 保守起见，只有**该线路下全部分集**都以剧名开头、且削完还剩内容时才动手；
+     * 只要有任何一个不符合，就认为剧名不是前缀，原样返回。
+     */
+    fun stripTitlePrefix(groups: List<PlayGroup>, title: String): List<PlayGroup> {
+        val t = title.replace(Regex("\\s+"), " ").trim()
+        if (t.length < 2) return groups
+        return groups.map { g ->
+            val eps = g.episodes
+            if (eps.size < 2) return@map g
+            val all = eps.all { it.name.startsWith(t) && it.name.length > t.length }
+            if (!all) return@map g
+            g.copy(episodes = eps.map { it.copy(name = it.name.removePrefix(t).trim()) })
+        }
     }
 
     private fun nearestTitle(node: Element): String {

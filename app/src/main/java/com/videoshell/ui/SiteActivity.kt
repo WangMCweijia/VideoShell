@@ -11,6 +11,7 @@ import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -60,6 +61,22 @@ class SiteActivity : AppCompatActivity() {
     private var mode = MODE_CATEGORY
     private var currentType = ""
     private var keyword = ""
+
+    /**
+     * 校准模式回来后：配方变了（甚至站点模式被切成 html 了），
+     * 必须丢开旧 Adapter、重新读站点、重新拉一次分类 —— 否则用户会以为校准没生效。
+     */
+    private val calibLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { res ->
+        if (res.resultCode != RESULT_OK) return@registerForActivityResult
+        Store.find(this, site.key)?.let { site = it }
+        adapter = AdapterFactory.create(site)
+        binding.tvTitle.text = site.name.ifBlank { site.baseUrl }
+        cats = emptyList()
+        toast(getString(R.string.calib_resumed))
+        loadCategories()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -119,6 +136,11 @@ class SiteActivity : AppCompatActivity() {
         // 诊断与兜底合一：看到"分类 4 个"却点不出名字 = 渲染问题；连数字都没有 = 解析问题。
         binding.tvCatHint.setOnClickListener { showCategoryPicker() }
         binding.btnDoctor.setOnClickListener { runDoctor() }
+        // 调试校准模式：自动适配不灵时，让用户点一遍分类 / 影片 / 分集，
+        // 把这三类链接的形状固化下来（比继续加正则可靠）
+        binding.btnCalib.setOnClickListener {
+            calibLauncher.launch(CalibrateActivity.intent(this, site.key))
+        }
 
         loadCategories()
     }
