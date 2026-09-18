@@ -60,6 +60,23 @@ object HtmlExtractor {
         "历史", "专题", "关于", "反馈", "APP", "手机版", "换一换"
     )
 
+    /**
+     * 卡片上的**操作按钮文案**：它是链接的用途，不是影片名。
+     *
+     * 自研 SSR 站的 hero 轮播实测（野果短剧首页）：
+     * ```html
+     * <a href="/drama/detail/3379/" aria-label="查看剧集">
+     *   <img src="data:image/gif;base64,R0lGOD…" alt="庆余年 第三季">
+     * ```
+     * `aria-label` 是 CTA、`img[alt]` 才是真标题；旧实现按「title → aria-label → 选择器 → alt」
+     * 取值 ⇒ **整页 53 张卡片全叫「查看剧集」**。命中这个词表就往后顺延，别停在这里。
+     */
+    private val CTA_NAMES = setOf(
+        "查看剧集", "查看详情", "查看更多", "查看", "点击查看", "详情",
+        "立即播放", "马上播放", "开始观看", "立即观看", "点击播放", "去播放", "播放", "观看",
+        "选集", "下载", "收藏", "追剧", "免费观看", "在线观看"
+    )
+
     // ------------------------------------------------------------------ 列表
 
     /** 单张卡片 */
@@ -192,15 +209,27 @@ object HtmlExtractor {
         return ""
     }
 
+    /**
+     * 取卡片名。
+     *
+     * 顺序：`a[title]` → `a[aria-label]` → 名称选择器 → `img[alt]` → 锚点文本。
+     * **每一层都要过 [CTA_NAMES]**：命中的是"查看剧集 / 立即播放"这类按钮文案，
+     * 不代表它不能用 —— 只代表**它不是名字**，继续往下一层找。
+     * 野果首页的 `aria-label="查看剧集"` + `img[alt]="庆余年 第三季"` 就靠这一条纠正。
+     */
     private fun pickName(a: Element, img: Element?): String? {
-        cleanName(a.attr("title"))?.let { return it }
-        cleanName(a.attr("aria-label"))?.let { return it }
+        cleanName(a.attr("title"))?.takeIf { !isCta(it) }?.let { return it }
+        cleanName(a.attr("aria-label"))?.takeIf { !isCta(it) }?.let { return it }
         for (s in NAME_SELECTORS) {
-            cleanName(a.selectFirst(s)?.text())?.let { return it }
+            cleanName(a.selectFirst(s)?.text())?.takeIf { !isCta(it) }?.let { return it }
         }
-        cleanName(img?.attr("alt"))?.let { return it }
-        return cleanName(a.ownText().ifBlank { a.text() })
+        cleanName(img?.attr("alt"))?.takeIf { !isCta(it) }?.let { return it }
+        return cleanName(a.ownText().ifBlank { a.text() })?.takeIf { !isCta(it) }
     }
+
+    /** 按钮文案不是影片名（含"XX · 更多"这种带尾巴的形态） */
+    private fun isCta(s: String): Boolean =
+        s in CTA_NAMES || s.substringBefore(" ·").substringBefore("·").trim() in CTA_NAMES
 
     private fun cleanName(raw: String?): String? {
         val t = raw.orEmpty().replace(Regex("\\s+"), " ").trim()
@@ -285,6 +314,18 @@ object HtmlExtractor {
         return LINE_LABEL.containsMatchIn(s) || QUALITY_LABEL.matches(s)
     }
 
+    /**
+     * **标签栏整段文本**：「线路1线路2」「播放源1播放源2」——
+     * tab 栏是若干个相邻的行内标签，Jsoup 的 `.text()` 会把它们**不加空格地连在一起**。
+     * 拿它当线路名就会得到一颗叫「线路1线路2」的 chip（两条线的名字缝在一起）。
+     * [nearestTitle] 撞见这种就跳过，让 [parseGroups] 落回「线路 N」。
+     */
+    private val TAB_BAR_TEXT = Regex(
+        "^(?:(?:线路|播放源|片源|来源|源|节点|云播|秒播|快播|极速|超清|高清|蓝光|原画|备用|移动|电信|联通)" +
+            "\\s*[一二三四五六七八九十\\d]*\\s*){2,}$",
+        RegexOption.IGNORE_CASE
+    )
+
     /** 分组名清洗：去掉页面里带过来的分隔符尾巴（`肖申克的救赎|` → `肖申克的救赎`） */
     private fun cleanGroupName(raw: String): String {
         var t = raw.replace(Regex("\\s+"), " ").trim()
@@ -355,8 +396,29 @@ object HtmlExtractor {
         for (k in idNames.keys) doc.getElementById(k)?.let { ordered.add(it) }
         for (sel in CONTAINER_SELECTORS) ordered.addAll(doc.select(sel))
 
-        // 3) 去掉被其它候选包住的（.lists-box 与 .tab-pane 常常是同一个元素或其子集）
-        val containers = ordered.filter { c -> ordered.none { o -> o !== c && c.parents().contains(o) } }
+        // 3) 去掉被其它候选包住的（.lists-box 与 .tab-pane 常常是同一个元素或其子集）。
+        //    ⚠️ 这里不能无脑「留外层」：有的站几条线路共用一个外层包装
+        //    （外层里并排两块播放列表），留外层就把两条线并成一条 ——
+        //    症状是「线路1线路2 融成一颗 chip，选集 52 = 26+26」。
+        //    规则：外层的分集被内层候选的并集**全覆盖** ⇒ 外层只是包装，弃外层留内层；
+        //          盖不全（内层只是外层的局部格式化）⇒ 仍留外层，别丢集。
+        val epsCache = HashMap<Element, List<Episode>>()
+        fun epsOf(e: Element): List<Episode> = epsCache.getOrPut(e) { collectEpisodes(e, base) }
+        val dropped = HashSet<Element>()
+        for (c in ordered) {
+            if (c in dropped) continue
+            val inners = ordered.filter { o -> o !== c && o.parents().contains(c) && o !in dropped }
+            if (inners.isEmpty()) continue
+            val outerEps = epsOf(c)
+            val innerUrls = HashSet<String>()
+            for (o in inners) epsOf(o).forEach { innerUrls.add(it.url) }
+            if (outerEps.isNotEmpty() && outerEps.all { innerUrls.contains(it.url) }) {
+                dropped.add(c)              // 内层盖得全 ⇒ 外层只是包装，弃外层
+            } else {
+                dropped.addAll(inners)      // 盖不全 ⇒ 留外层，弃内层（老行为，别丢集）
+            }
+        }
+        val containers = ordered.filter { it !in dropped }
 
         val out = ArrayList<PlayGroup>()
         for (c in containers) {
@@ -380,7 +442,18 @@ object HtmlExtractor {
             if (name.isBlank()) name = "线路 ${out.size + 1}"
             out.add(PlayGroup(name, eps))
         }
-        if (out.isNotEmpty()) return out
+        if (out.isNotEmpty()) {
+            // 组名去重：两条线拿到同一个名字时加序号，否则 UI 上两颗 chip 一模一样分不清。
+            // （拆开外层包装后，两块列表都可能从同一段 tab 栏附近取名。）
+            val used = HashMap<String, Int>()
+            for (i in out.indices) {
+                val g = out[i]
+                val n = (used[g.name] ?: 0) + 1
+                used[g.name] = n
+                if (n > 1) out[i] = PlayGroup("${g.name} ($n)", g.episodes)
+            }
+            return out
+        }
 
         // 4) 兜底：认不出容器结构时，整页链接按文档顺序当成一条线路
         //    先用严格判据，一个都没命中再放宽 —— 放宽只是为了别漏掉奇怪主题，不是在放宽噪声
@@ -490,12 +563,12 @@ object HtmlExtractor {
         while (p != null && depth < 4) {
             for (sel in GROUP_TITLE_SELECTORS.split(", ")) {
                 val t = p.selectFirst(sel)?.text()?.trim().orEmpty()
-                if (t.isNotBlank() && t.length <= 16) return t
+                if (t.isNotBlank() && t.length <= 16 && !TAB_BAR_TEXT.matches(t)) return t
             }
             val prev = p.previousElementSibling()
             if (prev != null) {
                 val t = prev.text().trim()
-                if (t.isNotBlank() && t.length <= 16) return t
+                if (t.isNotBlank() && t.length <= 16 && !TAB_BAR_TEXT.matches(t)) return t
             }
             p = p.parent()
             depth++

@@ -49,6 +49,14 @@ data class SiteRecipe(
      */
     val catTpl: String? = null,
     /**
+     * 「最新」tab（`browse("")`）实际使用的分类页 URL。
+     *
+     * 有些站的**首页是客户端渲染的 hero 轮播**：SSR 里没有剧集数据、卡片图全是
+     * `data:` 占位、名字是「查看剧集」这类按钮文案 ⇒ 整屏无封面、整屏假名字。
+     * 一旦探到某个真分类页**确实带封面**，就记下来长期替代首页 —— 只探一次。
+     */
+    val homeCat: String? = null,
+    /**
      * 人工校准完成时间；> 0 表示这份配方是**校准模式**固化下来的。
      */
     val calibAt: Long = 0L,
@@ -62,7 +70,7 @@ data class SiteRecipe(
 
     val isEmpty: Boolean
         get() = detailTpl == null && playTpl == null && listTpl == null &&
-                searchTpl == null && navSel == null && catTpl == null
+                searchTpl == null && navSel == null && catTpl == null && homeCat == null
 }
 
 object RecipeStore {
@@ -126,6 +134,7 @@ object RecipeStore {
         lines += "来源：      " + if (r.calibAt > 0) "调试校准模式（人工）" else "自动学习"
         lines += "分类形状：  " + (r.catTpl ?: "—")
         lines += "分类容器：  " + (r.navSel ?: "—")
+        lines += "首页替代：  " + (r.homeCat ?: "—")
         lines += "详情页模板：" + (r.detailTpl ?: "—")
         lines += "播放页模板：" + (r.playTpl ?: "—")
         lines += "列表页模板：" + (r.listTpl ?: "—")

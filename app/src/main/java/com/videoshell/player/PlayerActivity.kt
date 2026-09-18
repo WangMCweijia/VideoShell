@@ -184,6 +184,12 @@ class PlayerActivity : AppCompatActivity() {
         val url = intent.getStringExtra(EXTRA_URL).orEmpty()
         if (url.isNotBlank()) {
             currentUrl = url
+            // ⚠️ 必须在 playUrl 之前定好"这一集是谁" —— playUrl 里要按它去取续播点。
+            // DetailActivity 跳转前已把 PlayQueue 填好（title/siteKey/groups/episodeIndex），
+            // 这里取到的就是用户点的那一集。
+            currentEpKey = PlayQueue.current()?.let {
+                episodeKey(PlayQueue.siteKey, PlayQueue.title, it.name)
+            }.orEmpty()
             playUrl(url)
         }
     }
@@ -439,7 +445,7 @@ class PlayerActivity : AppCompatActivity() {
                 .createMediaSource(MediaItem.fromUri(url))
         }
 
-        val resume = if (fromRetry) 0L else resumePosition(url)
+        val resume = if (fromRetry) 0L else resumePosition(activeKey())
         p.setMediaSource(source)
         p.playbackParameters = PlaybackParameters(SPEEDS[speedIndex])
         p.volume = if (muted) 0f else 1f
@@ -585,7 +591,12 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun playEpisode(index: Int) {
         val ep = PlayQueue.episodes().getOrNull(index) ?: return
+        // ⚠️ 换集前先把"正在看的这一集"的进度落盘。之前只在 onStop 写盘，
+        // 而 Activity 内部换集不会走 onStop ⇒ 上一集看到一半的位置直接丢。
+        savePosition()
         PlayQueue.episodeIndex = index
+        // 进度身份切到新的一集（此刻才换 key，保证上面那次 savePosition 写的是旧集）
+        currentEpKey = episodeKey(PlayQueue.siteKey, PlayQueue.title, ep.name)
         // 换了集，上一集的嗅探候选就作废了
         SniffQueue.clear()
         fromSniff = false
@@ -780,21 +791,42 @@ class PlayerActivity : AppCompatActivity() {
     private fun isLandscape(): Boolean =
         resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-    private fun resumeKey(url: String) = "resume_${url.hashCode()}"
+    /**
+     * 当前这一集的进度身份。**进度必须挂在"哪一集的第几集"上，不能挂在媒体地址上。**
+     *
+     * 之前的写法是 `"resume_${url.hashCode()}"`，有两个死穴：
+     * 1. **串台**：短剧站很常见"整部剧共用一条 m3u8"（或同一播放页换集），
+     *    那么所有集的媒体地址**完全一样** ⇒ 同一个 key ⇒ 记住 A 的进度，播 B 也从这个点续播。
+     *    URL 只是"从哪取流"，不是"这一集是谁"，拿它当身份本身就错了。
+     * 2. **丢进度**：带时效签名的直链每次解析都不同，hash 自然每次都变，存了也读不回来。
+     *
+     * 改为「站点 + 剧名 + 集名」这个稳定语义身份：一集一个槽位，换线路（group）也共享，
+     * 因为它标识的是"内容"而不是"取流地址"。
+     */
+    private var currentEpKey: String = ""
 
-    private fun resumePosition(url: String): Long {
-        val v = runCatching { sp.getLong(resumeKey(url), 0L) }.getOrDefault(0L)
-        return if (v > 10_000L) v else 0L
+    private fun episodeKey(siteKey: String, show: String, epName: String): String =
+        "resume_" + Media.digest("$siteKey|$show|$epName")
+
+    /** 无剧集上下文（直链播放 / 嗅探进来）时的兜底：按地址摘要记。digest 取代 32 位 hashCode。 */
+    private fun urlKey(url: String): String = "resume_url_" + Media.digest(url)
+
+    /** 有剧集身份就用剧集身份，否则退回地址摘要 */
+    private fun activeKey(): String = currentEpKey.ifBlank { urlKey(currentUrl) }
+
+    private fun resumePosition(key: String): Long {
+        val v = runCatching { sp.getLong(key, 0L) }.getOrDefault(0L)
+        return if (v > 10_000L) v else 0L   // 少于 10 秒不值得续播
     }
 
     private fun savePosition() {
         val p = player ?: return
-        val url = currentUrl
-        if (url.isBlank()) return
+        if (currentUrl.isBlank() && currentEpKey.isBlank()) return
         val pos = p.currentPosition
         val dur = p.duration
-        val key = resumeKey(url)
+        val key = activeKey()
         if (pos < 15_000L || (dur > 0 && pos > dur - 15_000L)) {
+            // 刚开始看 / 已经看到尾：清掉记忆，下次从头播
             sp.edit().remove(key).apply()
         } else {
             sp.edit().putLong(key, pos).apply()

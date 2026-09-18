@@ -106,6 +106,26 @@ object Media {
         return sb.toString()
     }
 
+    /**
+     * 稳定摘要（SHA-1 取前 8 字节 = 16 个十六进制字符）。
+     *
+     * **进度记忆的 key 必须用它，不要用 `String.hashCode()`。** 两个原因：
+     * 1. hashCode 只有 32 位，不同内容撞到同一个 key 就会"串台"（A 的进度续到 B 上）；
+     * 2. 它换不来"稳定" —— 带时效签名的媒体直链每次都不同，hash 值自然每次都变。
+     */
+    fun digest(s: String): String = try {
+        val b = java.security.MessageDigest.getInstance("SHA-1").digest(s.toByteArray(Charsets.UTF_8))
+        val sb = StringBuilder(16)
+        for (i in 0 until 8) {
+            val v = b[i].toInt() and 0xFF
+            sb.append(HEX[v shr 4]).append(HEX[v and 0xF])
+        }
+        sb.toString()
+    } catch (t: Throwable) {
+        // 摘要算法不可用（理论不会发生）时退化，仍然确定、只是短一些
+        Integer.toHexString(s.hashCode()).padStart(8, '0')
+    }
+
     private fun isUnsafe(c: Char): Boolean =
         c.code > 127 || c == ' ' || c.code < 0x20 ||
             c == '"' || c == '<' || c == '>' || c == '\\' ||

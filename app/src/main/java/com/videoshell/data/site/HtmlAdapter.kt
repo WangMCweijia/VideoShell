@@ -65,11 +65,35 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
      */
     private var detailPicHint: String = ""
 
+    /** 校准固化的分类页 URL 形状（`/bspvt/{slug}.html`） */
+    @Volatile
+    private var manualCatTpl: String? = null
+
+    /** 调试校准模式固化下来的分类容器（形状认不出来时的退路） */
+    @Volatile
+    private var manualNavSel: String? = null
+
+    /** 本站是否经过人工校准（报告里要能看出来） */
+    @Volatile
+    private var calibrated = false
+
+    /**
+     * 「最新」tab（`browse("")`）实际改用哪个分类页。
+     *
+     * 见 [substituteHome]：首页是 JS 渲染的站，SSR 里根本没有剧集数据。
+     */
+    private var homeCat: String? = null
+
     /**
      * 站点配方：跨 Activity / 跨启动复用。
      *
      * **这是 v1.0.11 的关键修复**：详情页在独立的 `DetailActivity` 里，会新建 Adapter 实例，
      * 实例内存的学习结果全丢 —— 不落盘就只能靠穷举模板，站点改过目录名必然失败。
+     *
+     * ⚠️ **这个 init 必须放在所有「会被它赋值的属性」之后。** Kotlin 把属性初始化器与 init 块
+     * 按**源码出现顺序**编进构造函数：init 写在前面时，后面那几行的 `= null` 会把刚读出来的
+     * 配方**当场覆写掉**。v1.0.18 前 `manualCatTpl` / `manualNavSel` / `calibrated` 就踩在这上面 ——
+     * 表现是「校准明明写盘了，进页面却还是没生效」，而且**不报错、不崩溃**。
      */
     init {
         RecipeStore.load(site.baseUrl)?.let { r ->
@@ -84,20 +108,9 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
             manualCatTpl = r.catTpl?.takeIf { it.isNotBlank() }
             manualNavSel = r.navSel?.takeIf { it.isNotBlank() }
             calibrated = r.calibAt > 0
+            homeCat = r.homeCat?.takeIf { it.isNotBlank() }
         }
     }
-
-    /** 校准固化的分类页 URL 形状（`/bspvt/{slug}.html`） */
-    @Volatile
-    private var manualCatTpl: String? = null
-
-    /** 调试校准模式固化下来的分类容器（形状认不出来时的退路） */
-    @Volatile
-    private var manualNavSel: String? = null
-
-    /** 本站是否经过人工校准（报告里要能看出来） */
-    @Volatile
-    private var calibrated = false
 
     /** 分类为空时把原因带出去，让 UI 能显示出来（不然只能靠猜） */
     private var diag: String = ""
@@ -552,6 +565,9 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
 
     override suspend fun browse(typeId: String, page: Int): List<VideoItem> {
         val ref = typeId.trim()
+        // 「最新」tab：已经确认过本站首页不可用时，直接走固化的分类页（省掉一次首页请求）
+        if (ref.isEmpty()) homeCat?.let { return browseCat(it, page) }
+
         val urls = browseUrls(ref, page)
         if (urls.isEmpty()) return emptyList()
 
@@ -560,7 +576,60 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
             seenKey = k
             seenIds.clear()
         }
-        return fetchList(urls, page)
+        val list = fetchList(urls, page)
+        // 空 id = 「最新」= 站点首页。首页拿不到封面时改用真分类页，见 substituteHome。
+        if (ref.isEmpty() && page <= 1) substituteHome(list)?.let { return it }
+        return list
+    }
+
+    private suspend fun browseCat(cat: String, page: Int): List<VideoItem> {
+        val k = "browse|$cat"
+        if (k != seenKey) {
+            seenKey = k
+            seenIds.clear()
+        }
+        return fetchList(browseUrls(cat, page), page)
+    }
+
+    /**
+     * 「最新」tab 的兜底：**首页列表一条封面都没有**时，改用探到的真分类页。
+     *
+     * 为什么要做这件事（v1.0.18，野果短剧线上实测）：
+     *
+     * | | App 默认入口 `browse("")`（首页） | 真分类页 |
+     * |---|---|---|
+     * | 条数 | 53 | 30 |
+     * | 有封面 | **0** | **30** |
+     * | 名字 | 全是「查看剧集」 | 正常剧名 |
+     * | HTML 里的图床地址 | **0 个** | 31 个 |
+     *
+     * 原因不是"解析没写好"，而是**首页的数据根本不在 SSR 里**：`__NUXT_DATA__` 只有 SEO 配置
+     * （`cover` 值为空、页面上 56 张图全是 `data:` 占位 GIF），剧集列表由客户端 JS 再拉一次接口
+     * 才填上。**这类页面无论怎么改选择器都抠不出封面**，只能换数据源。
+     *
+     * 保守起见必须**探到"分类页确实有封面"才替换**：只试 1~3 个分类，都没有就原样返回首页结果，
+     * 不做任何"猜"的替换。探到之后固化进配方（[SiteRecipe.homeCat]），此后只探一次。
+     */
+    private suspend fun substituteHome(home: List<VideoItem>): List<VideoItem>? {
+        if (home.isEmpty() || home.any { it.pic.isNotBlank() }) return null
+        val cat = probeCoveredCategory() ?: return null
+        homeCat = cat
+        RecipeStore.update(site.baseUrl) { it.copy(homeCat = cat) }
+        diag = "首页无封面数据（客户端渲染），已改用分类页 $cat"
+        return browseCat(cat, 1)
+    }
+
+    /** 探 1~3 个真分类页，返回**确实带封面**的那一个；都没有则 null（不替换） */
+    private suspend fun probeCoveredCategory(): String? {
+        val cands = runCatching { categories() }.getOrDefault(emptyList())
+            .map { abs(it.id) }
+            .filter { it.startsWith("http") }
+            .distinct()
+            .take(3)
+        for (c in cands) {
+            if (fetchList(listOf(c), 1).any { it.pic.isNotBlank() }) return c
+        }
+        return null
     }
 
     private fun browseUrls(ref: String, page: Int): List<String> {
