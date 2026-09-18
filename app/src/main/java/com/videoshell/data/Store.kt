@@ -42,4 +42,17 @@ object Store {
     }
 
     fun find(ctx: Context, key: String): SiteConfig? = sites(ctx).firstOrNull { it.key == key }
+
+    /** 只改显示名（SiteConfig.name 是 val，用 copy 重建），key/识别结果都不动 */
+    fun rename(ctx: Context, key: String, name: String) {
+        val list = sites(ctx)
+        var changed = false
+        for (i in list.indices) {
+            if (list[i].key == key) {
+                list[i] = list[i].copy(name = name)
+                changed = true
+            }
+        }
+        if (changed) save(ctx, list)
+    }
 }

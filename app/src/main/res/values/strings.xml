@@ -13,6 +13,8 @@
     <string name="detecting">正在识别站点类型…</string>
     <string name="delete">删除</string>
     <string name="delete_confirm">确定删除该站点？</string>
+    <string name="site_rename_title">编辑站点名称</string>
+    <string name="site_rename_done">已改名</string>
     <string name="cancel">取消</string>
     <string name="ok">确定</string>
 

@@ -144,8 +144,31 @@ class MainActivity : AppCompatActivity() {
         startActivity(SiteActivity.intent(this, site.key))
     }
 
-    private fun confirmDelete(site: SiteConfig) {
+    /** 长按站点改名：只改显示名，不动站点识别结果与配方 */
+    private fun renameSite(site: SiteConfig) {
+        val input = android.widget.EditText(this).apply {
+            setText(site.name.ifBlank { site.baseUrl })
+            setSingleLine(true)
+            setSelection(text.length)
+        }
         AlertDialog.Builder(this)
+            .setTitle(getString(R.string.site_rename_title))
+            .setView(input)
+            .setPositiveButton(R.string.ok) { _, _ ->
+                val name = input.text.toString().trim()
+                if (name.isEmpty()) {
+                    toast("名称不能为空")
+                    return@setPositiveButton
+                }
+                Store.rename(this, site.key, name)
+                refresh()
+                toast(getString(R.string.site_rename_done))
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun confirmDelete(site: SiteConfig) {        AlertDialog.Builder(this)
             .setTitle(site.name.ifBlank { site.baseUrl })
             .setMessage(getString(R.string.delete_confirm))
             .setNegativeButton(getString(R.string.cancel), null)

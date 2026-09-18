@@ -63,6 +63,7 @@ object HlsPlaylistFixer {
         var inMedia = false
         var maxDur = 0.0
         var isVod = false
+        var hadEndList = false
         var skipNextDiscontinuity = false
         var kept = 0
 
@@ -89,6 +90,10 @@ object HlsPlaylistFixer {
                     continue
                 }
                 if (line.startsWith("#EXT-X-ENDLIST", true)) {
+                    // v1.0.22：原文自带的 ENDLIST 要**记账**（见末尾补写）—— 此前这里
+                    // 剥掉后只有 PLAYLIST-TYPE:VOD 才补回，导致大量"有 ENDLIST 但没写
+                    // PLAYLIST-TYPE"的普通 VOD 流被 ExoPlayer 当直播、从 live edge 起播。
+                    hadEndList = true
                     continue
                 }
                 if (SEGMENT_TAGS.any { line.startsWith(it, true) }) {
@@ -134,8 +139,9 @@ object HlsPlaylistFixer {
         out.append("#EXT-X-TARGETDURATION:").append(td).append('\n')
         out.append(head)
         out.append(body)
-        // 只给 VOD 补 ENDLIST：直播流补上会被当成"已结束"直接截断
-        if (isVod && !body.contains("#EXT-X-ENDLIST")) out.append("#EXT-X-ENDLIST\n")
+        // 补 ENDLIST：声明过 VOD，或**原文本来就带 ENDLIST**（剥掉必须还回去）。
+        // 真直播流两者皆无，照旧不补 —— 补了会被当成"已结束"直接截断。
+        if ((isVod || hadEndList) && !body.contains("#EXT-X-ENDLIST")) out.append("#EXT-X-ENDLIST\n")
         return out.toString()
     }
 

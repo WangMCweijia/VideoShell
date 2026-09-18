@@ -23,6 +23,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
@@ -130,6 +131,15 @@ class PlayerActivity : AppCompatActivity() {
     /** 本次播放是否已经记过"就绪"（换源/重试后要允许再记一次） */
     private var readyLogged = false
 
+    /** 标题栏分辨率标签（如 "1080P"），取到画面尺寸前为空 */
+    private var resLabel = ""
+
+    /**
+     * 按画面比例自动横竖屏的开关。用户**手动**点过旋转按钮后就不再自动切
+     * （他要的朝向优先）；换集时复位，让新一集继续按内容自动。
+     */
+    private var orientAuto = true
+
     private val sp: SharedPreferences by lazy { getSharedPreferences(SP, Context.MODE_PRIVATE) }
     private val handler = Handler(Looper.getMainLooper())
     private val hideHud = Runnable { binding.tvHud.visibility = View.GONE }
@@ -171,7 +181,7 @@ class PlayerActivity : AppCompatActivity() {
         currentTitle = intent.getStringExtra(EXTRA_TITLE).orEmpty()
         fallbackPage = intent.getStringExtra(EXTRA_PAGE).orEmpty()
         fromSniff = intent.getBooleanExtra(EXTRA_FROM_SNIFF, false)
-        binding.tvTitle.text = currentTitle
+        applyTitle()
 
         bright = window.attributes.screenBrightness.let { if (it > 0f) it else 0.5f }
         volFloat = audio.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() /
@@ -216,6 +226,7 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun toggleOrientation() {
+        orientAuto = false   // 用户手动指定后，本集内不再按画面比例自动切
         val next = when (currentOrientMode()) {
             ORIENT_LANDSCAPE -> ORIENT_PORTRAIT
             ORIENT_PORTRAIT -> ORIENT_AUTO
@@ -236,6 +247,52 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun currentOrientMode(): Int = sp.getInt(KEY_ORIENT, ORIENT_LANDSCAPE)
+
+    // ------------------------------------------------------------------ 标题 / 画面自适应
+
+    /** 标题栏 = 剧名·集名 · 分辨率（分辨率取到前只显示标题） */
+    private fun applyTitle() {
+        binding.tvTitle.text = when {
+            resLabel.isBlank() -> currentTitle
+            currentTitle.isBlank() -> resLabel
+            else -> "$currentTitle · $resLabel"
+        }
+    }
+
+    /**
+     * 分辨率标签：用宽高里**较小**的一边（横屏视频是高度、竖屏视频是宽度），
+     * 与日常"1080P/720P"的叫法一致。尺寸未知（纯音频/还没解出第一帧）不显示。
+     */
+    private fun applyResLabel(v: VideoSize) {
+        if (v.width <= 0 || v.height <= 0) return
+        val m = minOf(v.width, v.height)
+        resLabel = when {
+            m >= 2160 -> "4K"
+            m >= 1440 -> "2K"
+            m >= 1080 -> "1080P"
+            m >= 720 -> "720P"
+            m >= 480 -> "480P"
+            m >= 360 -> "360P"
+            else -> "${m}P"
+        }
+        applyTitle()
+    }
+
+    /**
+     * 按画面比例自动横竖屏：横屏视频自动转横屏、竖屏视频回竖屏。
+     * 用户手动点过旋转按钮（[toggleOrientation]）后交还控制权，本集内不再自动切。
+     */
+    private fun applyVideoOrientation(v: VideoSize) {
+        if (v.width <= 0 || v.height <= 0) return
+        if (!orientAuto) return
+        val want =
+            if (v.width > v.height) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            else ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+        if (requestedOrientation != want) {
+            requestedOrientation = want
+            showHud(if (v.width > v.height) "画面：横屏" else "画面：竖屏")
+        }
+    }
 
     // ------------------------------------------------------------------ 控制条
 
@@ -412,6 +469,11 @@ class PlayerActivity : AppCompatActivity() {
                 if (playbackState == Player.STATE_ENDED && PlayQueue.hasNext()) {
                     playEpisode(PlayQueue.episodeIndex + 1)
                 }
+            }
+
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                applyResLabel(videoSize)
+                applyVideoOrientation(videoSize)
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -624,7 +686,10 @@ class PlayerActivity : AppCompatActivity() {
         episodeAdapter.select(index)
         binding.episodePanel.visibility = View.GONE
         currentTitle = "${PlayQueue.title} ${ep.name}".trim()
-        binding.tvTitle.text = currentTitle
+        // 新一集是新的流：分辨率标签清空（等 onVideoSizeChanged 重新取），自动横竖屏复位
+        resLabel = ""
+        orientAuto = true
+        applyTitle()
         fallbackPage = ep.url
 
         val site = PlayQueue.siteKey.takeIf { it.isNotBlank() }?.let { Store.find(this, it) }

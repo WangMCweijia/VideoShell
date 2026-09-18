@@ -8,7 +8,8 @@ import com.videoshell.databinding.ItemSiteBinding
 
 class SiteListAdapter(
     private val onClick: (SiteConfig) -> Unit,
-    private val onDelete: (SiteConfig) -> Unit
+    private val onDelete: (SiteConfig) -> Unit,
+    private val onLongClick: (SiteConfig) -> Unit = {}
 ) : RecyclerView.Adapter<SiteListAdapter.VH>() {
 
     private val items = ArrayList<SiteConfig>()
@@ -32,6 +33,7 @@ class SiteListAdapter(
             b.tvUrl.text = s.baseUrl
             b.tvMode.text = listOf(s.note, s.apiMode).filter { it.isNotBlank() }.joinToString(" · ")
             b.root.setOnClickListener { onClick(s) }
+            b.root.setOnLongClickListener { onLongClick(s); true }
             b.btnDelete.setOnClickListener { onDelete(s) }
         }
     }

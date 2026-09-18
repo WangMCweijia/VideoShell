@@ -76,6 +76,23 @@ object Http {
     }
 
     /**
+     * UA 兜底拦截器：请求没显式带 User-Agent 就补成浏览器 UA。
+     *
+     * 必要：站点解析的各请求都手动带了 UA，但走这个 client 的**其它路径**
+     * （如 Coil 封面请求，App.newImageLoader 用 callFactory 挂上来）不带 ——
+     * OkHttp 默认 UA（okhttp/4.x）会被部分图床 CDN 直接拒绝，表现为
+     * "解析正常、封面全 403"。在这里统一兜底，所有路径行为一致。
+     */
+    private val uaFallback = okhttp3.Interceptor { chain ->
+        val req = chain.request()
+        chain.proceed(
+            if (req.header("User-Agent").isNullOrBlank()) {
+                req.newBuilder().header("User-Agent", UA).build()
+            } else req
+        )
+    }
+
+    /**
      * 超时收短到「快速失败」区间：12s→8s。
      * 反正失败后会重试，与其在一个连不通的地址上等 12 秒，不如早点换下一次。
      */
@@ -88,6 +105,7 @@ object Http {
             .retryOnConnectionFailure(true)
             .followRedirects(true)
             .cookieJar(cookieJar)
+            .addInterceptor(uaFallback)
             .build()
     }
 
