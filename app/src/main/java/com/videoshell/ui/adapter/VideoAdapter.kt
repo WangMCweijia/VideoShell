@@ -1,8 +1,14 @@
 package com.videoshell.ui.adapter
 
+import android.graphics.Typeface
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
 import com.videoshell.R
@@ -14,6 +20,15 @@ class VideoAdapter(
 ) : RecyclerView.Adapter<VideoAdapter.VH>() {
 
     private val items = ArrayList<VideoItem>()
+
+    /**
+     * 当前搜索关键词：命中时在片名里标出来（加粗 + 品牌色）。空串 = 不标。
+     *
+     * 为什么需要它：站点的搜索是宽匹配（标题/标签/演员/简介都算），标出片名里的命中词，
+     * 用户一眼就能分清「这条是标题匹配」和「那条是靠标签进来的（角标会写明）」。
+     * 收藏页等其它复用方不设这个字段，行为与以前完全一致。
+     */
+    var highlight: String = ""
 
     fun submit(list: List<VideoItem>, append: Boolean) {
         if (!append) items.clear()
@@ -38,7 +53,7 @@ class VideoAdapter(
 
     inner class VH(private val b: ItemVideoBinding) : RecyclerView.ViewHolder(b.root) {
         fun bind(v: VideoItem) {
-            b.tvName.text = v.name
+            b.tvName.text = markedName(v.name)
 
             val sub = listOf(v.typeName, v.year, v.area).filter { it.isNotBlank() }.joinToString(" · ")
             b.tvSub.text = sub
@@ -61,6 +76,22 @@ class VideoAdapter(
             }
 
             b.root.setOnClickListener { onClick(v) }
+        }
+
+        /** 片名里标出关键词；没设置关键词、或片名不含关键词，都原样返回 */
+        private fun markedName(name: String): CharSequence {
+            val kw = highlight.trim()
+            if (kw.isEmpty() || name.isEmpty()) return name
+            val i = name.indexOf(kw, ignoreCase = true)
+            if (i < 0) return name
+            val end = (i + kw.length).coerceAtMost(name.length)
+            return SpannableString(name).apply {
+                setSpan(StyleSpan(Typeface.BOLD), i, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                setSpan(
+                    ForegroundColorSpan(ContextCompat.getColor(b.root.context, R.color.brand)),
+                    i, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                )
+            }
         }
     }
 }

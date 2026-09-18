@@ -297,6 +297,10 @@ class SiteBrowser(
                 }
                 return@launch
             }
+            // 搜索模式：片名里标出关键词（切回分类/换站时自动清掉）。
+            // 就放在 submit 前 —— `submit(…, false)` 走 notifyDataSetChanged，会立刻用新值重绑所有卡片；
+            // 分散到 doSearch / onCategory / bindSite 各写一遍反而容易漏（本项目踩过"漏传回调"的坑）。
+            videoAdapter.highlight = if (mode == MODE_SEARCH) keyword else ""
             videoAdapter.submit(items, append)
             page = p
             showState(null)

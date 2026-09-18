@@ -126,6 +126,20 @@ class YeguoAdapter(site: SiteConfig, private val recipe: CryptRecipe) : SiteAdap
      *
      * 结论：加演员 tab 只会多一次请求、且永远轮不到它 —— 别加。
      * （演员接口的结构与夹具见 `_ygo/search_actor.json`。）
+     *
+     * ## 为什么还要标「命中来源」
+     *
+     * 上面说了剧集 tab 是**宽匹配**——这是站点行为，不是我们的缺陷。但它有个副作用：
+     * 搜标签词时结果**看片名全是无关的**。实测（`_ygo/search_tag.json` 等夹具）：
+     *
+     * | 关键词 | 条数 | 标题命中 | 其余靠什么命中 |
+     * |---|---|---|---|
+     * | 爱 | 20 | 17 | 标签 3 |
+     * | 甜宠 | 9 | **0** | 标签 7 + 简介 2 |
+     * | 短剧 | 20 | **0** | 标签 20（全是 `AI短剧` 的**子串**，等于整个片库） |
+     *
+     * 用户只看得到片名 ⇒ 结论必然是「结果错的」。站点其实在每一项里都下发了
+     * `matched_fields`，把它翻成中文标在角标位（那里原本是空的）就够解释了。
      */
     override suspend fun search(keyword: String, page: Int): List<VideoItem> {
         val kw = keyword.trim()
@@ -135,7 +149,7 @@ class YeguoAdapter(site: SiteConfig, private val recipe: CryptRecipe) : SiteAdap
             mapOf("keyword" to kw, "page" to "${page.coerceAtLeast(1)}", "limit" to "$limit")
         )
         // 「关键词无效」是站点的正常业务回复（词太短 / 被过滤），不是故障
-        return YeguoMap.itemsFromResp(resp)
+        return YeguoMap.searchItemsFromResp(resp)
     }
 
     // ------------------------------------------------------------------ 详情
@@ -265,6 +279,51 @@ object YeguoMap {
         val arr = resp?.obj("data")?.get("list")
             ?.takeIf { it.isJsonArray }?.asJsonArray ?: return emptyList()
         return itemsFrom(arr)
+    }
+
+    /**
+     * `matched_fields` 的取值 → 中文角标。
+     *
+     * 实测取值只有 `title` / `tags` / `actors` / `description` 四种（见 `_ygo/search*.json`），
+     * 多留一个 `alias` 是防御 —— 站点加维度时不该静默变成无标注。
+     */
+    private val MATCH_LABEL = mapOf(
+        "title" to "标题",
+        "tags" to "标签",
+        "actors" to "演员",
+        "description" to "简介",
+        "alias" to "别名"
+    )
+
+    /**
+     * 非标题命中时给出「为什么它会在结果里」的角标文案。
+     *
+     * **标题命中一律返回空串**：关键词就在片名里，用户一眼能看见，标了只占地方。
+     * 认不出的字段名退化成「关键词相关」，宁可含糊也不静默（本项目一贯纪律）。
+     */
+    fun matchHintOf(o: JsonObject?): String {
+        val fields = o.arr("matched_fields").map { it.str().trim() }.filter { it.isNotBlank() }
+        if (fields.isEmpty()) return ""
+        if (fields.any { it == "title" }) return ""
+        return MATCH_LABEL[fields.first()]?.let { "命中$it" } ?: "关键词相关"
+    }
+
+    /**
+     * 搜索结果专用映射：在 [itemsFromResp] 基础上标「命中来源」。
+     *
+     * 角标位在搜索结果里**本来就是空的**（站点只在浏览/榜单接口给 `play_count_text`），
+     * 所以这里是纯增量，不覆盖任何既有信息。如果哪天站点在搜索里也开始下发角标，
+     * 这里选择了**命中来源优先** —— 「这条为什么在这儿」比「多少人看过」更该先说。
+     */
+    fun searchItemsFromResp(resp: JsonObject?): List<VideoItem> {
+        val arr = resp?.obj("data")?.get("list")
+            ?.takeIf { it.isJsonArray }?.asJsonArray ?: return emptyList()
+        return arr.toList().mapNotNull { el ->
+            val o = el.takeIf { e -> e.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+            val item = itemOf(o) ?: return@mapNotNull null
+            val hint = matchHintOf(o)
+            if (hint.isBlank()) item else item.copy(remarks = hint)
+        }
     }
 
     fun itemsFrom(arr: JsonArray?): List<VideoItem> =
