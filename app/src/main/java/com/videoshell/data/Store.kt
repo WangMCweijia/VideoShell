@@ -75,4 +75,20 @@ object Store {
         if (list.isEmpty()) return null
         return list.firstOrNull { it.key == defaultKey(ctx) } ?: list.first()
     }
+
+    // ------------------------------------------------------------------ 剧集列表排序
+
+    private const val KEY_EP_DESC = "episode_desc"
+
+    /**
+     * 剧集列表是否倒序。
+     *
+     * 放在全局偏好里而不是各页面各自记：详情页与播放器选集面板是同一个列表的两个入口，
+     * 用户在详情页切成倒序、进播放器又变回正序会很难受（也会让人以为按钮没生效）。
+     */
+    fun episodeDesc(ctx: Context): Boolean = sp(ctx).getBoolean(KEY_EP_DESC, false)
+
+    fun setEpisodeDesc(ctx: Context, desc: Boolean) {
+        sp(ctx).edit().putBoolean(KEY_EP_DESC, desc).apply()
+    }
 }

@@ -439,15 +439,21 @@ object HtmlExtractor {
             // 「几条源共用一个外层列表」：骚火电影是
             //   <ul class="play_list"><li>源1 的 26 集</li><li>源2 的 26 集</li></ul>
             // 整个 ul 当一个容器 ⇒ 「1 条线路 52 集」，两条源缝在一起（52 = 26+26）。
-            // 判据：分集锚点按「容器顶层块」归堆后 ≥2 堆、每堆 ≥2 集 ⇒ 每堆一条线路。
+            // 判据：分集锚点按「容器某一层的块」归堆后 ≥2 堆、每堆 ≥2 集 ⇒ 每堆一条线路。
             // 正常「每集一个 li」的列表每堆只有 1 个锚点，不会误拆（见 splitSubBlocks）。
-            val blocks = splitSubBlocks(c, base)
+            //
+            // 两条路都试：先按 DOM 分层（能处理绝大多数主题），再按播放地址里的线路段兜底
+            //（几条源**交错**摆在同一层时 DOM 分不开，只能看地址）。
+            val blocks = splitSubBlocks(c, base) ?: splitByUrlShape(eps)
             if (blocks != null) {
-                val labels = lineLabelsFor(c, blocks.size)
+                // 名字优先取页面自己的线路标签栏：容器外面的（骚火 div.play_from）或
+                // 容器里面的 tab 栏（zqkhmy .anthology-tab），两者都认。
+                val labels = lineLabelsFor(c, blocks.size) ?: tabLabelsIn(c, blocks.size)
                 for ((i, b) in blocks.withIndex()) {
                     val bn = labels?.getOrNull(i)
-                        ?: cleanGroupName(nearestTitle(b.first)).ifBlank { "线路 ${out.size + 1}" }
-                    out.add(PlayGroup(bn, b.second))
+                        ?: b.node?.let { cleanGroupName(nearestTitle(it)) }.orEmpty()
+                            .ifBlank { "线路 ${out.size + 1}" }
+                    out.add(PlayGroup(bn, b.episodes))
                 }
                 continue
             }
@@ -521,36 +527,178 @@ object HtmlExtractor {
     }
 
     /**
-     * 同一容器里几条源各占一个「子块」⇒ 拆成多条线路。
-     *
-     * 形状（骚火电影实测）：`<ul class="play_list"><li>源1 的 26 个 <a></li><li>源2 的 26 个</li></ul>`
-     * —— 锚点的顶层祖先（容器直接子层）正好两块，每块 26 集。
-     *
-     * 判据：把容器里每个分集锚点向上归到「容器的直接子元素」，归堆后
-     * **≥2 堆且每堆 ≥2 个锚点** 才拆。反面形状是正常主题的「每集一个 li」
-     * （`<ul><li><a>第1集</a></li>…`）—— 每堆只有 1 个锚点，绝不拆。
-     * 这与「外层被内层候选全覆盖 ⇒ 弃外层」互补：那条管**内层本身是容器候选**的，
-     * 这条管**内层只是普通 li/div** 的。
+     * 拆出来的一条「线路」：分集 + 它所在的块节点（取名用，按地址拆时没有）。
      */
-    private fun splitSubBlocks(c: Element, base: String): List<Pair<Element, List<Episode>>>? {
-        val byBlock = LinkedHashMap<Element, MutableList<Episode>>()
+    private class LineBlock(val episodes: List<Episode>, val node: Element?)
+
+    /**
+     * 同一容器里几条源各占一块 ⇒ 拆成多条线路。
+     *
+     * 形状一（骚火电影）：`<ul class="play_list"><li>源1 的 26 个 <a></li><li>源2 的 26 个</li></ul>`
+     * —— 锚点的顶层祖先（容器直接子元素）正好两块。
+     *
+     * 形状二（zqkhmy 实测，v1.0.28 修）：块外面还裹了一层
+     * ```
+     * <div class="anthology">
+     *   <div class="anthology-tab">…6 个线路标签…</div>
+     *   <div class="anthology-list">
+     *     <div class="anthology-list-box none"><div><ul class="anthology-list-play">181 集</ul></div></div>
+     *     <div class="anthology-list-box none">… 180 集 …</div>   ← 共 6 块
+     * ```
+     * 全部锚点的「直接子层祖先」都是同一个 `.anthology-list` ⇒ 只归到 1 堆，
+     * 老实现直接放弃拆分，6 条源被缝成「1 条线路 924 集」（924 = 181+180+21+181+181+180）。
+     * 所以这里**逐层下探**：第 1 层不行就看第 2 层，最多到 [MAX_SUB_BLOCK_DEPTH] 层。
+     *
+     * 判据（任一层命中即拆）：锚点按该层祖先归堆后 **≥2 堆、且每堆 ≥2 个锚点**。
+     * 反面形状是正常主题的「每集一个 li」——每堆只有 1 个锚点，绝不拆；
+     * 平铺列表（`<div class="playlist"><a/><a/>…`）的祖先就是容器本身，也不算一「层」。
+     */
+    private fun splitSubBlocks(c: Element, base: String): List<LineBlock>? {
+        val items = anchorEpisodes(c, base)
+        if (items.size < 4) return null
+        for (level in 1..MAX_SUB_BLOCK_DEPTH) {
+            val piles = LinkedHashMap<Element, MutableList<Episode>>()
+            var aligned = true
+            for ((a, ep) in items) {
+                val top = ancestorAt(a, c, level)
+                if (top == null) {
+                    aligned = false
+                    break
+                }
+                piles.getOrPut(top) { ArrayList() }.add(ep)
+            }
+            if (!aligned) continue
+            if (piles.size < 2 || piles.values.any { it.size < 2 }) continue
+            // 每堆内部的「无名分集」按堆内序号补名，与老行为一致
+            return piles.map { (node, list) ->
+                LineBlock(
+                    list.mapIndexed { i, e -> if (e.name.isBlank()) e.copy(name = "第${i + 1}集") else e },
+                    node
+                )
+            }
+        }
+        return null
+    }
+
+    /** 最多往下找几层「分块层」。2 层够 zqkhmy（`.anthology` → `.anthology-list`）；再多只是徒增误拆面。 */
+    private const val MAX_SUB_BLOCK_DEPTH = 3
+
+    /**
+     * `a` 往上第 `level` 层的祖先。
+     * 中途撞到容器 `c`（说明锚点本身就在这一层或更浅）或走到顶 ⇒ 返回 null，这一层不算数。
+     */
+    private fun ancestorAt(a: Element, c: Element, level: Int): Element? {
+        var n: Element = a
+        for (i in 1..level) {
+            val p = n.parent() ?: return null
+            if (p === c) return null
+            n = p
+        }
+        return n
+    }
+
+    /** 容器里所有分集锚点（按 URL 去重、保持文档顺序），带原始 `<a>` 以便回溯祖先 */
+    private fun anchorEpisodes(c: Element, base: String): List<Pair<Element, Episode>> {
+        val out = ArrayList<Pair<Element, Episode>>()
         val seen = HashSet<String>()
         for (a in c.select("a[href]")) {
             val href = a.attr("href").trim()
             if (!HtmlTemplates.isEpisodeLink(href)) continue
             val u = resolveUrl(base, href)
             if (u.isBlank() || !seen.add(u)) continue
-            var n: Element? = a
-            var top: Element? = null
-            while (n != null && n !== c) { top = n; n = n.parent() }
-            top ?: return null
-            val list = byBlock.getOrPut(top) { ArrayList() }
-            list.add(Episode(episodeName(a).ifBlank { "第${list.size + 1}集" }, u))
+            out.add(a to Episode(episodeName(a), u))
         }
-        if (byBlock.size < 2) return null
-        if (byBlock.values.any { it.size < 2 }) return null
-        return byBlock.map { it.key to it.value.toList() }
+        return out
     }
+
+    /**
+     * 按**播放地址里的线路段**拆线（DOM 分不开时的兜底）。
+     *
+     * maccms 的播放页地址是 `/{目录}/{影片id}-{线路id}-{集id}.html`，
+     * **同一条分集列表里的线路段必然相同**。所以「一组里出现 ≥2 个线路段」= 至少两条源被缝在一起。
+     * 这是与 DOM 结构完全无关的独立证据：页面把几条源平铺在同一层、整块由 JS 拼出来，
+     * DOM 分层都会失手，地址不会。
+     *
+     * 保守到什么程度：
+     * 1. **只要有一条地址不是这个形状就整体放弃**（返回 null）；
+     * 2. 线路段在第 3 段还是第 4 段，由「**分出来的堆更少**」自己定 —— 线路数（个位数）
+     *    天然远少于集数，段序被换过的站也能自动对齐；平局按 maccms 标准取第 3 段；
+     * 3. 每堆必须 ≥2 集：只有一集的「线路」一定是判据看错了（或某站把线段含义反过来用），
+     *    这种情况整体放弃，绝不拆出一堆单集线路。
+     */
+    private fun splitByUrlShape(eps: List<Episode>): List<LineBlock>? {
+        if (eps.size < 4) return null
+        val parts = eps.map { PLAY_URL_PARTS.find(it.url)?.groupValues ?: return null }
+        val byThird = pileByUrl(eps, parts) { it[3] }
+        val byFourth = pileByUrl(eps, parts) { it[4] }
+        val pick = when {
+            byThird == null -> byFourth
+            byFourth == null -> byThird
+            byFourth.size < byThird.size -> byFourth
+            else -> byThird
+        } ?: return null
+        return pick.map { (_, list) -> LineBlock(fillBlankNames(list), null) }
+    }
+
+    /** 按 `key(分组)` 归堆；堆数 <2 或存在只有 1 集的堆 ⇒ 这不成一条判据，返回 null */
+    private fun pileByUrl(
+        eps: List<Episode>,
+        parts: List<List<String>>,
+        key: (List<String>) -> String
+    ): LinkedHashMap<String, MutableList<Episode>>? {
+        val piles = LinkedHashMap<String, MutableList<Episode>>()
+        for (i in eps.indices) piles.getOrPut(key(parts[i])) { ArrayList() }.add(eps[i])
+        if (piles.size < 2 || piles.values.any { it.size < 2 }) return null
+        return piles
+    }
+
+    /** 没取到名字的分集按堆内序号补名（与 [collectEpisodes] 的兜底一致） */
+    private fun fillBlankNames(list: List<Episode>): List<Episode> =
+        list.mapIndexed { i, e -> if (e.name.isBlank()) e.copy(name = "第${i + 1}集") else e }
+
+    /** `/{目录}/{影片id}-{线路id}-{集id}.html` → 分组 1=目录 2=影片 3=线路 4=集 */
+    private val PLAY_URL_PARTS = Regex("/([A-Za-z][\\w_\\-]*)/(\\d+)-(\\d+)-(\\d+)(?:\\.html?)?")
+
+    /**
+     * 容器**内部**的线路标签栏（与 [lineLabelsFor] 互补：那个找容器前面的，这个找里面的）。
+     *
+     * zqkhmy 实测形状：
+     * ```
+     * <div class="anthology-tab"><div class="swiper-wrapper">
+     *   <a class="swiper-slide"><i class="fa…"></i>&nbsp;蓝光2k<span class="badge">181</span></a>
+     *   … 共 6 个，顺序与下面 6 个分集块一一对应
+     * ```
+     * 只认**没有真链接**的锚点（无 `href` / `#` / `javascript:`）—— 带真链接的是导航。
+     * 名字取 `ownText()`：数量徽标在子 `<span>` 里，不会被混进名字（得到「蓝光2k」而不是「蓝光2k181」）。
+     * 条数必须恰好等于分块数，多一个少一个都认输返回 null。
+     */
+    private fun tabLabelsIn(c: Element, n: Int): List<String>? {
+        if (n < 2) return null
+        val byParent = LinkedHashMap<Element, MutableList<Element>>()
+        for (a in c.select("a")) {
+            val href = a.attr("href").trim()
+            if (href.startsWith("http") || href.startsWith("/") || href.startsWith("mailto")) continue
+            val p = a.parent() ?: continue
+            byParent.getOrPut(p) { ArrayList() }.add(a)
+        }
+        for ((_, kids) in byParent) {
+            if (kids.size != n) continue
+            val labels = kids.map { tabLabelText(it) }
+            if (labels.all { it.isNotBlank() }) return labels
+        }
+        return null
+    }
+
+    /** tab 标签取文：优先 ownText（徽标在子节点里），退到整段文本；太长/太空当没取到 */
+    private fun tabLabelText(a: Element): String {
+        val own = a.ownText().replace(SPACES, " ").trim()
+        val t = if (own.isNotBlank()) own else a.text().replace(SPACES, " ").trim()
+        return if (t.length in 1..16) t else ""
+    }
+
+    /** 空白归一化。`&nbsp;`(\u00A0) 与全角空格 `\u3000` 不在 Java 正则的 `\s` 里，必须显式列出 —
+     *  zqkhmy 的 tab 就是 `<i…></i>&nbsp;蓝光2k`，漏掉它名字会带一个前导空白。 */
+    private val SPACES = Regex("[\\s\\u00A0\\u3000]+")
 
     /**
      * 找容器**前面**的「线路标签栏」，给按子块拆出的线路命名。

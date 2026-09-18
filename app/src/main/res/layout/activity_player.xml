@@ -19,13 +19,17 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- ==================== 顶部栏 ==================== -->
+    <!-- ==================== 顶部栏 ====================
+         ⚠️ 高度必须是 wrap_content + minHeight：`applyOverlayInsets` 会给它补上
+         「挖孔 / 状态栏」的 padding，写死 52dp 的话 padding 会去挤内容
+         （v1.0.26 的真事故：标题与图标被压成一条横带）。 -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
-        android:layout_height="52dp"
+        android:layout_height="wrap_content"
         android:background="#99000000"
         android:gravity="center_vertical"
+        android:minHeight="52dp"
         android:orientation="horizontal"
         android:paddingStart="4dp"
         android:paddingEnd="8dp">
@@ -255,16 +259,40 @@
         android:padding="10dp"
         android:visibility="gone">
 
-        <TextView
-            android:id="@+id/tvPanelTitle"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:text="@string/player_episodes"
-            android:textColor="@color/white"
-            android:textSize="13sp"
-            android:textStyle="bold" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tvPanelTitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/player_episodes"
+                android:textColor="@color/white"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <!-- 顺序 / 倒序：站点给的分集顺序各家不同（有的 181→1 倒着给），
+                 给用户一个自己摆正的开关。文案显示**当前**状态。 -->
+            <TextView
+                android:id="@+id/tvOrder"
+                android:layout_width="wrap_content"
+                android:layout_height="28dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_chip"
+                android:gravity="center"
+                android:minWidth="56dp"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:text="@string/order_asc"
+                android:textColor="@color/brand"
+                android:textSize="12sp" />
+        </LinearLayout>
 
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/rvEpisodes"

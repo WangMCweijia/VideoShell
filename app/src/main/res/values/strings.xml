@@ -63,6 +63,11 @@
     <string name="detail_info">影片信息</string>
     <string name="episode_count">共 %1$d 集</string>
     <string name="source_line">线路 %1$d</string>
+    <!-- 选集列表「顺序 / 倒序」开关：文案显示**当前**状态 -->
+    <string name="order_asc">正序</string>
+    <string name="order_desc">倒序</string>
+    <string name="order_hud_asc">选集：正序（第 1 集在前）</string>
+    <string name="order_hud_desc">选集：倒序（最后一集在前）</string>
 
     <string name="player_speed">倍速</string>
     <string name="player_episodes">选集</string>

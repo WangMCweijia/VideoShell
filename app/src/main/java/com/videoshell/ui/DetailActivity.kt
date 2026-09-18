@@ -209,7 +209,8 @@ class DetailActivity : AppCompatActivity() {
         if (d.groups.isEmpty()) {
             binding.tvSourceTitle.visibility = View.GONE
             binding.rvGroups.visibility = View.GONE
-            binding.tvEpisodeTitle.visibility = View.GONE
+            // 整行一起收（标题 + 切序按钮），否则会剩一个孤零零的「正序」按钮
+            binding.rowEpisodeHeader.visibility = View.GONE
             binding.rvEpisodes.visibility = View.GONE
             showState("该影片未解析到播放列表，可尝试网页嗅探")
             return
@@ -228,9 +229,30 @@ class DetailActivity : AppCompatActivity() {
         groupIndex = index
         groupAdapter.select(index)
         binding.tvEpisodeTitle.text = "选集 · 共 ${g.episodes.size} 集"
-        binding.tvEpisodeTitle.visibility = View.VISIBLE
+        binding.rowEpisodeHeader.visibility = View.VISIBLE
         binding.rvEpisodes.visibility = View.VISIBLE
-        episodeAdapter.submit(g.episodes)
+        showOrderButton()
+        submitEpisodes()
+    }
+
+    /** 显示当前排序状态（正序/倒序）；状态与播放器的选集面板共用 */
+    private fun showOrderButton() {
+        binding.tvOrder.text = getString(
+            if (Store.episodeDesc(this)) R.string.order_desc else R.string.order_asc
+        )
+        binding.tvOrder.setOnClickListener {
+            val desc = !Store.episodeDesc(this)
+            Store.setEpisodeDesc(this, desc)
+            showOrderButton()
+            submitEpisodes()
+            toast(if (desc) R.string.order_hud_desc else R.string.order_hud_asc)
+        }
+    }
+
+    /** 按当前偏好提交分集列表。回调里的 index 是**组内原始序号**，与显示顺序无关 */
+    private fun submitEpisodes() {
+        val g = detail?.groups?.getOrNull(groupIndex) ?: return
+        episodeAdapter.submit(g.episodes, Store.episodeDesc(this))
     }
 
     private fun playEpisode(index: Int, ep: Episode) {

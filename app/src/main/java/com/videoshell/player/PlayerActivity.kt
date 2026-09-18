@@ -13,6 +13,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.SeekBar
 import androidx.appcompat.app.AppCompatActivity
@@ -243,23 +244,47 @@ class PlayerActivity : AppCompatActivity() {
         applyOverlayInsets()
     }
 
-    /** 覆盖层（顶栏/底栏/选集面板/诊断面板）的原始 padding，只采样一次 */
-    private val overlayBase = HashMap<Int, IntArray>()
+    /** 覆盖层（顶栏/底栏/选集面板/诊断面板）的**原始** padding，只采样一次 */
+    private val overlayPadBase = HashMap<Int, IntArray>()
 
-    private fun overlayViews() =
-        listOf(binding.topBar, binding.bottomBar, binding.episodePanel, binding.diagPanel)
+    /** 靠 margin 让位的控件（固定高的底部面板 + 锁定按钮）的**原始** margin，只采样一次 */
+    private val overlayMarginBase = HashMap<Int, IntArray>()
+
+    private fun overlaySpecs(): List<Pair<View, Int>> = listOf(
+        binding.topBar to PlayerInsets.TOP,
+        binding.bottomBar to PlayerInsets.BOTTOM,
+        binding.episodePanel to PlayerInsets.BOTTOM,
+        binding.diagPanel to PlayerInsets.BOTTOM
+    )
+
+    /** 用 margin（而不是 padding）让位的控件：它们高度固定，吃 padding 会把内容挤扁 */
+    private fun marginViews() = listOf(binding.episodePanel, binding.diagPanel, binding.ivUnlock)
 
     /**
      * 把「挖孔 + 系统栏」的安全距离补给覆盖层，而不是缩画面。
      *
-     * 基线 padding 必须**只取一次**：监听器每次收到 inset 都会重设 padding，
+     * 基线 padding / margin 必须**只取一次**：监听器每次收到 inset 都会重设，
      * 在原始值上累加的话会越撑越大（这是这类代码最经典的自伤）。
+     *
+     * ⚠️ v1.0.28 修的坑：以前是**四条边一起补**。顶栏贴的是上边，却被同时加上
+     * top（挖孔/状态栏，真机上测得 ~40dp）与 bottom（导航栏）两笔内边距，
+     * 而它是固定 52dp 高 ⇒ 内容区被压成十几 dp，标题与图标只剩一条横带 ——
+     * 这就是用户反馈的「竖屏播放时顶部信息栏显示不全」。
+     * 现在按方位只补对应的一条边（见 [PlayerInsets]），固定高的底部面板改用 margin 让位，
+     * 顶栏在布局里改成 `wrap_content + minHeight`，让 padding 去**撑高**它而不是挤内容。
      */
     private fun applyOverlayInsets() {
-        if (overlayBase.isEmpty()) {
-            for (v in overlayViews()) {
-                overlayBase[v.id] = intArrayOf(
+        val specs = overlaySpecs()
+        if (overlayPadBase.isEmpty()) {
+            for ((v, _) in specs) {
+                overlayPadBase[v.id] = intArrayOf(
                     v.paddingStart, v.paddingTop, v.paddingEnd, v.paddingBottom
+                )
+            }
+            for (v in marginViews()) {
+                val lp = v.layoutParams as? ViewGroup.MarginLayoutParams ?: continue
+                overlayMarginBase[v.id] = intArrayOf(
+                    lp.marginStart, lp.topMargin, lp.marginEnd, lp.bottomMargin
                 )
             }
         }
@@ -267,9 +292,20 @@ class PlayerActivity : AppCompatActivity() {
             val c = insets.getInsets(
                 WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.systemBars()
             )
-            for (v in overlayViews()) {
-                val b = overlayBase[v.id] ?: continue
-                v.setPadding(b[0] + c.left, b[1] + c.top, b[2] + c.right, b[3] + c.bottom)
+            val ins = intArrayOf(c.left, c.top, c.right, c.bottom)
+            for ((v, edges) in specs) {
+                val b = overlayPadBase[v.id] ?: continue
+                val p = PlayerInsets.pad(b, ins, edges)
+                v.setPadding(p[0], p[1], p[2], p[3])
+            }
+            for (v in marginViews()) {
+                val b = overlayMarginBase[v.id] ?: continue
+                val lp = v.layoutParams as? ViewGroup.MarginLayoutParams ?: continue
+                lp.marginStart = b[0] + c.left
+                lp.topMargin = b[1] + c.top
+                lp.marginEnd = b[2] + c.right
+                lp.bottomMargin = b[3] + c.bottom
+                v.layoutParams = lp
             }
             insets
         }
@@ -705,8 +741,10 @@ class PlayerActivity : AppCompatActivity() {
         binding.tvPanelTitle.text = (PlayQueue.title.ifBlank { "选集" }) + " · 共 ${eps.size} 集"
         binding.rvEpisodes.layoutManager = GridLayoutManager(this, if (isLandscape()) 8 else 5)
         binding.rvEpisodes.adapter = episodeAdapter
-        episodeAdapter.submit(eps)
-        episodeAdapter.select(PlayQueue.episodeIndex)
+        // 显示顺序（正序/倒序）与详情页共用同一个偏好；选中态永远是**组内原始序号**
+        binding.tvOrder.text = getString(if (Store.episodeDesc(this)) R.string.order_desc else R.string.order_asc)
+        binding.tvOrder.setOnClickListener { toggleEpisodeOrder() }
+        submitEpisodes()
         binding.btnEpisodes.setOnClickListener {
             val show = binding.episodePanel.visibility != View.VISIBLE
             binding.episodePanel.visibility = if (show) View.VISIBLE else View.GONE
@@ -717,6 +755,22 @@ class PlayerActivity : AppCompatActivity() {
                 scheduleHide()
             }
         }
+    }
+
+    /** 按当前偏好提交分集列表，并把正在播的那一集标出来 */
+    private fun submitEpisodes() {
+        episodeAdapter.submit(PlayQueue.episodes(), Store.episodeDesc(this))
+        episodeAdapter.select(PlayQueue.episodeIndex)
+    }
+
+    private fun toggleEpisodeOrder() {
+        val desc = !Store.episodeDesc(this)
+        Store.setEpisodeDesc(this, desc)
+        binding.tvOrder.text = getString(if (desc) R.string.order_desc else R.string.order_asc)
+        submitEpisodes()
+        showHud(getString(if (desc) R.string.order_hud_desc else R.string.order_hud_asc))
+        // 换了顺序，列表从头看起更顺（选中项可能已经跑到很后面）
+        binding.rvEpisodes.scrollToPosition(0)
     }
 
     private fun stepEpisode(delta: Int) {
