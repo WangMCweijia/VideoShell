@@ -20,7 +20,13 @@ object HtmlTemplates {
         Regex("vod/detail/id/(\\d+)"),
         Regex("vodplay/(\\d+)"),
         Regex("/show/(\\d+)"),
-        Regex("/vodplay/[\\w-]*-\\d+-\\d+")
+        Regex("/vodplay/[\\w-]*-\\d+-\\d+"),
+        // WordPress 系：`/archives/{id}/`、`/index.php/archives/{id}/`（v1.0.25 指纹扩充）
+        Regex("/archives/(\\d+)"),
+        // 自研站常见的 `/{目录}/{id}/` 详情形态由 tplFromNumericSegment 兜，
+        // 这里补两条与分类页不冲突的强形状
+        Regex("/video/(\\d+)/?$"),
+        Regex("/vod/detail/(\\d+)")
     )
 
     /**
@@ -353,19 +359,36 @@ object HtmlTemplates {
         return if (path.startsWith("/")) path else "/$path"
     }
 
+    /**
+     * 列表（分类）页候选。
+     *
+     * v1.0.25 指纹扩充：把国内主流 CMS 的分类页形状都排进来 ——
+     * maccms10（苹果CMS，`vodshow` / `index.php/vod/show`）、海洋 CMS seacms（`/list/{id}-{page}.html`）、
+     * 飞飞 / 苹果 CMS 的 `vodtype`、WordPress 视频主题（`/category/{slug}/page/{n}/`）。
+     * 命中顺序无所谓（逐个真抓，谁有卡片用谁），关键是**别漏**。
+     */
     fun listCandidates(base: String): List<String> = listOf(
         "$base/vodshow/{id}--------{page}---.html",
+        "$base/vodshow/{id}---{page}---.html",
         "$base/index.php/vod/show/id/{id}/page/{page}.html",
         "$base/vodshow/id/{id}.html",
         "$base/vodshow/{id}/page/{page}.html",
         "$base/vodtype/{id}-{page}.html",
         "$base/vodshow/{id}---{page}.html",
         "$base/index.php/vod/type/id/{id}/page/{page}.html",
+        "$base/index.php/vod/type/id/{id}.html",
         "$base/vod/{id}.html",
         "$base/list/{id}-{page}.html",
-        "$base/vod/{id}/page/{page}.html"
+        "$base/list/{id}.html",
+        "$base/vod/{id}/page/{page}.html",
+        "$base/type/{id}-{page}.html",
+        "$base/index.php/vod/show/{id}--------{page}---.html",
+        "$base/category/{id}/page/{page}/"
     )
 
+    /**
+     * 详情页候选（v1.0.25 扩充 WP / seacms / 自研形态）。
+     */
     fun detailCandidates(base: String): List<String> = listOf(
         "$base/voddetail/{id}.html",
         "$base/detail/{id}.html",
@@ -376,7 +399,10 @@ object HtmlTemplates {
         // WordPress 系常见路径（列表页学不到模板时的兜底）
         "$base/movie/{id}.html",
         "$base/film/{id}.html",
-        "$base/video/{id}.html"
+        "$base/video/{id}.html",
+        "$base/archives/{id}/",
+        "$base/index.php/archives/{id}/",
+        "$base/item/{id}.html"
     )
 
     /**
@@ -394,6 +420,11 @@ object HtmlTemplates {
         "$base/play/{id}-1-1/"
     )
 
+    /**
+     * 搜索候选（v1.0.25 指纹扩充）：
+     * maccms10 `vodsearch/wd/{kw}`、海洋 CMS `search.php?searchword=`、苹果CMS index.php 形态、
+     * WordPress `?s={kw}`、以及自研站的 query 形态。
+     */
     fun searchCandidates(base: String): List<String> = listOf(
         "$base/vodsearch/wd/{kw}.html",
         "$base/vodsearch/{kw}-------------.html",
@@ -405,7 +436,12 @@ object HtmlTemplates {
         "$base/s----------.html?wd={kw}",
         "$base/search.html?wd={kw}",
         "$base/search.php?searchword={kw}",
-        "$base/search?keyword={kw}"
+        "$base/index.php?m=vod-search&wd={kw}",
+        "$base/vodsearch/{kw}/page/1.html",
+        "$base/search?keyword={kw}",
+        "$base/?s={kw}",
+        "$base/search?q={kw}",
+        "$base/search?wd={kw}"
     )
 
     /**

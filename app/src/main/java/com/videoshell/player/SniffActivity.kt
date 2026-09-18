@@ -25,6 +25,8 @@ import com.google.gson.reflect.TypeToken
 import com.videoshell.R
 import com.videoshell.data.net.Http
 import com.videoshell.data.net.NetLog
+import com.videoshell.data.site.JxParser
+import com.videoshell.data.site.SniffSession
 import com.videoshell.databinding.ActivitySniffBinding
 import com.videoshell.ui.adapter.CandidateAdapter
 import com.videoshell.util.toast
@@ -108,6 +110,9 @@ class SniffActivity : AppCompatActivity() {
     private var probeRounds = 0
     private var probing = false
     private var textProbed = false
+
+    /** ③ jx 解析接口只试一次 */
+    private var jxTried = false
 
     /** 「没抓到候选」的原因只记一次，别把播放记录刷满 */
     private var loggedOneShot = false
@@ -232,6 +237,8 @@ class SniffActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 injectHook()
                 binding.webView.alpha = if (webVisible) 1f else 0f
+                // 会话记忆：把'这个站该带什么 Referer'留下，播放/解析复用（换集、从历史进来都受益）
+                SniffSession.remember(pageUrl, pageUrl, Http.UA)
             }
         }
     }
@@ -283,6 +290,15 @@ class SniffActivity : AppCompatActivity() {
                 for (item in parseJs(value)) {
                     val p = item.lastIndexOf('|')
                     if (p <= 0) offer(item) else offer(item.substring(0, p))
+                }
+            }
+        }
+        // ② 嗅探增强：资源时间线 + 内联脚本里的地址（很多站把 m3u8 写在 <script> 的配置对象里，
+        // 既不 fetch 也不进 video 标签，以前抓不到）
+        if (ticks % 3 == 0) {
+            runCatching {
+                binding.webView.evaluateJavascript(PERF_JS) { value ->
+                    for (item in parseJs(value)) offer(item)
                 }
             }
         }
@@ -339,6 +355,7 @@ class SniffActivity : AppCompatActivity() {
         if (autoPlayed) return
         if (candidates.isEmpty()) {
             maybeDetectLoginWall()
+            maybeFollowJx()
             return
         }
         if (firstSeenAt == 0L) return
@@ -437,6 +454,31 @@ class SniffActivity : AppCompatActivity() {
         return runCatching { (JSONTokener(v).nextValue() as? String).orEmpty() }.getOrDefault("")
     }
 
+    /**
+     * ③ 解析接口（jx）跟随：页面里只有 iframe 指向解析接口时，
+     * 直接把接口地址扒出来 GET 一次，很多时候一次就拿到 m3u8，不必等页面把流跑起来。
+     */
+    private fun maybeFollowJx() {
+        if (jxTried || ticks < 6) return
+        jxTried = true
+        runCatching {
+            binding.webView.evaluateJavascript(DOM_JS) { value ->
+                val html = jsonString(value)
+                if (html.isBlank()) return@evaluateJavascript
+                val jx = JxParser.findJxUrl(html) ?: return@evaluateJavascript
+                lifecycleScope.launch {
+                    val stream = JxParser.follow(jx, pageUrl)
+                    if (!stream.isNullOrBlank()) {
+                        SniffSession.remember(pageUrl, pageUrl)
+                        offer(stream)
+                        PlayLog.record("jx 解析接口命中：${PlayLog.shortenPublic(jx)}")
+                        updateStatus()
+                    }
+                }
+            }
+        }
+    }
+
     private fun copyReport() {
         val sb = StringBuilder()
         sb.appendLine("===== 嗅探报告 =====")
@@ -482,8 +524,9 @@ class SniffActivity : AppCompatActivity() {
         )
 
         val h = HashMap<String, String>()
-        h.putAll(pageHeaders)
+        h.putAll(SniffSession.enrich(c.url, pageHeaders))
         if (h.keys.none { it.equals("Referer", true) } && pageUrl.isNotBlank()) h["Referer"] = pageUrl
+        SniffSession.remember(pageUrl, h["Referer"] ?: pageUrl, h["User-Agent"] ?: Http.UA)
 
         startActivity(
             PlayerActivity.intent(
@@ -542,6 +585,7 @@ class SniffActivity : AppCompatActivity() {
               if (window.__vsFound.length > 60) window.__vsFound.splice(0, 20);
             } catch(e){}
           }
+          window.__vsPush = push;
           try {
             var _open = XMLHttpRequest.prototype.open;
             XMLHttpRequest.prototype.open = function(m, u){ push(u); return _open.apply(this, arguments); };
@@ -560,6 +604,23 @@ class SniffActivity : AppCompatActivity() {
               var v = e.target; if (v && v.tagName === 'VIDEO' && v.currentSrc) push(v.currentSrc);
             }, true);
           } catch(e){}
+          // ② MediaSource：走 MSE 的站（自研播放器、hls.js）只喂 blob 分片，
+          // 但 addSourceBuffer 的 mime 与后续 appendBuffer 的时长能证明'这个 blob 在被播放'；
+          // 真正有用的是下面 URL.createObjectURL 的入参来源 —— 这里挂钩只为留下播放发生过的痕迹。
+          try {
+            if (window.MediaSource && MediaSource.prototype.addSourceBuffer) {
+              var _add = MediaSource.prototype.addSourceBuffer;
+              MediaSource.prototype.addSourceBuffer = function(m){ window.__vsMse = String(m); return _add.apply(this, arguments); };
+            }
+          } catch(e){}
+          // ② JSON.parse：加密接口把结果解密成 JSON 后立刻 parse，这里顺手扫一遍字符串值
+          try {
+            var _parse = JSON.parse;
+            JSON.parse = function(s){
+              try { window.__vsPush(s); } catch(e){}
+              return _parse.apply(this, arguments);
+            };
+          } catch(e){}
           setInterval(function(){
             try {
               var vs = document.querySelectorAll('video, source');
@@ -575,7 +636,41 @@ class SniffActivity : AppCompatActivity() {
     private val COLLECT_JS =
         "(function(){var a=window.__vsFound||[];window.__vsFound=[];return JSON.stringify(a);})()"
 
+    /**
+     * ② 嗅探增强：两处补充来源
+     * 1. `performance.getEntriesByType('resource')` —— 浏览器自己记的完整资源时间线，
+     *    比我们挂钩子更全（含 hook 之前就发出的请求）；
+     * 2. 页面内联网脚本文本里的媒体地址（`<script>` 配置对象、内联 JSON）。
+     */
+    private val PERF_JS = """
+        (function(){
+          var out = [];
+          try {
+            var es = performance.getEntriesByType('resource') || [];
+            for (var i = 0; i < es.length; i++){
+              var n = es[i].name || '';
+              if (n.indexOf('.m3u8') >= 0 || n.indexOf('.mp4') >= 0 || n.indexOf('.flv') >= 0 || n.indexOf('.ts') >= 0) out.push(n);
+            }
+          } catch(e){}
+          try {
+            var ss = document.querySelectorAll('script:not([src])');
+            var re = /https?:\/\/[^"'\s\\<>]+?\.(?:m3u8|mp4|flv)[^"'\s\\<>]*/g;
+            for (var j = 0; j < ss.length; j++){
+              var t = ss[j].textContent || '';
+              if (t.indexOf('m3u8') < 0 && t.indexOf('.mp4') < 0) continue;
+              var m; var c = 0;
+              while ((m = re.exec(t)) !== null && c < 5){ out.push(m[0]); c++; }
+            }
+          } catch(e){}
+          return JSON.stringify(out.slice(0, 40));
+        })()
+    """
+
     /** 页面可见文字（截断）—— 只在"一个候选都没有"时用，判断是不是登录墙 */
     private val TEXT_JS =
         "(function(){try{return document.body?document.body.innerText.slice(0,1200):''}catch(e){return ''}})()"
+
+    /** 整页 HTML —— 只在没有候选时取一次，用来找 jx 解析接口地址 */
+    private val DOM_JS =
+        "(function(){try{return document.documentElement?document.documentElement.outerHTML:''}catch(e){return ''}})()"
 }

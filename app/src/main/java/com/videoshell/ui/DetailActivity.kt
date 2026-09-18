@@ -144,7 +144,18 @@ class DetailActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val a = adapter ?: return@launch
             val res = runCatching { a.detail(id) }
-            val d = res.getOrNull()
+            var d = res.getOrNull()
+
+            // ⑥ 预渲染兜底（v1.0.25）：首屏 HTML 里没有分集（JS 渲染站）时，
+            // 用 WebView 真跑一遍详情页，再把渲染后的 DOM 交回适配器解析。
+            if (d == null) {
+                val url = a.detailUrlFor(id)
+                if (!url.isNullOrBlank()) {
+                    val html = WebRender.html(this@DetailActivity, url)
+                    if (!html.isNullOrBlank()) d = a.parseDetailFromHtml(html)
+                }
+            }
+
             binding.pb.visibility = View.GONE
             if (d == null) {
                 val why = res.exceptionOrNull()?.message?.takeIf { it.isNotBlank() }

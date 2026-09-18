@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- API 23+ 且暗色：深色底 → 状态栏图标保持浅色 -->
+<resources>
+    <style name="Theme.VideoShell" parent="Theme.VideoShell.Base">
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <style name="Theme.VideoShell.Player" parent="Theme.VideoShell">
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

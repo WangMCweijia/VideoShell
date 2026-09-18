@@ -577,9 +577,103 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
             seenIds.clear()
         }
         val list = fetchList(urls, page)
+        // ⑤ 失败自动校准（v1.0.25）：首屏一条都解析不出来时，自己在站内探一遍 ——
+        // 学详情/分类形状、真抓几个分类页，谁有卡片就把列表模板固化下来。
+        // 用户端表现：以前要点「重学本站」或手动进校准，现在第一次进站自愈。
+        if (list.isEmpty() && page <= 1 && !autoHealed) {
+            autoHealed = true
+            autoHeal()?.let { healed ->
+                diag = "自动校准生效：${diag}".trim()
+                return healed
+            }
+        }
         // 空 id = 「最新」= 站点首页。首页拿不到封面时改用真分类页，见 substituteHome。
         if (ref.isEmpty() && page <= 1) substituteHome(list)?.let { return it }
         return list
+    }
+
+    // ------------------------------------------------------------------ v1.0.25：自愈 + 预渲染
+
+    /** 自动校准只跑一次（同一实例内），避免每次翻页都探测一遍 */
+    private var autoHealed = false
+
+    /**
+     * ⑤ 失败自动校准：解析拿不到东西时，站内自己探一轮。
+     * @return 探到的列表；什么都没探到返回 null（调用方照常报错）
+     */
+    private suspend fun autoHeal(): List<VideoItem>? {
+        // 1) 首页：能学的形状（详情模板 / 分类形状 / 结构判定）全学一遍
+        val homeHtml = runCatching { fetch(site.baseUrl) }.getOrNull() ?: return null
+        val home = Jsoup.parse(homeHtml, site.baseUrl)
+        rememberShape(home)
+        learnDetailTpl(home)
+
+        // 2) 候选分类页：先问解析出来的分类，没有就退回模板候选
+        val navCands = runCatching { categories() }.getOrDefault(emptyList())
+            .map { abs(it.id) }
+            .filter { it.startsWith("http") }
+            .distinct()
+        val cands = (navCands.ifEmpty {
+            HtmlTemplates.listCandidates(root).map { build(it, id = "1", page = 1) }
+        }).take(4)
+
+        for (c in cands) {
+            val html = runCatching { fetch(c) }.getOrNull() ?: continue
+            val doc = Jsoup.parse(html, site.baseUrl)
+            val items = HtmlExtractor.parseList(doc, site.baseUrl, vodIsCategory, html)
+            if (items.size < 5) continue
+            rememberShape(doc)
+            learnDetailTpl(doc)
+            val tpl = guessTpl(c, 1)
+            if (tpl != null && tpl != listTpl) {
+                listTpl = tpl
+                RecipeStore.update(site.baseUrl) { it.copy(listTpl = tpl) }
+            }
+            diag = "自动校准：改用 $c（${items.size} 条）"
+            return accept(items, 1)
+        }
+        return null
+    }
+
+    // ------------------------------------------------------------------ 预渲染兜底（供 UI 层回调）
+
+    /** HTML 解析器才吃「预渲染兜底」：数据本来就该在 DOM 里，只是需要 JS 跑一遍 */
+    override val supportsWebRender: Boolean get() = true
+
+    /** 用已渲染好的 HTML 解析列表（WebView 预渲染兜底） */
+    override fun parseListFromHtml(html: String, page: Int): List<VideoItem> {
+        val doc = Jsoup.parse(html, site.baseUrl)
+        rememberShape(doc)
+        learnDetailTpl(doc)
+        val items = HtmlExtractor.parseList(doc, site.baseUrl, vodIsCategory, html)
+        if (items.isEmpty()) return emptyList()
+        diag = "预渲染兜底解析到 ${items.size} 条"
+        return accept(items, page) ?: emptyList()
+    }
+
+    /** 用已渲染好的 HTML 解析详情（WebView 预渲染兜底） */
+    override fun parseDetailFromHtml(html: String): VideoDetail? {
+        val doc = Jsoup.parse(html, site.baseUrl)
+        lastDetailDoc = doc
+        val groups = HtmlExtractor.parseGroups(doc, site.baseUrl)
+        if (groups.isEmpty()) return null
+        tr("预渲染兜底：解析到 ${groups.size} 条线路")
+        return buildDetail("", doc, groups)
+    }
+
+    override fun searchUrlFor(keyword: String, page: Int): String? =
+        ordered(searchTpl, HtmlTemplates.searchCandidates(root))
+            .firstOrNull()?.let { build(it, kw = keyword, page = page) }
+
+    override fun browseUrlFor(typeId: String, page: Int): String? =
+        browseUrls(typeId, page).firstOrNull()
+
+    /** 详情页地址：配方/学到的模板优先，其次候选模板里最像的那条 */
+    override fun detailUrlFor(id: String): String? {
+        if (id.isBlank()) return null
+        val tpl = detailTpl ?: learnedDetailTpl
+        if (!tpl.isNullOrBlank()) return build(tpl, id = id)
+        return HtmlTemplates.detailCandidates(root).firstOrNull()?.let { build(it, id = id) }
     }
 
     private suspend fun browseCat(cat: String, page: Int): List<VideoItem> {

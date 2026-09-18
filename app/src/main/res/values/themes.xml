@@ -1,6 +1,12 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
 
-    <style name="Theme.VideoShell" parent="Theme.MaterialComponents.NoActionBar">
+    <!--
+      主题基类：亮/暗只差颜色资源（values/colors.xml 与 values-night/colors.xml），
+      状态栏图标明暗由 values-v23 / values-night-v23 覆盖同名 style 决定 ——
+      亮色底要深色图标（windowLightStatusBar=true），暗色底要浅色图标（false）。
+      不这么拆的话，亮色模式下会出现「白底白字」的状态栏（用户实测反馈）。
+    -->
+    <style name="Theme.VideoShell.Base" parent="Theme.MaterialComponents.NoActionBar">
         <item name="colorPrimary">@color/brand</item>
         <item name="colorPrimaryVariant">@color/brand_dark</item>
         <item name="colorOnPrimary">@color/white</item>
@@ -17,6 +23,8 @@
         <item name="android:textColorSecondary">@color/text_secondary</item>
         <item name="android:textColorHint">@color/text_hint</item>
     </style>
+
+    <style name="Theme.VideoShell" parent="Theme.VideoShell.Base" />
 
     <style name="Theme.VideoShell.Player" parent="Theme.VideoShell">
         <item name="android:windowBackground">@color/black</item>

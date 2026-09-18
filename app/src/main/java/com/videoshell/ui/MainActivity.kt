@@ -4,17 +4,17 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.view.inputmethod.EditorInfo
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.videoshell.R
 import com.videoshell.data.Store
 import com.videoshell.data.model.SiteConfig
+import com.videoshell.data.model.VideoItem
 import com.videoshell.data.net.Http
 import com.videoshell.data.site.Media
 import com.videoshell.data.site.SiteDetector
@@ -22,18 +22,23 @@ import com.videoshell.databinding.ActivityMainBinding
 import com.videoshell.player.PlayerActivity
 import com.videoshell.player.SniffActivity
 import com.videoshell.ui.adapter.SiteListAdapter
-import com.videoshell.ui.adapter.VideoAdapter
 import com.videoshell.util.toast
 import kotlinx.coroutines.launch
 
 /**
  * 主界面：底部三 Tab。
- * 首页 = 默认站源内容直达；站源 = 添加入口 + 站点管理；我的 = 历史/收藏/播放设置/外观。
+ * - 首页 = **默认站源的浏览器**（分类 + 搜索 + 网格，与二级站源页同一套视图与逻辑）
+ * - 站源 = 添加入口 + 站点管理（点击进入 / 长按改名 / ★ 设默认 / 删除）
+ * - 我的 = 播放历史、收藏、播放设置、外观（自动暗色）
  */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
+    private lateinit var browserHome: SiteBrowser
     private var pendingPageUrl: String = ""
+
+    /** 首页当前绑定的站点 key（避免每次 onResume 都重新拉一遍分类） */
+    private var homeKeyBound: String = ""
 
     private val siteAdapter = SiteListAdapter(
         onClick = { openSite(it) },
@@ -41,7 +46,14 @@ class MainActivity : AppCompatActivity() {
         onLongClick = { renameSite(it) },
         onSetDefault = { setDefaultSite(it) }
     )
-    private val homeAdapter = VideoAdapter { openDetail(it) }
+
+    /** 首页里的「校准」入口：回来后配方变了，浏览器得重来一遍 */
+    private val calibLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { res ->
+        if (res.resultCode != RESULT_OK) return@registerForActivityResult
+        browserHome.onCalibReturned()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,11 +63,14 @@ class MainActivity : AppCompatActivity() {
         binding.tvVersion.text = "v" + versionName()
         binding.tvVersionMine.text = "v" + versionName()
 
-        // ---- 首页：默认站源内容 ----
-        binding.rvHome.layoutManager = GridLayoutManager(this, 3)
-        binding.rvHome.adapter = homeAdapter
-        binding.tvHomeState.setOnClickListener { loadHomeContent() }
-        binding.tvHomeChange.setOnClickListener { binding.bottomNav.selectedItemId = R.id.nav_sites }
+        // ---- 首页：默认站源浏览器 ----
+        browserHome = SiteBrowser(
+            act = this,
+            b = binding.browserHome,
+            launchCalib = { key -> calibLauncher.launch(CalibrateActivity.intent(this, key)) },
+            onOpenDetail = { key, item -> openDetail(key, item) }
+        )
+        browserHome.setup(showBack = false) { }
 
         // ---- 站源：添加入口 ----
         binding.btnDetect.setOnClickListener { detect() }
@@ -90,16 +105,11 @@ class MainActivity : AppCompatActivity() {
         binding.swResume.setOnCheckedChangeListener { _, checked ->
             sp.edit().putBoolean("setting_resume", checked).apply()
         }
-        binding.swDark.isChecked = sp.getBoolean("setting_dark", true)
+        // 自动暗色：开 = 跟随系统；关 = 固定亮色
+        binding.swDark.isChecked = sp.getBoolean(KEY_AUTO_DARK, true)
         binding.swDark.setOnCheckedChangeListener { _, checked ->
-            sp.edit().putBoolean("setting_dark", checked).apply()
-            AppCompatDelegate.setDefaultNightMode(
-                if (checked) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO
-            )
-        }
-        binding.swLaunchDirect.isChecked = sp.getBoolean(KEY_LAUNCH_DIRECT, false)
-        binding.swLaunchDirect.setOnCheckedChangeListener { _, checked ->
-            sp.edit().putBoolean(KEY_LAUNCH_DIRECT, checked).apply()
+            sp.edit().putBoolean(KEY_AUTO_DARK, checked).apply()
+            applyNightMode(checked)
         }
 
         // ---- 底部导航 ----
@@ -112,18 +122,21 @@ class MainActivity : AppCompatActivity() {
             true
         }
         showPage(PAGE_HOME)
-
-        // 启动直达默认站源（「我的」里可开关）
-        val direct = sp.getBoolean(KEY_LAUNCH_DIRECT, false)
-        if (direct && savedInstanceState == null) {
-            Store.defaultSite(this)?.let { openSite(it) }
-        }
     }
 
     override fun onResume() {
         super.onResume()
         refresh()
-        loadHomeContent()
+        bindHome()
+    }
+
+    // ------------------------------------------------------------------ 暗色
+
+    private fun applyNightMode(auto: Boolean) {
+        AppCompatDelegate.setDefaultNightMode(
+            if (auto) AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+            else AppCompatDelegate.MODE_NIGHT_NO
+        )
     }
 
     // ------------------------------------------------------------------ 页面切换
@@ -140,46 +153,26 @@ class MainActivity : AppCompatActivity() {
             }
         )
         if (page == PAGE_SITES) refresh()
+        if (page == PAGE_HOME) bindHome()
     }
 
-    // ------------------------------------------------------------------ 首页：默认站源内容
+    // ------------------------------------------------------------------ 首页：默认站源
 
-    private fun loadHomeContent() {
+    private fun bindHome(force: Boolean = false) {
         val site = Store.defaultSite(this)
         if (site == null) {
-            binding.tvHomeSite.visibility = View.GONE
-            binding.tvHomeChange.visibility = View.GONE
-            homeAdapter.clear()
-            showHomeState(getString(R.string.home_empty_default), visible = true)
+            homeKeyBound = ""
+            browserHome.showNoSite()
             return
         }
-        binding.tvHomeSite.visibility = View.VISIBLE
-        binding.tvHomeSite.text = getString(R.string.home_default_fmt, site.name.ifBlank { site.baseUrl })
-        binding.tvHomeChange.visibility = View.VISIBLE
-        showHomeState(null, visible = false)
-        lifecycleScope.launch {
-            val res = runCatching {
-                com.videoshell.data.site.AdapterFactory.create(site).browse("", 1)
-            }
-            val items = res.getOrElse { emptyList() }.take(24)
-            if (items.isEmpty()) {
-                homeAdapter.clear()
-                showHomeState(getString(R.string.home_load_fail), visible = true)
-            } else {
-                showHomeState(null, visible = false)
-                homeAdapter.submit(items, false)
-            }
+        if (force || site.key != homeKeyBound) {
+            homeKeyBound = site.key
+            browserHome.bindSite(site, force = true)
         }
     }
 
-    private fun showHomeState(msg: String?, visible: Boolean) {
-        binding.tvHomeState.text = msg.orEmpty()
-        binding.tvHomeState.visibility = if (visible) View.VISIBLE else View.GONE
-    }
-
-    private fun openDetail(item: com.videoshell.data.model.VideoItem) {
-        val site = Store.defaultSite(this) ?: return
-        startActivity(DetailActivity.intent(this, site.key, item))
+    private fun openDetail(key: String, item: VideoItem) {
+        startActivity(DetailActivity.intent(this, key, item))
     }
 
     // ------------------------------------------------------------------ 站源管理
@@ -194,7 +187,7 @@ class MainActivity : AppCompatActivity() {
     private fun setDefaultSite(site: SiteConfig) {
         Store.setDefault(this, site.key)
         refresh()
-        loadHomeContent()
+        bindHome(force = true)
         toast(getString(R.string.set_default_done))
     }
 
@@ -215,7 +208,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 Store.rename(this, site.key, name)
                 refresh()
-                loadHomeContent()
+                bindHome(force = true)
                 toast(getString(R.string.site_rename_done))
             }
             .setNegativeButton(R.string.cancel, null)
@@ -230,7 +223,7 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton(getString(R.string.ok)) { _, _ ->
                 Store.remove(this, site.key)
                 refresh()
-                loadHomeContent()
+                bindHome(force = true)
             }
             .show()
     }
@@ -324,7 +317,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val SP = "videoshell"
-        private const val KEY_LAUNCH_DIRECT = "launch_direct"
+        private const val KEY_AUTO_DARK = "setting_dark_auto"
         private const val PAGE_HOME = 0
         private const val PAGE_SITES = 1
         private const val PAGE_MINE = 2

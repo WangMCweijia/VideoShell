@@ -35,7 +35,7 @@
     <string name="sw_auto_orient">画面自动横竖屏</string>
     <string name="sw_auto_next">自动连播下一集</string>
     <string name="sw_resume">记住播放进度</string>
-    <string name="sw_dark">暗色模式</string>
+    <string name="sw_dark">自动暗色（跟随系统）</string>
     <string name="fav">收藏</string>
     <string name="fav_added">已加入收藏</string>
     <string name="fav_removed">已取消收藏</string>

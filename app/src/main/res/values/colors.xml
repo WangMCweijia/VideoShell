@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 亮色（默认关掉暗色模式时用；暗色值在 values-night/colors.xml） -->
-    <color name="bg">#FFF4F6F9</color>
+    <!-- 亮色（自动暗色关闭 / 系统为浅色时用；暗色值在 values-night/colors.xml） -->
+    <color name="bg">#FFF3F5F8</color>
     <color name="surface">#FFFFFFFF</color>
-    <color name="surface_2">#FFEDF0F5</color>
-    <color name="line">#FFE1E6ED</color>
-    <color name="brand">#FF3D7FFB</color>
-    <color name="brand_dark">#FF2F66CC</color>
-    <color name="text_primary">#FF171B22</color>
-    <color name="text_secondary">#FF596470</color>
-    <color name="text_hint">#FF9AA4B0</color>
+    <color name="surface_2">#FFEAEEF4</color>
+    <color name="line">#FFD8DEE7</color>
+    <color name="brand">#FF2F6FE4</color>
+    <color name="brand_dark">#FF2559B8</color>
+    <color name="text_primary">#FF16191F</color>
+    <color name="text_secondary">#FF4E5866</color>
+    <color name="text_hint">#FF7C8797</color>
     <color name="white">#FFFFFFFF</color>
     <color name="black">#FF000000</color>
     <color name="transparent_scrim">#99000000</color>

@@ -22,9 +22,21 @@ import com.videoshell.data.model.SiteConfig
  * 并且那次播放**真的成功了**。这是比 `apiMode` 强得多的证据，必须压过它。
  * 典型触发场景：站点先被识别成有采集接口、后来接口被站方关掉（返回 `closed`），
  * 或用户把站点删掉重加了一遍 —— 两种情况都会让 apiMode 变回 maccms。
+ *
+ * ## v1.0.25：加密接口白名单**最优先**
+ *
+ * 有一类站把接口响应整体 AES 加密（[CryptRecipes]），HTML 模式与采集模式**都取不到数据**：
+ * 抓页面只有 SEO 占位、抓接口拿到密文。对这类站，我们手上的「密钥配方」是**实测出来的硬知识**，
+ * 比形状识别和人工校准都更准确 —— 所以命中白名单就直接用专用适配器，其余路径全部让开。
+ *
+ * 顺序：**加密白名单 → 人工校准 → apiMode**。
  */
 object AdapterFactory {
     fun create(site: SiteConfig): SiteAdapter {
+        // 加密接口站：白名单命中即生效（密钥与算法见 CryptRecipes 的实测表）
+        CryptRecipes.forUrl(site.baseUrl)?.let { recipe ->
+            return YeguoAdapter(site, recipe)
+        }
         // 人工校准过 ⇒ 网页解析被真实验证过 ⇒ 不允许被采集接口模式绕过
         val r = RecipeStore.load(site.baseUrl)
         if (r != null && r.calibAt > 0L) return HtmlAdapter(site)

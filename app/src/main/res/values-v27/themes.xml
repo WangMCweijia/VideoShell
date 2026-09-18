@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- API 27+：亮色底 → 状态栏 + 导航栏图标都用深色 -->
+<resources>
+    <style name="Theme.VideoShell" parent="Theme.VideoShell.Base">
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+
+    <style name="Theme.VideoShell.Player" parent="Theme.VideoShell">
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>

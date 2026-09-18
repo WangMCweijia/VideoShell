@@ -51,52 +51,18 @@
         android:layout_height="0dp"
         android:layout_weight="1">
 
-        <!-- ======================= 首页：默认站源内容直达 ======================= -->
+        <!-- ======================= 首页：默认站源浏览（分类+搜索，与二级站源页同一套视图） ======================= -->
         <LinearLayout
             android:id="@+id/pageHome"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:orientation="vertical">
 
-            <LinearLayout
+            <include
+                android:id="@+id/browserHome"
+                layout="@layout/view_site_browser"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="18dp"
-                android:layout_marginTop="4dp"
-                android:layout_marginEnd="14dp"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <TextView
-                    android:id="@+id/tvHomeSite"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:textColor="@color/text_primary"
-                    android:textSize="14sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/tvHomeChange"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:padding="6dp"
-                    android:text="@string/nav_sites"
-                    android:textColor="@color/brand"
-                    android:textSize="12sp" />
-            </LinearLayout>
-
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/rvHome"
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_marginTop="6dp"
-                android:layout_weight="1"
-                android:clipToPadding="false"
-                android:paddingStart="14dp"
-                android:paddingTop="2dp"
-                android:paddingEnd="14dp"
-                android:paddingBottom="20dp" />
+                android:layout_height="match_parent" />
 
             <TextView
                 android:id="@+id/tvHomeState"
@@ -156,8 +122,13 @@
                         android:layout_width="0dp"
                         android:layout_height="44dp"
                         android:layout_weight="1"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:minWidth="0dp"
+                        android:maxLines="1"
                         android:text="@string/btn_detect"
-                        android:textSize="14sp" />
+                        android:textSize="14sp"
+                        app:cornerRadius="10dp" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnSniff"
@@ -168,9 +139,12 @@
                         android:layout_weight="1"
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
+                        android:minWidth="0dp"
+                        android:maxLines="1"
                         android:text="@string/btn_sniff"
                         android:textColor="@color/text_primary"
                         android:textSize="14sp"
+                        app:cornerRadius="10dp"
                         app:strokeColor="@color/line" />
                 </LinearLayout>
 
@@ -457,34 +431,6 @@
 
                         <com.google.android.material.switchmaterial.SwitchMaterial
                             android:id="@+id/swDark"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
-                    </LinearLayout>
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="0.5dp"
-                        android:background="@color/line" />
-
-                    <LinearLayout
-                        android:id="@+id/rowLaunchDirect"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:background="?android:attr/selectableItemBackground"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:padding="14dp">
-
-                        <TextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="@string/launch_direct"
-                            android:textColor="@color/text_primary"
-                            android:textSize="14sp" />
-
-                        <com.google.android.material.switchmaterial.SwitchMaterial
-                            android:id="@+id/swLaunchDirect"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content" />
                     </LinearLayout>

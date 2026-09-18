@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- API 23+：亮色底 → 状态栏图标用深色，避免"白底白字" -->
+<resources>
+    <style name="Theme.VideoShell" parent="Theme.VideoShell.Base">
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
+    <!-- 播放器永远黑底：图标必须保持浅色 -->
+    <style name="Theme.VideoShell.Player" parent="Theme.VideoShell">
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

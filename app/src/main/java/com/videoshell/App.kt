@@ -11,11 +11,12 @@ class App : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         instance = this
-        // 暗色模式（默认开，跟随「我的」里的开关）
-        val dark = getSharedPreferences("videoshell", MODE_PRIVATE)
-            .getBoolean("setting_dark", true)
+        // 自动暗色（默认开）：开 = 跟随系统深浅色；关 = 固定亮色
+        val auto = getSharedPreferences("videoshell", MODE_PRIVATE)
+            .getBoolean("setting_dark_auto", true)
         AppCompatDelegate.setDefaultNightMode(
-            if (dark) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO
+            if (auto) AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+            else AppCompatDelegate.MODE_NIGHT_NO
         )
     }
 

@@ -17,6 +17,24 @@ object Media {
     private val KEY_URL = Regex("\"url\"\\s*:\\s*\"([^\"]+)\"", RegexOption.IGNORE_CASE)
     private val KEY_URL2 = Regex("\"url_next\"\\s*:\\s*\"([^\"]+)\"", RegexOption.IGNORE_CASE)
 
+    /**
+     * 自研播放器（DPlayer / ArtPlayer / Plyr / video.js）的地址字段（v1.0.25）。
+     *
+     * 这类播放器的初始化参数长这样：
+     * ```js
+     * new DPlayer({ video: { url: '...m3u8' } })
+     * dplayer = { "file": "...m3u8", "type": "hls" }
+     * ```
+     * 老规则只认 `"url"`，遇到 `file` / `playUrl` 就漏。
+     */
+    private val KEY_FILE = Regex(
+        "\"(?:file|source|src|playUrl|play_url|videoUrl|video_url|m3u8)\"\\s*:\\s*\"([^\"]+)\"",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** `sources: [{file: "..."}]` 形式：先抠出数组再取里面的地址 */
+    private val SOURCES_ARRAY = Regex("\"sources\"\\s*:\\s*\\[([\\s\\S]{0,3000}?)]", RegexOption.IGNORE_CASE)
+
     private val QUOTED_MEDIA = Regex(
         "[\"']([^\"']+?\\.(?:m3u8|mp4|flv|ts|mpd)[^\"']*)[\"']",
         RegexOption.IGNORE_CASE
@@ -268,8 +286,14 @@ object Media {
             val body = m.groupValues[1]
             pick(KEY_URL, body)?.let { return it }
             pick(KEY_URL2, body)?.let { return it }
+            pick(KEY_FILE, body)?.let { return it }
         }
         pick(KEY_URL, html)?.let { return it }
+        // 自研播放器（DPlayer / ArtPlayer / video.js）
+        SOURCES_ARRAY.find(html)?.let { m ->
+            pick(KEY_FILE, m.groupValues[1])?.let { return it }
+        }
+        pick(KEY_FILE, html)?.let { return it }
         pick(QUOTED_MEDIA, html)?.let { return it }
         BARE_MEDIA.find(html)?.let {
             val u = innermost(unescape(it.value))

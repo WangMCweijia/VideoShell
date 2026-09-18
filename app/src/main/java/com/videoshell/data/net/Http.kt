@@ -266,6 +266,89 @@ object Http {
         null
     }
 
+    /**
+     * 表单 POST（`application/x-www-form-urlencoded`）。
+     *
+     * v1.0.25 新增：加密接口站（见 [com.videoshell.data.site.CryptRecipes]）一律要求
+     * **POST + 表单体**，GET 过去只会收到「关键词无效」—— 这是实测结论，不是猜测。
+     * 与 [get] 共用重试、CookieJar、NetLog 与韧性 DNS，行为保持一致。
+     */
+    suspend fun postForm(
+        url: String,
+        params: Map<String, String>,
+        referer: String? = null,
+        ua: String = UA,
+        fast: Boolean = false
+    ): String = withContext(Dispatchers.IO) {
+        var last: Exception? = null
+        for (attempt in 0 until MAX_ATTEMPTS) {
+            if (attempt > 0) delay(RETRY_DELAY_MS[attempt])
+            try {
+                return@withContext oncePost(url, params, referer, ua, fast)
+            } catch (e: Exception) {
+                last = e
+                if (!worthRetry(e)) break
+            }
+        }
+        throw last ?: IOException("请求失败：$url")
+    }
+
+    suspend fun postFormOrNull(
+        url: String,
+        params: Map<String, String>,
+        referer: String? = null,
+        ua: String = UA,
+        fast: Boolean = false
+    ): String? = try {
+        postForm(url, params, referer, ua, fast)
+    } catch (e: Exception) {
+        null
+    }
+
+    /** 单次表单 POST（不含重试） */
+    private fun oncePost(
+        url: String,
+        params: Map<String, String>,
+        referer: String?,
+        ua: String,
+        fast: Boolean
+    ): String {
+        val form = okhttp3.FormBody.Builder()
+        for ((k, v) in params) form.add(k, v)
+        val b = Request.Builder().url(url)
+            .post(form.build())
+            .header("User-Agent", ua)
+            .header("Accept", "application/json, text/plain, */*")
+            .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+        if (!referer.isNullOrBlank()) {
+            b.header("Referer", referer)
+            // 表单 POST 带 Origin：部分站点的 WAF 对"有 Referer 没有 Origin"的 XHR 直接 403
+            runCatching { b.header("Origin", originOf(referer)) }
+        }
+        val c = if (fast) fastClient else client
+        val t0 = System.currentTimeMillis()
+        try {
+            c.newCall(b.build()).execute().use { resp ->
+                val bytes = resp.body?.bytes() ?: ByteArray(0)
+                NetLog.record(url, resp.code, System.currentTimeMillis() - t0)
+                if (!resp.isSuccessful) throw IOException("HTTP ${resp.code} @ $url")
+                return decodeBody(bytes, resp.body?.contentType()?.charset()?.name())
+            }
+        } catch (e: Exception) {
+            if (e !is IOException || !e.message.orEmpty().startsWith("HTTP ")) {
+                NetLog.record(url, -1, System.currentTimeMillis() - t0,
+                    e.javaClass.simpleName + ": " + e.message)
+            }
+            throw e
+        }
+    }
+
+    /** `https://a.b/c` -> `https://a.b`（Origin 头用） */
+    private fun originOf(url: String): String {
+        val m = Regex("^(https?://[^/]+)", RegexOption.IGNORE_CASE).find(url)
+        return m?.groupValues?.get(1) ?: url
+    }
+
     /** 只取状态码（自检用）：不抛异常，任何情况都返回一个可读结果 */
     suspend fun probe(url: String, referer: String? = null, range: String? = null): Pair<Int, String> =
         withContext(Dispatchers.IO) {
