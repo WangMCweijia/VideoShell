@@ -86,6 +86,25 @@ object SiteDoctor {
             return sb.toString()
         }
 
+        // [3a] 封面取图实测 —— "列表有数据但没图"时，这里直接给出图床的真实反应
+        //（状态码 / DNS 对照），不再停留在"解析正常，图就是不出来"的悬案上。
+        L("")
+        L("[3a] 封面取图实测（列表首条）")
+        val cover = items.firstOrNull { it.pic.isNotBlank() }?.pic
+        if (cover.isNullOrBlank()) {
+            L("    列表条目本身没带封面地址 —— 这是解析层的问题，不是图片加载问题")
+        } else {
+            L("    封面：${cover.take(160)}")
+            val (cst, cinfo) = Http.probe(cover, site.baseUrl, "bytes=0-1023")
+            L("    带 Referer 请求：HTTP $cst" + if (cinfo.isNotBlank()) "   $cinfo" else "")
+            val host = runCatching { java.net.URI(cover).host }.getOrNull().orEmpty()
+            if (host.isNotBlank()) {
+                L("    ${Http.dnsReport(host)}")
+                L("    解读：系统 DNS 若为空/异常而 DoH 正常 ⇒ 域名被污染（App 已自动走 DoH 兜底）；")
+                L("         两边都正常但 HTTP 非 2xx ⇒ 图床按 UA/Referer/IP 拒绝，把状态码发回定位。")
+            }
+        }
+
         // 4) 详情 + 选集
         val id = items.first().id
         L("")

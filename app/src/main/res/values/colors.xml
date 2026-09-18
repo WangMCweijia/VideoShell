@@ -4,8 +4,8 @@
     <color name="surface">#FF171A21</color>
     <color name="surface_2">#FF1F2430</color>
     <color name="line">#FF262B36</color>
-    <color name="brand">#FFFF3B30</color>
-    <color name="brand_dark">#FFD32B21</color>
+    <color name="brand">#FF3D7FFB</color>
+    <color name="brand_dark">#FF2F66CC</color>
     <color name="text_primary">#FFF2F4F7</color>
     <color name="text_secondary">#FF9AA3AF</color>
     <color name="text_hint">#FF6B7480</color>

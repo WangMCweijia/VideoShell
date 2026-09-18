@@ -8,6 +8,7 @@ import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.Dns
 import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
@@ -93,12 +94,58 @@ object Http {
     }
 
     /**
+     * DoH（DNS over HTTPS，阿里公共 DNS 223.5.5.5 / 223.6.6.6，RFC 8484）。
+     *
+     * 必要：图床/CDN 域名是"系统 DNS 污染"的重灾区 —— 站点主页能开、图片全挂
+     * 就是典型症状（野果封面案例）。系统解析失败或返回空时回落到 DoH。
+     * 选阿里而不选 Cloudflare/Google：境外 DoH 本身就常被墙，兜底会变成死路。
+     */
+    val dohDns: okhttp3.dnsoverhttps.DnsOverHttps by lazy {
+        val bootstrap = OkHttpClient.Builder()
+            .connectTimeout(4, TimeUnit.SECONDS)
+            .readTimeout(4, TimeUnit.SECONDS)
+            .build()
+        okhttp3.dnsoverhttps.DnsOverHttps.Builder()
+            .client(bootstrap)
+            .url("https://223.5.5.5/dns-query".toHttpUrl())
+            .bootstrapDnsHosts(
+                InetAddress.getByName("223.5.5.5"),
+                InetAddress.getByName("223.6.6.6")
+            )
+            .build()
+    }
+
+    /**
+     * 韧性 DNS：系统优先（IPv4 前置），解析失败或返回空 → DoH 兜底。
+     * 封面请求、站点解析、播放器分片共用这一套。
+     */
+    private val resilientDns = object : Dns {
+        override fun lookup(hostname: String): List<InetAddress> {
+            return try {
+                val r = ipv4FirstDns.lookup(hostname)
+                if (r.isNotEmpty()) r else dohDns.lookup(hostname)
+            } catch (e: Exception) {
+                dohDns.lookup(hostname)
+            }
+        }
+    }
+
+    /** 自检用：给出某域名在系统 DNS 与 DoH 下各自的解析结果，供报告对照 */
+    fun dnsReport(hostname: String): String {
+        fun fmt(list: List<InetAddress>) =
+            list.joinToString(" ") { it.hostAddress ?: "?" }.ifBlank { "（无记录）" }
+        val sys = runCatching { Dns.SYSTEM.lookup(hostname) }.getOrDefault(emptyList())
+        val doh = runCatching { dohDns.lookup(hostname) }.getOrElse { listOf<InetAddress>() }
+        return "系统DNS: ${fmt(sys)}｜DoH: ${fmt(doh)}"
+    }
+
+    /**
      * 超时收短到「快速失败」区间：12s→8s。
      * 反正失败后会重试，与其在一个连不通的地址上等 12 秒，不如早点换下一次。
      */
     val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .dns(ipv4FirstDns)
+            .dns(resilientDns)
             .connectTimeout(8, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .callTimeout(22, TimeUnit.SECONDS)
@@ -132,7 +179,7 @@ object Http {
     /** 探测用短超时客户端：识别站点时并发打多个接口，不能让一个坏接口拖死整轮 */
     val fastClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .dns(ipv4FirstDns)
+            .dns(resilientDns)
             .connectTimeout(5, TimeUnit.SECONDS)
             .readTimeout(6, TimeUnit.SECONDS)
             .callTimeout(8, TimeUnit.SECONDS)

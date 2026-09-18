@@ -10,6 +10,7 @@ object Store {
 
     private const val SP = "videoshell"
     private const val KEY_SITES = "sites"
+    private const val KEY_DEFAULT = "default_site_key"
     private val gson = Gson()
 
     private fun sp(ctx: Context) = ctx.getSharedPreferences(SP, Context.MODE_PRIVATE)
@@ -54,5 +55,24 @@ object Store {
             }
         }
         if (changed) save(ctx, list)
+    }
+
+    // ------------------------------------------------------------------ 默认站源
+
+    /** @return 默认站源 key；没设过/被删了返回空串 */
+    fun defaultKey(ctx: Context): String = sp(ctx).getString(KEY_DEFAULT, "").orEmpty()
+
+    fun setDefault(ctx: Context, key: String) {
+        sp(ctx).edit().putString(KEY_DEFAULT, key).apply()
+    }
+
+    /**
+     * 默认站源：用户星标的那个；没星标则取列表第一个；
+     * 一个站点都没有返回 null（首页内容区据此显示引导文案）。
+     */
+    fun defaultSite(ctx: Context): SiteConfig? {
+        val list = sites(ctx)
+        if (list.isEmpty()) return null
+        return list.firstOrNull { it.key == defaultKey(ctx) } ?: list.first()
     }
 }
