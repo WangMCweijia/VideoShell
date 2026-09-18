@@ -244,12 +244,15 @@ HTML 适配是「按主题猜 DOM」，HLS 规范化又直接决定播不播得�
 ```bash
 cd D:/TRAE/视频壳 && python _build.py :app:assembleDebug
 cd D:/TRAE/releases/.tools/videoshell_verify && python runall.py
-# 期望末行：==== 合计 PASS=430  FAIL=0 ====
+# 期望末行：==== 合计 PASS=447  FAIL=0 ====
 ```
 
 各套件：`runverify3`（HTML 适配 54 条）、`runlive2`（真实 suspend 链路 + SiteDoctor 20 条）、
 `runlinefix`（线路/分集判定）、`runretry`（网络重试 17 条）、`runenc`（`encodeUrl` 14 条）、
-`runrank`（嗅探排序 43 条）、`runhdfix` / `runhdfix2`（HLS 规范化 11 + 12 条）、
+`runrank`（嗅探排序 43 条）、`runhdfix` / `runhdfix2` / `runhdfix3`（HLS 规范化 11 + 12 + 9 条；
+hdfix3 是 **ENDLIST 记账离线回归**：原生 ENDLIST 剥掉后必须还回去 —— v1.0.22 之前只有
+`PLAYLIST-TYPE:VOD` 的才补回，普通 VOD 流经 fix 后丢 ENDLIST 被 ExoPlayer 当直播、从 live edge
+起播，即野果"所有集从末尾播"的根因）、
 `runextract2`（**取最内层地址，19 条**：合成用例 + 真实播放页）、
 `runbs`（**金牌影视 15 条**：分类判据 / 线路名 / 详情与播放页选集）、
 `runbs3`（**跨实例 16 条**：每个步骤都新建 adapter，复现真机 Activity 边界）、
