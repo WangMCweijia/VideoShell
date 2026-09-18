@@ -244,7 +244,7 @@ HTML 适配是「按主题猜 DOM」，HLS 规范化又直接决定播不播得�
 ```bash
 cd D:/TRAE/视频壳 && python _build.py :app:assembleDebug
 cd D:/TRAE/releases/.tools/videoshell_verify && python runall.py
-# 期望末行：==== 合计 PASS=408  FAIL=0 ====
+# 期望末行：==== 合计 PASS=416  FAIL=0 ====
 ```
 
 各套件：`runverify3`（HTML 适配 54 条）、`runlive2`（真实 suspend 链路 + SiteDoctor 20 条）、
@@ -263,8 +263,10 @@ cd D:/TRAE/releases/.tools/videoshell_verify && python runall.py
 换线路共享 / 换集分离 / 跨剧跨站分离、2000 组唯一性、**源码守卫**（`hashCode()` 写法绝迹））、
 `runhome`（**首页封面 14 条**：「最新」tab 抓的是站点首页 ⇒ SSR payload 0 封面是必然、
 剧名去重率、真分类页 30+30 封面、`homeCat` 过 Gson 往返）、
-`rungroups`（**线路分组 11 条**：外层包装被内层全覆盖 ⇒ 拆成两条线（52=26+26 不再融合）、
-标签栏整段文本不当组名、盖不全时仍留外层别丢集、标准 maccms tab 映射不变）。
+`rungroups`（**线路分组 19 条**：外层包装被内层全覆盖 ⇒ 拆成两条线（52=26+26 不再融合）、
+标签栏整段文本不当组名、盖不全时仍留外层别丢集、标准 maccms tab 映射不变、
+**骚火形状**（`ul.play_list > li` 每条源一个 li ⇒ 子块拆线 + 组名取线路标签栏）、
+**负例**（每集一个 li 的正常结构不许拆）、组名「剧名+尾注」拼合取剧名）。
 
 > `runbs4` 是 **UI 之外的那半张网**：校准模式的判据与推导全在 `SiteCalib` / `HtmlTemplates` 里
 > （不在 Activity 里），所以能被离线断言覆盖。校准一旦推错就会被**固化**，比自动学习错了更难发现
