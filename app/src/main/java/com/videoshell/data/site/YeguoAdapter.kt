@@ -113,6 +113,19 @@ class YeguoAdapter(site: SiteConfig, private val recipe: CryptRecipe) : SiteAdap
      * 对一个加密站而言**每一条候选都是错的** —— 打不中关键词就 404 软跳首页、
      * 页面上的推荐位被当成搜索结果，用户看到的就是「搜什么都一样」。
      * 有了原生接口，这条路的正确率是 100%。
+     *
+     * ## 为什么只查 `tab=video`，不去查 `tab=actor`
+     *
+     * 站点把搜索分成剧集 / 演员两套结果（演员项是 `{actor_id,name,avatar,works,
+     * representative_work,representative_video_id}`，没有 `title`）。但**实测不需要**：
+     *
+     * - 剧集 tab 本身就是**宽匹配** —— 标题、标签、演员名都算。搜「木君」（演员名）返回 20 条，
+     *   搜「AI短剧」（标签）也返回 20 条。所以「搜人名搜不到」这个场景不存在；
+     * - 演员项没法映射进本壳的列表模型（只能退化成一堆 `representative_work`），
+     *   而它的代表作本来就在剧集 tab 的结果里。
+     *
+     * 结论：加演员 tab 只会多一次请求、且永远轮不到它 —— 别加。
+     * （演员接口的结构与夹具见 `_ygo/search_actor.json`。）
      */
     override suspend fun search(keyword: String, page: Int): List<VideoItem> {
         val kw = keyword.trim()

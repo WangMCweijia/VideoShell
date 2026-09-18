@@ -60,7 +60,7 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        binding.tvVersion.text = "v" + versionName()
+        // 版本号只在「我的」页展示一份 —— 顶部那行的版本号随整行一起去掉了（v1.0.26）
         binding.tvVersionMine.text = "v" + versionName()
 
         // ---- 首页：默认站源浏览器 ----
@@ -145,13 +145,6 @@ class MainActivity : AppCompatActivity() {
         binding.pageHome.visibility = if (page == PAGE_HOME) View.VISIBLE else View.GONE
         binding.pageSites.visibility = if (page == PAGE_SITES) View.VISIBLE else View.GONE
         binding.pageMine.visibility = if (page == PAGE_MINE) View.VISIBLE else View.GONE
-        binding.tvBarTitle.setText(
-            when (page) {
-                PAGE_SITES -> R.string.nav_sites
-                PAGE_MINE -> R.string.nav_mine
-                else -> R.string.app_name
-            }
-        )
         if (page == PAGE_SITES) refresh()
         if (page == PAGE_HOME) bindHome()
     }

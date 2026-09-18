@@ -219,7 +219,12 @@ object Http {
     ): String {
         val b = Request.Builder().url(url)
             .header("User-Agent", ua)
-            .header("Accept", "text/html,application/xhtml+xml,application/xml,application/json;q=0.9,*/*;q=0.8")
+            // ⚠️ 这里**绝不能**写 `application/json`（2026-09-18 实测踩过）：
+            // 部分站点的 nginx 按 Accept 做内容协商/反爬，一看到 application/json 就把
+            // **整页 HTML 转义成 JSON 字符串**返回（`"<!DOCTYPE html>…"`、中文变 `\uXXXX`）。
+            // 字节数看着正常，但站型判据一个中文词都匹配不到 ⇒ 整站被判「不是视频站」。
+            // 对齐真实 Chrome 的文档 Accept，尾部 `*/*` 已足够让 JSON 接口照常返回 JSON。
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
             .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
         if (!referer.isNullOrBlank()) b.header("Referer", referer)
         for ((k, v) in headers) b.header(k, v)

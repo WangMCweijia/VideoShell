@@ -8,6 +8,7 @@ import android.content.SharedPreferences
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.media.AudioManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -15,6 +16,7 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.SeekBar
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -215,11 +217,63 @@ class PlayerActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------ 系统栏 / 方向
 
+    /**
+     * 全屏 + **不避让前置挖孔**。
+     *
+     * 系统默认（`LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT`）会把整个窗口限制在"安全区"里：
+     * 横屏时挖孔所在的那条短边被留出来，表现为**视频旁边一条黑边、画面被挤小**。
+     * 用户明确要求用满整屏，所以开 `SHORT_EDGES`（API 28+）——内容可以延伸到短边，
+     * 而横屏时挖孔恰好就在短边上。
+     *
+     * 代价是**控件**可能被挖孔压住，所以画面（PlayerView）继续铺满整屏，
+     * 由 [applyOverlayInsets] 单独给覆盖层补上安全距离 —— 两件事分开做，
+     * 才能做到"画面用满、按钮不被遮"。
+     */
     private fun immersive() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val c = WindowInsetsControllerCompat(window, window.decorView)
         c.hide(WindowInsetsCompat.Type.systemBars())
         c.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        applyOverlayInsets()
+    }
+
+    /** 覆盖层（顶栏/底栏/选集面板/诊断面板）的原始 padding，只采样一次 */
+    private val overlayBase = HashMap<Int, IntArray>()
+
+    private fun overlayViews() =
+        listOf(binding.topBar, binding.bottomBar, binding.episodePanel, binding.diagPanel)
+
+    /**
+     * 把「挖孔 + 系统栏」的安全距离补给覆盖层，而不是缩画面。
+     *
+     * 基线 padding 必须**只取一次**：监听器每次收到 inset 都会重设 padding，
+     * 在原始值上累加的话会越撑越大（这是这类代码最经典的自伤）。
+     */
+    private fun applyOverlayInsets() {
+        if (overlayBase.isEmpty()) {
+            for (v in overlayViews()) {
+                overlayBase[v.id] = intArrayOf(
+                    v.paddingStart, v.paddingTop, v.paddingEnd, v.paddingBottom
+                )
+            }
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
+            val c = insets.getInsets(
+                WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.systemBars()
+            )
+            for (v in overlayViews()) {
+                val b = overlayBase[v.id] ?: continue
+                v.setPadding(b[0] + c.left, b[1] + c.top, b[2] + c.right, b[3] + c.bottom)
+            }
+            insets
+        }
+        ViewCompat.requestApplyInsets(binding.root)
     }
 
     /** 默认横屏；用户切过就按上次的选择 */

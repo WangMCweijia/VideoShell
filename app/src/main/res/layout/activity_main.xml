@@ -6,45 +6,9 @@
     android:background="@color/bg"
     android:orientation="vertical">
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingStart="16dp"
-        android:paddingTop="14dp"
-        android:paddingEnd="16dp"
-        android:paddingBottom="10dp">
-
-        <ImageView
-            android:layout_width="24dp"
-            android:layout_height="24dp"
-            android:contentDescription="@string/app_name"
-            android:src="@drawable/ic_play"
-            android:tint="@color/brand" />
-
-        <TextView
-            android:id="@+id/tvBarTitle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:text="@string/app_name"
-            android:textColor="@color/text_primary"
-            android:textSize="19sp"
-            android:textStyle="bold" />
-
-        <View
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1" />
-
-        <TextView
-            android:id="@+id/tvVersion"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textColor="@color/text_hint"
-            android:textSize="12sp" />
-    </LinearLayout>
+    <!-- 原「图标 + 视频壳 + 版本号」这一行已移除（v1.0.26）：
+         它占了整整一行高度，但信息量为零 —— 应用名在桌面图标上就有，版本号在「我的」页
+         （tvVersionMine）也有一份。省下的这一行直接让首页内容上移。 -->
 
     <FrameLayout
         android:layout_width="match_parent"
