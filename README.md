@@ -244,7 +244,7 @@ HTML 适配是「按主题猜 DOM」，HLS 规范化又直接决定播不播得�
 ```bash
 cd D:/TRAE/视频壳 && python _build.py :app:assembleDebug
 cd D:/TRAE/releases/.tools/videoshell_verify && python runall.py
-# 期望末行：==== 合计 PASS=416  FAIL=0 ====
+# 期望末行：==== 合计 PASS=430  FAIL=0 ====
 ```
 
 各套件：`runverify3`（HTML 适配 54 条）、`runlive2`（真实 suspend 链路 + SiteDoctor 20 条）、
@@ -266,7 +266,9 @@ cd D:/TRAE/releases/.tools/videoshell_verify && python runall.py
 `rungroups`（**线路分组 19 条**：外层包装被内层全覆盖 ⇒ 拆成两条线（52=26+26 不再融合）、
 标签栏整段文本不当组名、盖不全时仍留外层别丢集、标准 maccms tab 映射不变、
 **骚火形状**（`ul.play_list > li` 每条源一个 li ⇒ 子块拆线 + 组名取线路标签栏）、
-**负例**（每集一个 li 的正常结构不许拆）、组名「剧名+尾注」拼合取剧名）。
+**负例**（每集一个 li 的正常结构不许拆）、组名「剧名+尾注」拼合取剧名）。、
+`runsearch`（**搜索模板学习 11 条**：站点搜索表单反推 `?q={kw}` / `?wd={kw}`（厂长 `/nimasile`、骚火 `/s----------.html` 实测形状）、POST 表单与无 name 输入框不认、
+校准第 4 步「结果页地址 + 关键词」反推（解码后替换、找不到词返回 null）、两遍式搜索（严格命中关键词 ⇒ 宽松兜底））、`runresume` 15→17（骚火同名集 52 个「高清」靠序号全唯一）。
 
 > `runbs4` 是 **UI 之外的那半张网**：校准模式的判据与推导全在 `SiteCalib` / `HtmlTemplates` 里
 > （不在 Activity 里），所以能被离线断言覆盖。校准一旦推错就会被**固化**，比自动学习错了更难发现

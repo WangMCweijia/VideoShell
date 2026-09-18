@@ -402,9 +402,41 @@ object HtmlTemplates {
         "$base/index.php/vod/search.html?wd={kw}",
         "$base/vodsearch.html?wd={kw}",
         "$base/vodsearch/-------------.html?wd={kw}",
+        "$base/s----------.html?wd={kw}",
         "$base/search.html?wd={kw}",
-        "$base/search.php?searchword={kw}"
+        "$base/search.php?searchword={kw}",
+        "$base/search?keyword={kw}"
     )
+
+    /**
+     * 从首页的搜索表单反推搜索模板（v1.0.20）。
+     *
+     * 固定候选全是 maccms 系形状，自研站对不上：厂长的表单是
+     * `<form action="/nimasile"><input name="q">`，骚火是
+     * `<form action="/s----------.html" method="get"><input name="wd">` ——
+     * 只有读了表单才知道。约定：
+     * - 只认 GET 表单（POST 没法拼 URL）；
+     * - 模板 = `action?{输入框name}={kw}`（action 已带 query 就用 `&`）；
+     * - 找不到带名字的输入框、或 action 为空 => 返回 null（学不到，走固定候选）。
+     */
+    fun searchTplFromForm(doc: org.jsoup.nodes.Document, base: String): String? {
+        for (form in doc.select("form")) {
+            if (!form.attr("method").equals("get", ignoreCase = true) &&
+                form.attr("method").isNotBlank()
+            ) continue
+            var action = form.attr("action").trim()
+            if (action.isEmpty() || action.startsWith("javascript")) continue
+            if (!action.startsWith("http")) {
+                action = base.trimEnd('/') + "/" + action.trimStart('/')
+            }
+            val input = form.selectFirst("input[name]") ?: continue
+            val name = input.attr("name").trim()
+            if (name.isEmpty() || name == "{kw}") continue
+            val sep = if (action.contains("?")) "&" else "?"
+            return "$action${sep}$name={kw}"
+        }
+        return null
+    }
 
     private fun firstGroup(patterns: List<Regex>, href: String): String? {
         for (p in patterns) {

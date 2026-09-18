@@ -17,9 +17,9 @@ import org.jsoup.nodes.Element
  */
 object SiteCalib {
 
-    /** 校准三步。步骤语义放在这里而不是 UI 里，是为了让「判据」与「步骤」只有一个来源。 */
+    /** 校准四步（v1.0.20 起第 4 步为可选的搜索校准）。步骤语义放在这里而不是 UI 里，是为了让「判据」与「步骤」只有一个来源。 */
     enum class Step(val n: Int) {
-        CAT(1), DETAIL(2), PLAY(3)
+        CAT(1), DETAIL(2), PLAY(3), SEARCH(4)
     }
 
     /**
@@ -69,6 +69,27 @@ object SiteCalib {
         Step.CAT -> isCategoryShape(href)
         Step.DETAIL -> !HtmlTemplates.isPlayLink(href) && HtmlTemplates.videoIdOf(href, false) != null
         Step.PLAY -> HtmlTemplates.isPlayLink(href)
+        Step.SEARCH -> false   // 搜索步不靠点击，靠「结果页地址」，没有形状判据
+    }
+
+    /**
+     * 从「搜索结果页地址 + 用户搜的词」反推搜索模板（第 4 步搜索校准，v1.0.20）。
+     *
+     * 用户在站内搜了词 `kw`，我们拿到的结果页地址里**必然带着这个词**（query 里
+     * `wd=测试`，或路径里 `/search/测试/`）。把词换成 `{kw}` 就是模板：
+     * - 优先在**解码后**的地址里找（中文多半被百分号编码了）；`{kw}` 在构建时才编码，
+     *   所以模板里存中文原文没问题；
+     * - 词在地址里出现几次就换几次（构建时会统一回填）；
+     * - 地址里找不到词 => 学不到，返回 null（让界面明说，别静默）。
+     */
+    fun searchTplFromUrl(url: String, keyword: String): String? {
+        val u = url.trim()
+        val kw = keyword.trim()
+        if (u.isEmpty() || kw.isEmpty() || !u.startsWith("http")) return null
+        if (u.contains(kw)) return u.replace(kw, "{kw}")
+        val decoded = runCatching { java.net.URLDecoder.decode(u, "UTF-8") }.getOrNull() ?: return null
+        if (decoded.contains(kw)) return decoded.replace(kw, "{kw}")
+        return null
     }
 
     /**

@@ -83,9 +83,17 @@ class CalibrateActivity : AppCompatActivity() {
     private var catTpl: String? = null
     private var detailTpl: String? = null
     private var playTpl: String? = null
+    /** 第 4 步（可选）学到的搜索模板 */
+    private var searchTpl: String? = null
 
-    /** 第三步走完（规则已齐），别再响应后续点击 */
+    /** 第 3 步选中的播放页地址 —— 第 4 步结束时才真正去解析 / 试播 */
+    private var playPickAbs: String = ""
+
+    /** 第三步走完（别再响应网页点击）；真正收尾看 [resolvingStarted] */
     private var finished = false
+
+    /** 试播 / 固化流程已启动 —— 按钮退场，别再响应确定 */
+    private var resolvingStarted = false
 
     /**
      * 当前**已选中但还没确认**的点击。
@@ -130,9 +138,8 @@ class CalibrateActivity : AppCompatActivity() {
     // ------------------------------------------------------------------ 引导文案
 
     private fun render() {
-        binding.tvTitle.text =
-            if (finished) getString(R.string.calib_title_done)
-            else getString(R.string.calib_title, step.n)
+        // v1.0.20：三步之后还有可选的第 4 步（搜索），标题统一显示步数
+        binding.tvTitle.text = getString(R.string.calib_title, step.n)
         when (step) {
             SiteCalib.Step.CAT -> {
                 binding.tvStep.setText(R.string.calib_step1)
@@ -145,6 +152,10 @@ class CalibrateActivity : AppCompatActivity() {
             SiteCalib.Step.PLAY -> {
                 binding.tvStep.setText(R.string.calib_step3)
                 binding.tvHint.setText(R.string.calib_hint3)
+            }
+            SiteCalib.Step.SEARCH -> {
+                binding.tvStep.setText(R.string.calib_step4)
+                binding.tvHint.setText(R.string.calib_hint4)
             }
         }
         renderActions()
@@ -160,10 +171,11 @@ class CalibrateActivity : AppCompatActivity() {
                 SiteCalib.Step.CAT -> R.string.calib_confirm_cat
                 SiteCalib.Step.DETAIL -> R.string.calib_confirm_detail
                 SiteCalib.Step.PLAY -> R.string.calib_confirm_play
+                SiteCalib.Step.SEARCH -> R.string.calib_confirm_search
             }
         )
-        binding.btnConfirm.alpha = if (pending != null) 1f else 0.55f
-        val show = !finished
+        binding.btnConfirm.alpha = if (pending != null || step == SiteCalib.Step.SEARCH) 1f else 0.55f
+        val show = !resolvingStarted
         binding.btnConfirm.visibility = if (show) View.VISIBLE else View.GONE
         binding.btnReselect.visibility =
             if (show && pending != null) View.VISIBLE else View.GONE
@@ -176,9 +188,12 @@ class CalibrateActivity : AppCompatActivity() {
     private fun restart() {
         step = SiteCalib.Step.CAT
         finished = false
+        resolvingStarted = false
         pending = null
         detailTpl = null
         playTpl = null
+        searchTpl = null
+        playPickAbs = ""
         binding.pb.visibility = View.GONE
         render()
         state(getString(R.string.calib_restarted))
@@ -188,8 +203,18 @@ class CalibrateActivity : AppCompatActivity() {
     // ------------------------------------------------------------------ 确认 / 重选
 
     private fun confirm() {
-        if (finished) return
+        if (resolvingStarted) return
         val p = pending
+        when (step) {
+            SiteCalib.Step.SEARCH -> {
+                // 第 4 步不靠点击靠结果页地址；直接弹词框（留空 = 跳过）
+                pending = null
+                renderActions()
+                askSearchKeyword()
+                return
+            }
+            else -> Unit
+        }
         if (p == null) {
             state(
                 getString(
@@ -197,6 +222,7 @@ class CalibrateActivity : AppCompatActivity() {
                         SiteCalib.Step.CAT -> R.string.calib_need_pick_cat
                         SiteCalib.Step.DETAIL -> R.string.calib_need_pick_detail
                         SiteCalib.Step.PLAY -> R.string.calib_need_pick_play
+                        SiteCalib.Step.SEARCH -> R.string.calib_confirm_search
                     }
                 )
             )
@@ -208,6 +234,7 @@ class CalibrateActivity : AppCompatActivity() {
             SiteCalib.Step.CAT -> lifecycleScope.launch { pickCategory(p) }
             SiteCalib.Step.DETAIL -> pickDetail(p)
             SiteCalib.Step.PLAY -> pickPlay(p)
+            SiteCalib.Step.SEARCH -> Unit
         }
     }
 
@@ -220,6 +247,7 @@ class CalibrateActivity : AppCompatActivity() {
                     SiteCalib.Step.CAT -> R.string.calib_need_pick_cat
                     SiteCalib.Step.DETAIL -> R.string.calib_need_pick_detail
                     SiteCalib.Step.PLAY -> R.string.calib_need_pick_play
+                    SiteCalib.Step.SEARCH -> R.string.calib_hint4
                 }
             )
         )
@@ -304,7 +332,12 @@ class CalibrateActivity : AppCompatActivity() {
      * 现在这三种都会在引导卡上写明原因，且已选中的候选不会被一次误点冲掉。
      */
     private fun handlePick(json: String) {
-        if (finished) return
+        if (finished || resolvingStarted) return
+        if (step == SiteCalib.Step.SEARCH) {
+            // 第 4 步靠「结果页地址」不靠点击；点了也给个说明，免得像没反应
+            state(getString(R.string.calib_hint4))
+            return
+        }
         val o = runCatching { JSONObject(json) }.getOrNull() ?: return
         val raw = o.optString("href").trim()
         val text = o.optString("text").trim()
@@ -340,6 +373,7 @@ class CalibrateActivity : AppCompatActivity() {
                     SiteCalib.Step.CAT -> R.string.calib_picked_cat
                     SiteCalib.Step.DETAIL -> R.string.calib_picked_detail
                     SiteCalib.Step.PLAY -> R.string.calib_picked_play
+                    SiteCalib.Step.SEARCH -> R.string.calib_hint4
                 },
                 label
             )
@@ -353,6 +387,7 @@ class CalibrateActivity : AppCompatActivity() {
                     getString(R.string.calib_soft_detail)
                 }
             SiteCalib.Step.PLAY -> getString(R.string.calib_soft_play)
+            SiteCalib.Step.SEARCH -> getString(R.string.calib_hint4)
         }
         return soft + "\n" + getString(R.string.calib_picked_other, label)
     }
@@ -399,16 +434,57 @@ class CalibrateActivity : AppCompatActivity() {
         )
     }
 
-    /** ③ 分集：反推播放页模板，然后**真解析一次**，能出地址就顺势试播。模板没学到也照样试。 */
+    /**
+     * ③ 分集：反推播放页模板。v1.0.20 起这里**不再立刻试播收尾**，而是进入第 4 步
+     * （搜索校准）—— 试播挪到第 4 步按确定之后，规则一次性固化。
+     */
     private fun pickPlay(p: Pick) {
         playTpl = HtmlTemplates.playTplFrom(p.abs)
-        finished = true
+        playPickAbs = p.abs
+        step = SiteCalib.Step.SEARCH
         render()
         state(
             playTpl?.let { getString(R.string.calib_got_play, it) }
                 ?: getString(R.string.calib_soft_play)
         )
-        resolveAndPlay(p.abs)
+    }
+
+    // ------------------------------------------------------------------ ④ 搜索校准
+
+    /**
+     * 问用户刚才搜的词。留空 = 跳过搜索校准（规则照常固化、照常试播）。
+     */
+    private fun askSearchKeyword() {
+        val input = android.widget.EditText(this).apply {
+            hint = "比如：测试"
+            setSingleLine(true)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.calib_search_kw_title)
+            .setMessage(R.string.calib_search_kw_msg)
+            .setView(input)
+            .setPositiveButton(R.string.ok) { _, _ ->
+                applySearchCalib(input.text.toString().trim())
+            }
+            .setNegativeButton(R.string.cancel) { _, _ ->
+                applySearchCalib("")
+            }
+            .show()
+    }
+
+    private fun applySearchCalib(kw: String) {
+        if (kw.isEmpty()) {
+            state(getString(R.string.calib_search_skipped))
+        } else {
+            val tpl = SiteCalib.searchTplFromUrl(pageUrl, kw)
+            if (tpl == null) {
+                state(getString(R.string.calib_search_failed))
+            } else {
+                searchTpl = tpl
+                state(getString(R.string.calib_got_search, tpl))
+            }
+        }
+        resolveAndPlay(playPickAbs)
     }
 
     // ------------------------------------------------------------------ 分类容器反推
@@ -429,6 +505,8 @@ class CalibrateActivity : AppCompatActivity() {
     // ------------------------------------------------------------------ 解析 + 固化 + 试播
 
     private fun resolveAndPlay(playUrl: String) {
+        resolvingStarted = true
+        renderActions()
         binding.pb.visibility = View.VISIBLE
         state(getString(R.string.calib_resolving))
         lifecycleScope.launch {
@@ -477,10 +555,10 @@ class CalibrateActivity : AppCompatActivity() {
         }
     }
 
-    /** 校准摘要：把三步学到的东西原样摊给用户看 —— 他才知道"固化"到底固化了什么 */
+    /** 校准摘要：把四步学到的东西原样摊给用户看 —— 他才知道"固化"到底固化了什么 */
     private fun summary(): String = getString(
         R.string.calib_done_msg,
-        catTpl ?: "—", navSel ?: "—", detailTpl ?: "—", playTpl ?: "—"
+        catTpl ?: "—", navSel ?: "—", detailTpl ?: "—", playTpl ?: "—", searchTpl ?: "—"
     )
 
     private fun showDoneDialog(onPlay: () -> Unit) {
@@ -524,6 +602,7 @@ class CalibrateActivity : AppCompatActivity() {
                 "；分类容器=" + (navSel ?: "—") +
                 "；详情=" + (detailTpl ?: "—") +
                 "；播放=" + (playTpl ?: "—") +
+                "；搜索=" + (searchTpl ?: "—") +
                 "；$kind；样例=" + short(playUrl)
         RecipeStore.update(site.baseUrl) { r ->
             r.copy(
@@ -531,6 +610,7 @@ class CalibrateActivity : AppCompatActivity() {
                 navSel = navSel ?: r.navSel,
                 detailTpl = detailTpl ?: r.detailTpl,
                 playTpl = playTpl ?: r.playTpl,
+                searchTpl = searchTpl ?: r.searchTpl,
                 calibAt = System.currentTimeMillis(),
                 calibNote = note
             )

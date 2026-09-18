@@ -612,20 +612,28 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
      */
     private suspend fun substituteHome(home: List<VideoItem>): List<VideoItem>? {
         if (home.isEmpty() || home.any { it.pic.isNotBlank() }) return null
-        val cat = probeCoveredCategory() ?: return null
+        val cat = probeCoveredCategory()
+        if (cat == null) {
+            // v1.0.20：替换失败要留痕。用户反馈「仍然无封面」时，自检报告 / 诊断
+            // 必须能区分「探到了但没替换」与「分类都探了但全没封面」。
+            val n = runCatching { categories() }.getOrDefault(emptyList()).size
+            diag = "首页无封面（客户端渲染），已试探 $n 个分类页均未探到封面 —— " +
+                    "若分类 tab 里有封面，请把站点自检报告发出来"
+            return null
+        }
         homeCat = cat
         RecipeStore.update(site.baseUrl) { it.copy(homeCat = cat) }
         diag = "首页无封面数据（客户端渲染），已改用分类页 $cat"
         return browseCat(cat, 1)
     }
 
-    /** 探 1~3 个真分类页，返回**确实带封面**的那一个；都没有则 null（不替换） */
+    /** 探前 6 个真分类页，返回**确实带封面**的那一个；都没有则 null（不替换） */
     private suspend fun probeCoveredCategory(): String? {
         val cands = runCatching { categories() }.getOrDefault(emptyList())
             .map { abs(it.id) }
             .filter { it.startsWith("http") }
             .distinct()
-            .take(3)
+            .take(6)
         for (c in cands) {
             if (fetchList(listOf(c), 1).any { it.pic.isNotBlank() }) return c
         }
@@ -660,6 +668,21 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
             seenKey = k
             seenIds.clear()
         }
+        // v1.0.20：固定候选全是 maccms 形状，自研站对不上（厂长 action=/nimasile name=q、
+        // 骚火 action=/s----------.html name=wd）。站点自己的搜索表单就是标准答案 —— 学一次固化。
+        if (searchTpl.isNullOrBlank()) learnSearchTplFromForm()
+        // 两遍式：
+        // ① 严格——要求结果里至少一条标题带关键词。候选打歪时（404 软跳首页 / 无关词的
+        //    搜索总览页）parseList 仍能从推荐位抠出一份列表，表现为「搜什么都出同一批内容」
+        //    （金牌影院）。严格遍修掉它，并固化打中的模板。
+        // ② 宽松——严格遍全军覆没再退回旧行为。保住「按演员名搜索」这类
+        //    结果标题不含关键词的真搜索（搜「吴京」出「战狼」）；宽松遍**不固化**模板，
+        //    免得把打歪的候选学成永久配方。
+        searchPass(keyword, page, strict = true)?.let { return it }
+        return searchPass(keyword, page, strict = false) ?: emptyList()
+    }
+
+    private suspend fun searchPass(keyword: String, page: Int, strict: Boolean): List<VideoItem>? {
         for (tpl in ordered(searchTpl, HtmlTemplates.searchCandidates(root))) {
             val html = Http.getOrNull(build(tpl, kw = keyword, page = page), referer = site.baseUrl) ?: continue
             val doc = Jsoup.parse(html, site.baseUrl)
@@ -667,13 +690,26 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
             val fresh = accept(HtmlExtractor.parseList(doc, site.baseUrl, vodIsCategory, html), page)
             if (fresh == null) continue
             learnDetailTpl(doc)
-            if (searchTpl != tpl) {
+            if (strict && fresh.isNotEmpty() &&
+                fresh.none { it.name.contains(keyword, ignoreCase = true) }
+            ) continue
+            if (strict && searchTpl != tpl) {
                 searchTpl = tpl
                 RecipeStore.update(site.baseUrl) { it.copy(searchTpl = tpl) }
             }
             return fresh
         }
-        return emptyList()
+        return null
+    }
+
+    /** 从首页搜索表单学 `searchTpl`（学不到就算了，走固定候选）。 */
+    private suspend fun learnSearchTplFromForm() {
+        val html = runCatching { Http.getOrNull(site.baseUrl, referer = site.baseUrl) }.getOrNull() ?: return
+        val doc = Jsoup.parse(html, site.baseUrl)
+        val tpl = HtmlTemplates.searchTplFromForm(doc, root) ?: return
+        searchTpl = tpl
+        RecipeStore.update(site.baseUrl) { it.copy(searchTpl = tpl) }
+        diag = "搜索模板来自站点表单：$tpl"
     }
 
     // ------------------------------------------------------------------ 详情

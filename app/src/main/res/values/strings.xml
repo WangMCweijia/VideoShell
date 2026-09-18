@@ -76,7 +76,7 @@
     <!-- 调试校准模式 -->
     <string name="calib">校准</string>
     <string name="calib_restart">重来</string>
-    <string name="calib_title">调试校准 · 第 %1$d/3 步</string>
+    <string name="calib_title">调试校准 · 第 %1$d/4 步</string>
     <string name="calib_title_done">校准完成</string>
     <string name="calib_title_idle">调试校准</string>
     <string name="calib_step1">① 点一个分类名，然后按「确定」</string>
@@ -84,13 +84,21 @@
     <string name="calib_step2">② 点一部影片，然后按「确定」</string>
     <string name="calib_hint2">在列表里点一部影片的封面或标题，进入它的详情页，点完按「确定」。</string>
     <string name="calib_step3">③ 点一集（分集），然后按「确定」</string>
-    <string name="calib_hint3">在详情页的选集里点任意一集，点完按「确定」—— 会立刻解析一次并试播。</string>
+    <string name="calib_hint3">在详情页的选集里点任意一集，点完按「确定」—— 会记下播放页形状。</string>
+    <string name="calib_step4">④ 校准搜索（可选）</string>
+    <string name="calib_hint4">在站内搜索框里随便搜一个词（比如：测试），停在搜索结果页，再按「确定」—— 会记下这个站的搜索地址形状。不想校准搜索就直接按「确定」跳过。</string>
     <string name="calib_restarted">已重置，请重新点一个分类名</string>
 
     <!-- 选中 / 确认（v1.0.14：点击只选中，推进必须按确定） -->
     <string name="calib_confirm_cat">确定，用这个分类</string>
     <string name="calib_confirm_detail">确定，用这个影片</string>
     <string name="calib_confirm_play">确定，用这一集</string>
+    <string name="calib_confirm_search">完成（搜索校准）</string>
+    <string name="calib_search_kw_title">搜索校准</string>
+    <string name="calib_search_kw_msg">你刚才在站内搜的是哪个词？（留空 = 跳过搜索校准）</string>
+    <string name="calib_got_search">搜索模板已固化：%1$s</string>
+    <string name="calib_search_skipped">已跳过搜索校准</string>
+    <string name="calib_search_failed">结果页地址里没找到关键词，搜索模板没学到（已跳过，可按「重来」再试）</string>
     <string name="calib_reselect">重选</string>
     <string name="calib_picked_cat">已选中分类「%1$s」—— 按「确定」继续</string>
     <string name="calib_picked_detail">已选中影片「%1$s」—— 按「确定」继续</string>
@@ -117,7 +125,7 @@
     <string name="calib_got_detail">已记下详情页模板：%1$s</string>
     <string name="calib_got_play">已记下播放页模板：%1$s</string>
     <string name="calib_resolving">正在用这个分集试解析播放地址…</string>
-    <string name="calib_done_msg">分类形状：%1$s\n分类容器：%2$s\n详情页模板：%3$s\n播放页模板：%4$s\n\n规则已固化到本地 —— 下次进本站直接用，不再靠猜。</string>
+    <string name="calib_done_msg">分类形状：%1$s\n分类容器：%2$s\n详情页模板：%3$s\n播放页模板：%4$s\n搜索模板：%5$s\n\n规则已固化到本地 —— 下次进本站直接用，不再靠猜。</string>
     <string name="calib_play">试播</string>
     <string name="calib_finish">完成</string>
     <string name="calib_keep_rules">仍然保存规则</string>
