@@ -437,6 +437,9 @@ class CalibrateActivity : AppCompatActivity() {
     /**
      * ③ 分集：反推播放页模板。v1.0.20 起这里**不再立刻试播收尾**，而是进入第 4 步
      * （搜索校准）—— 试播挪到第 4 步按确定之后，规则一次性固化。
+     *
+     * v1.0.21：进第 4 步时**自动回到站点首页** —— 第 4 步的任务是"去站内搜一次"，
+     * 而用户此刻还停在第三步选中的播放页上；搜索框在首页，不回去就没法搜。
      */
     private fun pickPlay(p: Pick) {
         playTpl = HtmlTemplates.playTplFrom(p.abs)
@@ -447,12 +450,17 @@ class CalibrateActivity : AppCompatActivity() {
             playTpl?.let { getString(R.string.calib_got_play, it) }
                 ?: getString(R.string.calib_soft_play)
         )
+        binding.webView.loadUrl(site.baseUrl)
     }
 
     // ------------------------------------------------------------------ ④ 搜索校准
 
     /**
      * 问用户刚才搜的词。留空 = 跳过搜索校准（规则照常固化、照常试播）。
+     *
+     * v1.0.21：填了词却学不到模板（pageUrl 里没有关键词 —— 多半是还没去搜索、
+     * 或站点的搜索地址不走 URL）⇒ **留在第 4 步**，让用户去搜完再按一次「确定」；
+     * 旧行为是直接 resolveAndPlay 收尾，用户一次没搜对，整个校准就结束了。
      */
     private fun askSearchKeyword() {
         val input = android.widget.EditText(this).apply {
@@ -475,15 +483,17 @@ class CalibrateActivity : AppCompatActivity() {
     private fun applySearchCalib(kw: String) {
         if (kw.isEmpty()) {
             state(getString(R.string.calib_search_skipped))
-        } else {
-            val tpl = SiteCalib.searchTplFromUrl(pageUrl, kw)
-            if (tpl == null) {
-                state(getString(R.string.calib_search_failed))
-            } else {
-                searchTpl = tpl
-                state(getString(R.string.calib_got_search, tpl))
-            }
+            resolveAndPlay(playPickAbs)
+            return
         }
+        val tpl = SiteCalib.searchTplFromUrl(pageUrl, kw)
+        if (tpl == null) {
+            // 不收尾：提示后停在第 4 步，用户搜完再按「确定」即可；「取消」按钮可随时跳过
+            state(getString(R.string.calib_search_failed))
+            return
+        }
+        searchTpl = tpl
+        state(getString(R.string.calib_got_search, tpl))
         resolveAndPlay(playPickAbs)
     }
 
@@ -663,6 +673,21 @@ class CalibrateActivity : AppCompatActivity() {
     private fun short(u: String): String = if (u.length <= 56) u else u.take(53) + "..."
 
     // ------------------------------------------------------------------ 生命周期
+
+    /**
+     * v1.0.21：系统返回键 = **网页后退**，不再是退出校准。
+     *
+     * 第 4 步要求用户"在站内搜一次"—— 从播放页退回首页靠的就是返回键；
+     * 旧行为直接 finish()，用户按一下就丢掉前三步的成果（界面上看就是"无法校准"）。
+     * 网页退无可退时才真正退出。
+     */
+    override fun onBackPressed() {
+        if (binding.webView.canGoBack()) {
+            binding.webView.goBack()
+        } else {
+            super.onBackPressed()
+        }
+    }
 
     override fun onStop() {
         super.onStop()

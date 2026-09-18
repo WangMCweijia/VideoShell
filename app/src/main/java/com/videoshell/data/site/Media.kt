@@ -131,6 +131,18 @@ object Media {
             c == '"' || c == '<' || c == '>' || c == '\\' ||
             c == '^' || c == '`' || c == '{' || c == '|' || c == '}'
 
+    /**
+     * 续播落点是否已落进流末尾（v1.0.21）。
+     *
+     * 存进度时"看到尾"的会清掉（savePosition 的 dur-15s 规则），所以一个**正常**的续播点
+     * 不可能落在最后 15 秒里。若续播 seek 的实际落点在这里 ⇒ 要么存的点超出了本条流
+     * （站点截断 / 换源后时长变短），要么流本身的时长和存的时候不一样 —— 都该从头播，
+     * 而不是停在离片尾十几秒的地方让用户以为"进度错乱"。
+     * 纯函数放这里是为了离线 harness（ResumeKey）能直接断言。
+     */
+    fun resumeAtEnd(posMs: Long, durMs: Long): Boolean =
+        durMs > 0L && posMs > durMs - 15_000L
+
     fun looksLikeMedia(url: String): Boolean {
         val u = url.trim()
         if (!u.startsWith("http")) return false

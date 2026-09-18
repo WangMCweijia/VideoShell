@@ -43,6 +43,7 @@
     <string name="hud_speed">%1$sx</string>
     <string name="hud_locked">已锁定，点左上角图标解锁</string>
     <string name="hud_resume">已从 %1$s 继续播放</string>
+    <string name="hud_resume_dead">续播点已失效，从头播放</string>
     <string name="hud_ratio">画面：%1$s</string>
 
     <string name="player_error_title">播放失败</string>
@@ -86,7 +87,7 @@
     <string name="calib_step3">③ 点一集（分集），然后按「确定」</string>
     <string name="calib_hint3">在详情页的选集里点任意一集，点完按「确定」—— 会记下播放页形状。</string>
     <string name="calib_step4">④ 校准搜索（可选）</string>
-    <string name="calib_hint4">在站内搜索框里随便搜一个词（比如：测试），停在搜索结果页，再按「确定」—— 会记下这个站的搜索地址形状。不想校准搜索就直接按「确定」跳过。</string>
+    <string name="calib_hint4">已回到站点首页：在站内搜索框里随便搜一个词（比如：测试），停在搜索结果页，再按「确定」—— 会记下这个站的搜索地址形状。按系统返回键可在网页里后退；不想校准搜索就按「确定」后留空跳过。</string>
     <string name="calib_restarted">已重置，请重新点一个分类名</string>
 
     <!-- 选中 / 确认（v1.0.14：点击只选中，推进必须按确定） -->
@@ -98,7 +99,7 @@
     <string name="calib_search_kw_msg">你刚才在站内搜的是哪个词？（留空 = 跳过搜索校准）</string>
     <string name="calib_got_search">搜索模板已固化：%1$s</string>
     <string name="calib_search_skipped">已跳过搜索校准</string>
-    <string name="calib_search_failed">结果页地址里没找到关键词，搜索模板没学到（已跳过，可按「重来」再试）</string>
+    <string name="calib_search_failed">结果页地址里没找到关键词——先在网页里搜索一次，停在结果页再按「确定」。也可以按「确定」后留空跳过搜索校准。</string>
     <string name="calib_reselect">重选</string>
     <string name="calib_picked_cat">已选中分类「%1$s」—— 按「确定」继续</string>
     <string name="calib_picked_detail">已选中影片「%1$s」—— 按「确定」继续</string>

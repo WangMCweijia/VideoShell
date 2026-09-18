@@ -115,6 +115,9 @@ class PlayerActivity : AppCompatActivity() {
     private var fallbackPage = ""
     private var retried = false
 
+    /** 本次 playUrl 实际应用的续播点 —— 第一个 READY 时核对它是否落在流末尾（见 STATE_READY 守卫） */
+    private var appliedResume: Long = 0L
+
     /** 已经自动降级到嗅探过一次（防止反复跳转） */
     private var autoSniffTried = false
 
@@ -387,6 +390,23 @@ class PlayerActivity : AppCompatActivity() {
                     if (!readyLogged) {
                         readyLogged = true
                         PlayLog.record("✓ 播放就绪 ${shorten(currentUrl)}")
+                    }
+                    // v1.0.21：续播点失效守卫。seekTo 发生在 prepare 之前，此刻流的真实时长
+                    // 还未知 —— 若存的续播点**超出本条流**（站点截断/换源后时长变短/旧版残留），
+                    // ExoPlayer 会把它钳到片尾，用户看到的就是「一打开就从末尾快结束时播」。
+                    // 在第一个 READY 时核对一次：落点掉进最后 15 秒 ⇒ 判定失效，回 0 从头播。
+                    if (appliedResume > 0L) {
+                        val dur = p.duration
+                        if (dur > 0L && Media.resumeAtEnd(p.currentPosition, dur)) {
+                            PlayLog.record(
+                                "⚠ 续播点 ${appliedResume}ms 落在本条流（时长 ${dur}ms）末尾 —— 已失效，从头播放"
+                            )
+                            p.seekTo(0L)
+                            showHud(getString(R.string.hud_resume_dead))
+                        } else if (dur > 0L) {
+                            PlayLog.record("续播 ${appliedResume}ms / 时长 ${dur}ms")
+                        }
+                        appliedResume = 0L
                     }
                 }
                 if (playbackState == Player.STATE_ENDED && PlayQueue.hasNext()) {

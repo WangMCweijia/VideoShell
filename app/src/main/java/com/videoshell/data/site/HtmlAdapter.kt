@@ -702,14 +702,23 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
         return null
     }
 
-    /** 从首页搜索表单学 `searchTpl`（学不到就算了，走固定候选）。 */
-    private suspend fun learnSearchTplFromForm() {
-        val html = runCatching { Http.getOrNull(site.baseUrl, referer = site.baseUrl) }.getOrNull() ?: return
+    /**
+     * 从首页搜索表单学 `searchTpl`。
+     *
+     * [force] = false：只在还没有模板时学（首次搜索）。
+     * [force] = true：无条件重学 —— 严格遍全败后的自愈路径。**返回是否学到了与原先不同的
+     * 模板**：学不到/没变化都返回 false，调用方就不必白再试一轮。
+     */
+    private suspend fun learnSearchTplFromForm(force: Boolean = false): Boolean {
+        if (!force && !searchTpl.isNullOrBlank()) return false
+        val html = runCatching { Http.getOrNull(site.baseUrl, referer = site.baseUrl) }.getOrNull() ?: return false
         val doc = Jsoup.parse(html, site.baseUrl)
-        val tpl = HtmlTemplates.searchTplFromForm(doc, root) ?: return
+        val tpl = HtmlTemplates.searchTplFromForm(doc, root) ?: return false
+        if (tpl == searchTpl) return false
         searchTpl = tpl
         RecipeStore.update(site.baseUrl) { it.copy(searchTpl = tpl) }
         diag = "搜索模板来自站点表单：$tpl"
+        return true
     }
 
     // ------------------------------------------------------------------ 详情
