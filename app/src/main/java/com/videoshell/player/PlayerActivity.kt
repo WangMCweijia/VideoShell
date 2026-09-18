@@ -35,6 +35,8 @@ import androidx.recyclerview.widget.GridLayoutManager
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.videoshell.R
+import com.videoshell.data.HistEntry
+import com.videoshell.data.Library
 import com.videoshell.data.Store
 import com.videoshell.data.model.MediaSource
 import com.videoshell.data.net.Http
@@ -79,6 +81,10 @@ class PlayerActivity : AppCompatActivity() {
         private const val AUTO_HIDE_MS = 4_000L
         private const val SP = "videoshell"
         private const val KEY_ORIENT = "player_orientation"
+        /** 「我的」播放设置：记住播放进度 / 自动连播 / 画面自动横竖屏 */
+        private const val KEY_RESUME = "setting_resume"
+        private const val KEY_AUTO_NEXT = "setting_auto_next"
+        private const val KEY_AUTO_ORIENT = "setting_auto_orient"
 
         fun intent(
             context: Context,
@@ -285,6 +291,7 @@ class PlayerActivity : AppCompatActivity() {
     private fun applyVideoOrientation(v: VideoSize) {
         if (v.width <= 0 || v.height <= 0) return
         if (!orientAuto) return
+        if (!sp.getBoolean(KEY_AUTO_ORIENT, true)) return
         val want =
             if (v.width > v.height) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             else ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
@@ -466,7 +473,9 @@ class PlayerActivity : AppCompatActivity() {
                         appliedResume = 0L
                     }
                 }
-                if (playbackState == Player.STATE_ENDED && PlayQueue.hasNext()) {
+                if (playbackState == Player.STATE_ENDED && PlayQueue.hasNext() &&
+                    sp.getBoolean(KEY_AUTO_NEXT, true)
+                ) {
                     playEpisode(PlayQueue.episodeIndex + 1)
                 }
             }
@@ -676,6 +685,7 @@ class PlayerActivity : AppCompatActivity() {
         // ⚠️ 换集前先把"正在看的这一集"的进度落盘。之前只在 onStop 写盘，
         // 而 Activity 内部换集不会走 onStop ⇒ 上一集看到一半的位置直接丢。
         savePosition()
+        recordHistory()
         PlayQueue.episodeIndex = index
         // 进度身份切到新的一集（此刻才换 key，保证上面那次 savePosition 写的是旧集）
         currentEpKey = episodeKey(PlayQueue.siteKey, PlayQueue.title, ep.name, index)
@@ -903,11 +913,13 @@ class PlayerActivity : AppCompatActivity() {
     private fun activeKey(): String = currentEpKey.ifBlank { urlKey(currentUrl) }
 
     private fun resumePosition(key: String): Long {
+        if (!sp.getBoolean(KEY_RESUME, true)) return 0L
         val v = runCatching { sp.getLong(key, 0L) }.getOrDefault(0L)
         return if (v > 10_000L) v else 0L   // 少于 10 秒不值得续播
     }
 
     private fun savePosition() {
+        if (!sp.getBoolean(KEY_RESUME, true)) return
         val p = player ?: return
         if (currentUrl.isBlank() && currentEpKey.isBlank()) return
         val pos = p.currentPosition
@@ -919,6 +931,32 @@ class PlayerActivity : AppCompatActivity() {
         } else {
             sp.edit().putLong(key, pos).apply()
         }
+    }
+
+    /**
+     * 写播放历史：在进度落盘的同一时机（onStop / 换集前）调用。
+     * 无剧集上下文（直链 / 嗅探）不记 —— 没法回跳详情页。
+     */
+    private fun recordHistory() {
+        if (PlayQueue.title.isBlank() || PlayQueue.siteKey.isBlank()) return
+        val ep = PlayQueue.current() ?: return
+        val p = player
+        val pos = p?.currentPosition ?: 0L
+        val dur = p?.duration ?: 0L
+        Library.addHistory(
+            this,
+            HistEntry(
+                siteKey = PlayQueue.siteKey,
+                vid = PlayQueue.vid,
+                name = PlayQueue.title,
+                pic = PlayQueue.pic,
+                ep = ep.name,
+                epIdx = PlayQueue.episodeIndex,
+                pos = pos,
+                dur = dur,
+                ts = System.currentTimeMillis()
+            )
+        )
     }
 
     // ------------------------------------------------------------------ 生命周期
@@ -936,6 +974,7 @@ class PlayerActivity : AppCompatActivity() {
     override fun onStop() {
         super.onStop()
         savePosition()
+        recordHistory()
         handler.removeCallbacks(ticker)
         handler.removeCallbacks(autoHide)
         player?.let {

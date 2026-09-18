@@ -12,6 +12,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
 import com.videoshell.R
+import com.videoshell.data.Library
 import com.videoshell.data.Store
 import com.videoshell.data.model.Episode
 import com.videoshell.data.model.MediaSource
@@ -56,6 +57,11 @@ class DetailActivity : AppCompatActivity() {
     private var detail: VideoDetail? = null
     private var groupIndex = 0
 
+    /** 收藏/历史要用的当前影片信息（详情解析出来后会被真名/真封面覆盖） */
+    private var curName = ""
+    private var curPic = ""
+    private var curRemarks = ""
+
     /** 校准页回来：站点配方可能变了（也可能顺带切成了 HTML 模式）⇒ 丢旧 Adapter，重新解析 */
     private val calibLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -75,6 +81,9 @@ class DetailActivity : AppCompatActivity() {
         val name = intent.getStringExtra(EXTRA_NAME).orEmpty()
         val pic = intent.getStringExtra(EXTRA_PIC).orEmpty()
         val remarks = intent.getStringExtra(EXTRA_REMARKS).orEmpty()
+        curName = name
+        curPic = pic
+        curRemarks = remarks
 
         val site = Store.find(this, siteKey)
         if (site == null) {
@@ -98,6 +107,8 @@ class DetailActivity : AppCompatActivity() {
             }
         }
         binding.btnBack.setOnClickListener { finish() }
+        binding.btnFav.setOnClickListener { toggleFav() }
+        refreshFavIcon()
         binding.btnCalib.setOnClickListener {
             calibLauncher.launch(CalibrateActivity.intent(this, siteKey))
         }
@@ -153,6 +164,7 @@ class DetailActivity : AppCompatActivity() {
         if (d.name.isNotBlank()) {
             binding.tvName.text = d.name
             binding.tvTitle.text = d.name
+            curName = d.name
         }
         if (d.pic.isNotBlank()) {
             binding.ivPoster.load(d.pic) {
@@ -160,11 +172,14 @@ class DetailActivity : AppCompatActivity() {
                 placeholder(R.drawable.bg_poster)
                 error(R.drawable.bg_poster)
             }
+            curPic = d.pic
         }
         if (d.remarks.isNotBlank()) {
             binding.tvRemarks.text = d.remarks
             binding.tvRemarks.visibility = View.VISIBLE
+            curRemarks = d.remarks
         }
+        refreshFavIcon()
 
         val meta = listOf(
             if (d.typeName.isNotBlank()) "类型：${d.typeName}" else "",
@@ -211,6 +226,8 @@ class DetailActivity : AppCompatActivity() {
         val d = detail ?: return
         PlayQueue.title = d.name.ifBlank { binding.tvName.text.toString() }
         PlayQueue.siteKey = siteKey
+        PlayQueue.vid = d.id.ifBlank { videoId }
+        PlayQueue.pic = d.pic.ifBlank { curPic }
         PlayQueue.groups = d.groups
         PlayQueue.groupIndex = groupIndex
         PlayQueue.episodeIndex = index
@@ -234,6 +251,20 @@ class DetailActivity : AppCompatActivity() {
                 null -> toast("解析播放地址失败")
             }
         }
+    }
+
+    private fun toggleFav() {
+        val added = Library.toggleFav(this, siteKey, videoId, curName, curPic, curRemarks)
+        refreshFavIcon()
+        toast(if (added) R.string.fav_added else R.string.fav_removed)
+    }
+
+    private fun refreshFavIcon() {
+        val fav = Library.isFav(this, siteKey, videoId)
+        binding.btnFav.setImageResource(if (fav) R.drawable.ic_star else R.drawable.ic_star_outline)
+        binding.btnFav.setColorFilter(
+            androidx.core.content.ContextCompat.getColor(this, R.color.brand)
+        )
     }
 
     private fun showState(msg: String?) {

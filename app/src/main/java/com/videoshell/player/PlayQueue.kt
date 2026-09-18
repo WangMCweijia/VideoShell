@@ -8,6 +8,10 @@ object PlayQueue {
 
     var title: String = ""
     var siteKey: String = ""
+    /** 详情页影片 id（播放历史回跳详情用） */
+    var vid: String = ""
+    /** 封面（播放历史展示用） */
+    var pic: String = ""
     var groups: List<PlayGroup> = emptyList()
     var groupIndex: Int = 0
     var episodeIndex: Int = 0
@@ -21,6 +25,8 @@ object PlayQueue {
     fun clear() {
         title = ""
         siteKey = ""
+        vid = ""
+        pic = ""
         groups = emptyList()
         groupIndex = 0
         episodeIndex = 0

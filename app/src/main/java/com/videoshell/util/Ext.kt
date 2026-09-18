@@ -28,6 +28,10 @@ fun Context.toast(msg: String) {
     runCatching { Toast.makeText(this, msg, Toast.LENGTH_SHORT).show() }
 }
 
+fun Context.toast(resId: Int) {
+    runCatching { Toast.makeText(this, resId, Toast.LENGTH_SHORT).show() }
+}
+
 /** 相对地址补全 */
 fun resolveUrl(base: String, url: String): String {
     val u = url.trim()

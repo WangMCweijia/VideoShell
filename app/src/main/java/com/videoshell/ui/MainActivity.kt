@@ -4,9 +4,9 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.view.inputmethod.EditorInfo
-import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
@@ -26,7 +26,10 @@ import com.videoshell.ui.adapter.VideoAdapter
 import com.videoshell.util.toast
 import kotlinx.coroutines.launch
 
-/** 主界面：底部三 Tab —— 首页（添加 + 默认站源内容）/ 站源（管理）/ 我的（设置） */
+/**
+ * 主界面：底部三 Tab。
+ * 首页 = 默认站源内容直达；站源 = 添加入口 + 站点管理；我的 = 历史/收藏/播放设置/外观。
+ */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
@@ -48,12 +51,13 @@ class MainActivity : AppCompatActivity() {
         binding.tvVersion.text = "v" + versionName()
         binding.tvVersionMine.text = "v" + versionName()
 
-        // ---- 首页 ----
+        // ---- 首页：默认站源内容 ----
         binding.rvHome.layoutManager = GridLayoutManager(this, 3)
         binding.rvHome.adapter = homeAdapter
         binding.tvHomeState.setOnClickListener { loadHomeContent() }
         binding.tvHomeChange.setOnClickListener { binding.bottomNav.selectedItemId = R.id.nav_sites }
 
+        // ---- 站源：添加入口 ----
         binding.btnDetect.setOnClickListener { detect() }
         binding.btnSniff.setOnClickListener { sniffFromInput() }
         binding.btnPlayDirect.setOnClickListener { playDirect() }
@@ -65,17 +69,37 @@ class MainActivity : AppCompatActivity() {
             } else false
         }
 
-        // ---- 站源 ----
+        // ---- 站源：站点列表 ----
         binding.rvSites.layoutManager = LinearLayoutManager(this)
         binding.rvSites.adapter = siteAdapter
 
         // ---- 我的 ----
-        binding.rowDefaultSite.setOnClickListener { pickDefaultSite() }
-        binding.swLaunchDirect.isChecked = getSharedPreferences(SP, MODE_PRIVATE)
-            .getBoolean(KEY_LAUNCH_DIRECT, false)
+        binding.rowHistory.setOnClickListener { startActivity(Intent(this, HistoryActivity::class.java)) }
+        binding.rowFav.setOnClickListener { startActivity(Intent(this, FavActivity::class.java)) }
+
+        val sp = getSharedPreferences(SP, MODE_PRIVATE)
+        binding.swAutoOrient.isChecked = sp.getBoolean("setting_auto_orient", true)
+        binding.swAutoOrient.setOnCheckedChangeListener { _, checked ->
+            sp.edit().putBoolean("setting_auto_orient", checked).apply()
+        }
+        binding.swAutoNext.isChecked = sp.getBoolean("setting_auto_next", true)
+        binding.swAutoNext.setOnCheckedChangeListener { _, checked ->
+            sp.edit().putBoolean("setting_auto_next", checked).apply()
+        }
+        binding.swResume.isChecked = sp.getBoolean("setting_resume", true)
+        binding.swResume.setOnCheckedChangeListener { _, checked ->
+            sp.edit().putBoolean("setting_resume", checked).apply()
+        }
+        binding.swDark.isChecked = sp.getBoolean("setting_dark", true)
+        binding.swDark.setOnCheckedChangeListener { _, checked ->
+            sp.edit().putBoolean("setting_dark", checked).apply()
+            AppCompatDelegate.setDefaultNightMode(
+                if (checked) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO
+            )
+        }
+        binding.swLaunchDirect.isChecked = sp.getBoolean(KEY_LAUNCH_DIRECT, false)
         binding.swLaunchDirect.setOnCheckedChangeListener { _, checked ->
-            getSharedPreferences(SP, MODE_PRIVATE).edit()
-                .putBoolean(KEY_LAUNCH_DIRECT, checked).apply()
+            sp.edit().putBoolean(KEY_LAUNCH_DIRECT, checked).apply()
         }
 
         // ---- 底部导航 ----
@@ -90,7 +114,7 @@ class MainActivity : AppCompatActivity() {
         showPage(PAGE_HOME)
 
         // 启动直达默认站源（「我的」里可开关）
-        val direct = getSharedPreferences(SP, MODE_PRIVATE).getBoolean(KEY_LAUNCH_DIRECT, false)
+        val direct = sp.getBoolean(KEY_LAUNCH_DIRECT, false)
         if (direct && savedInstanceState == null) {
             Store.defaultSite(this)?.let { openSite(it) }
         }
@@ -137,7 +161,7 @@ class MainActivity : AppCompatActivity() {
             val res = runCatching {
                 com.videoshell.data.site.AdapterFactory.create(site).browse("", 1)
             }
-            val items = res.getOrElse { emptyList() }.take(12)
+            val items = res.getOrElse { emptyList() }.take(24)
             if (items.isEmpty()) {
                 homeAdapter.clear()
                 showHomeState(getString(R.string.home_load_fail), visible = true)
@@ -170,28 +194,8 @@ class MainActivity : AppCompatActivity() {
     private fun setDefaultSite(site: SiteConfig) {
         Store.setDefault(this, site.key)
         refresh()
+        loadHomeContent()
         toast(getString(R.string.set_default_done))
-    }
-
-    private fun pickDefaultSite() {
-        val list = Store.sites(this)
-        if (list.isEmpty()) {
-            toast(getString(R.string.home_empty_default))
-            return
-        }
-        val names = list.map { it.name.ifBlank { it.baseUrl } }.toTypedArray()
-        val current = Store.defaultKey(this)
-        val checked = list.indexOfFirst { it.key == current }.takeIf { it >= 0 } ?: 0
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.default_site))
-            .setSingleChoiceItems(names, checked) { dialog, which ->
-                Store.setDefault(this, list[which].key)
-                refresh()
-                binding.tvDefaultSite.text = names[which]
-                dialog.dismiss()
-            }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
     }
 
     private fun renameSite(site: SiteConfig) {
@@ -211,6 +215,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 Store.rename(this, site.key, name)
                 refresh()
+                loadHomeContent()
                 toast(getString(R.string.site_rename_done))
             }
             .setNegativeButton(R.string.cancel, null)
@@ -225,6 +230,7 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton(getString(R.string.ok)) { _, _ ->
                 Store.remove(this, site.key)
                 refresh()
+                loadHomeContent()
             }
             .show()
     }

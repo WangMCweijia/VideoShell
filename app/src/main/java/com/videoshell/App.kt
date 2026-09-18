@@ -1,6 +1,7 @@
 package com.videoshell
 
 import android.app.Application
+import androidx.appcompat.app.AppCompatDelegate
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import com.videoshell.data.net.Http
@@ -10,6 +11,12 @@ class App : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        // 暗色模式（默认开，跟随「我的」里的开关）
+        val dark = getSharedPreferences("videoshell", MODE_PRIVATE)
+            .getBoolean("setting_dark", true)
+        AppCompatDelegate.setDefaultNightMode(
+            if (dark) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO
+        )
     }
 
     /**

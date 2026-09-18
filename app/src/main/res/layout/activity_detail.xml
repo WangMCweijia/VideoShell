@@ -31,6 +31,17 @@
             android:layout_weight="1"
             android:textSize="17sp" />
 
+        <!-- 收藏星标 -->
+        <ImageButton
+            android:id="@+id/btnFav"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginEnd="4dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/fav"
+            android:src="@drawable/ic_star_outline"
+            android:tint="@color/text_primary" />
+
         <!-- 校准入口在这一页也放一个：用户看到「分集名 / 选集不对」时就在这一页，
              就地能教 App 学本站，比让他返回到站点页再找要顺。 -->
         <TextView
