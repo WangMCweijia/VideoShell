@@ -115,18 +115,61 @@ object Http {
             .build()
     }
 
+    /** DNS 判定的短期结论：可连通缓存久、连不通缓存短（好让网络恢复后自己好起来） */
+    private data class DnsVerdict(val usable: Boolean, val at: Long)
+
+    private val dnsVerdict = java.util.concurrent.ConcurrentHashMap<String, DnsVerdict>()
+
     /**
-     * 韧性 DNS：系统优先（IPv4 前置），解析失败或返回空 → DoH 兜底。
-     * 封面请求、站点解析、播放器分片共用这一套。
+     * 系统 DNS 给的答案**连得上吗**（v1.0.30）。
+     *
+     * 为什么必须真连一次：**域名污染的特征是「有答案但连不上」**，不是「没有答案」。
+     * 旧逻辑只在 `lookup` 抛异常或返回空时才回落 DoH —— 污染场景下系统 DNS 会爽快地
+     * 返回一个错 IP，于是我们一路连到错地址，表现为「**站点主页能开、图床/CDN 整片打不开**」
+     * （野果封面就是这个症状；本机 DNS 正常所以复现不出来，只能在设备侧自愈）。
+     *
+     * 成本控制（常态零开销）：
+     * - 只探**第一个**地址、**400 ms** 超时（比一次正常连接的等待还短）；
+     * - 结论按 `主机|答案` 缓存：可用 10 分钟、不可用 1 分钟（后者是为了能自愈）。
+     *
+     * 误判的代价也很小：探测失败只会让我们改用 DoH 再解析一次 ——
+     * 若 DoH 给出的还是同一批地址，行为与原来完全一致。
+     */
+    private fun sysDnsUsable(hostname: String, ips: List<InetAddress>): Boolean {
+        val key = hostname.lowercase() + "|" + ips.joinToString(",") { it.hostAddress ?: "" }
+        val now = System.currentTimeMillis()
+        dnsVerdict[key]?.let { v ->
+            val ttl = if (v.usable) 10 * 60_000L else 60_000L
+            if (now - v.at < ttl) return v.usable
+        }
+        val ok = try {
+            java.net.Socket().use { s ->
+                s.connect(java.net.InetSocketAddress(ips.first(), 443), 400)
+                true
+            }
+        } catch (e: Exception) {
+            false
+        }
+        dnsVerdict[key] = DnsVerdict(ok, now)
+        return ok
+    }
+
+    /**
+     * 韧性 DNS：系统优先（IPv4 前置），但**答案连不上时**回落阿里 DoH（v1.0.30 起）。
+     *
+     * 封面请求、站点解析、播放器分片、解析服务接口共用这一套；
+     * 任何一处因为「答案错」而失败，都会在这里被纠正后重连。
      */
     private val resilientDns = object : Dns {
         override fun lookup(hostname: String): List<InetAddress> {
-            return try {
-                val r = ipv4FirstDns.lookup(hostname)
-                if (r.isNotEmpty()) r else dohDns.lookup(hostname)
+            val sys = try {
+                ipv4FirstDns.lookup(hostname)
             } catch (e: Exception) {
-                dohDns.lookup(hostname)
+                emptyList()
             }
+            if (sys.isNotEmpty() && sysDnsUsable(hostname, sys)) return sys
+            val doh = runCatching { dohDns.lookup(hostname) }.getOrElse { emptyList() }
+            return if (doh.isNotEmpty()) doh else sys
         }
     }
 
@@ -136,7 +179,13 @@ object Http {
             list.joinToString(" ") { it.hostAddress ?: "?" }.ifBlank { "（无记录）" }
         val sys = runCatching { Dns.SYSTEM.lookup(hostname) }.getOrDefault(emptyList())
         val doh = runCatching { dohDns.lookup(hostname) }.getOrElse { listOf<InetAddress>() }
-        return "系统DNS: ${fmt(sys)}｜DoH: ${fmt(doh)}"
+        // 关键：把「有答案但连不通」也点名 —— 这才是污染最典型、也最容易被漏掉的一态
+        val verdict = when {
+            sys.isEmpty() -> "系统无记录"
+            sysDnsUsable(hostname, sys) -> "系统答案可连通"
+            else -> "**系统答案连不上（疑似污染）⇒ 本次已自动改走 DoH**"
+        }
+        return "系统DNS: ${fmt(sys)}［$verdict］｜DoH: ${fmt(doh)}"
     }
 
     /**

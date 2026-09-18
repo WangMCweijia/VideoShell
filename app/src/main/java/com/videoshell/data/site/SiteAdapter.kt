@@ -82,6 +82,11 @@ abstract class SiteAdapter(val site: SiteConfig) {
         Media.extractFromHtml(html)?.takeIf { it.isNotBlank() }?.let {
             return MediaSource.Direct(Media.encodeUrl(it), playHeaders(), Media.isHls(it))
         }
+        // 解析服务「mui-player 外壳」（v1.0.30）：页面本身就是它时直接换地址。
+        // 不是这种页面 shellOf() 返回 null ⇒ 一个多余请求都不会发（自门控）。
+        shellDirect(html, pageUrl)?.let {
+            return MediaSource.Direct(Media.encodeUrl(it), playHeaders(), Media.isHls(it))
+        }
         // jx 解析接口跟随：地址本身是解析接口，或页面里引用了它
         val jx = JxParser.findJxUrl(html).orEmpty().ifBlank {
             if (JxParser.isJxUrl(u)) u else ""
@@ -107,6 +112,10 @@ abstract class SiteAdapter(val site: SiteConfig) {
             if (next == pageUrl) break
             val nextHtml = Http.getOrNull(next, referer = pageUrl) ?: break
             Media.extractFromHtml(nextHtml)?.takeIf { it.isNotBlank() }?.let {
+                return MediaSource.Direct(Media.encodeUrl(it), playHeaders(), Media.isHls(it))
+            }
+            // 解析服务的播放页外壳：POST 它的 mplayer.php 换真地址（v1.0.30）
+            shellDirect(nextHtml, next)?.let {
                 return MediaSource.Direct(Media.encodeUrl(it), playHeaders(), Media.isHls(it))
             }
             pageUrl = next
@@ -142,5 +151,26 @@ abstract class SiteAdapter(val site: SiteConfig) {
         val lines = MacPlayer.parseLines(text)
         MacPlayer.putLines(host, lines)
         return lines
+    }
+
+    /**
+     * 解析服务「mui-player 外壳」→ 真地址（v1.0.30）。
+     *
+     * 这是「点某一集不能直接播、只能靠嗅探」里**最后剩的那一类**：站点把第三方解析源
+     * （`ps:1`）的播放页整个嵌进来，而那个播放页自己也不含地址 —— 它只摆一个
+     * `#player-data`，真地址得 `POST {origin}{bt}mplayer.php` 换。
+     *
+     * 两道门保证「不该发就不发」：
+     * 1. [MacPlayer.shellOf] 认不出外壳 ⇒ 直接 null，**零请求**；
+     * 2. 请求失败 / `code != 200` / 返回体里没有 http 地址 ⇒ null，退回嗅探（等价修复前行为）。
+     */
+    private suspend fun shellDirect(html: String?, pageUrl: String): String? {
+        val sh = MacPlayer.shellOf(html) ?: return null
+        val api = MacPlayer.shellApiUrl(pageUrl, sh.bt) ?: return null
+        val body = LinkedHashMap<String, String>()
+        body["url"] = sh.u
+        if (sh.te.isNotBlank()) body["token"] = sh.te
+        val json = Http.postFormOrNull(api, body, referer = pageUrl) ?: return null
+        return MacPlayer.jsonUrl(json)
     }
 }

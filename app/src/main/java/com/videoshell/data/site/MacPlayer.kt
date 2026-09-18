@@ -233,6 +233,79 @@ object MacPlayer {
         return tpl.trim() + token
     }
 
+    // ------------------------------------------------------------------ 解析服务外壳（v1.0.30）
+
+    /**
+     * 第三方解析源的播放页外壳（`mui-player`）承载的取流凭据。
+     *
+     * `ps:1` 线路跟一层后拿到的是这种页面：正文只有一个 `#player-data`，真地址要
+     * `POST {origin}{bt}mplayer.php`（表单 `url` + `token`）换回来。
+     *
+     * 实测（2026-09-19，zqkhmy 的 co / vwnet 两条线路）：
+     * ```
+     * 解析页 1293 B，4 个 script（jquery / mui-player / hls.js / md5.js）
+     * <div id="player-data" data-u="co_yumkvzd6xi4agezyhm"
+     *      data-te="4gKY…" data-v="8e35…" data-bt="/player/">
+     * POST /player/mplayer.php  url=co_…&token=4gKY…
+     * → {"code":200,"url":"https://cibn-edge-5g.1ljx.com/…/x.m3u8?auth_key=1789748995…"}
+     * ```
+     *
+     * **`url` 与 `token` 都直接来自页面，不需要重算签名** —— 站点把
+     * `data-*` 拼好后就摆在那儿，`md5.js`（jsjiami.cn.v7 混淆）只是干扰项。
+     * 反过来，页面里那个 `auth_key` 有时效 ⇒ 只能**播放时现取**，绝不固化直链。
+     */
+    data class Shell(val u: String, val te: String, val bt: String)
+
+    // `[^>]*` 会跨行 —— 真实页面的 data-* 每个一行，整个标签到 `style="display:none;">` 才结束。
+    private val PLAYER_DATA_TAG =
+        Regex("<div[^>]*id=[\"']player-data[\"'][^>]*>", RegexOption.IGNORE_CASE)
+    private val SHELL_U = Regex("data-u\\s*=\\s*[\"']([^\"']*)[\"']", RegexOption.IGNORE_CASE)
+    private val SHELL_TE = Regex("data-te\\s*=\\s*[\"']([^\"']*)[\"']", RegexOption.IGNORE_CASE)
+    private val SHELL_BT = Regex("data-bt\\s*=\\s*[\"']([^\"']*)[\"']", RegexOption.IGNORE_CASE)
+
+    /**
+     * 识别「解析服务外壳」。不是这种页面一律返回 null（调用方据此**不发任何请求**）。
+     *
+     * 只认带 `data-u` 的 `#player-data`：`data-u` 是视频号，缺了它接口必然要不到东西。
+     */
+    fun shellOf(html: String?): Shell? {
+        if (html.isNullOrBlank()) return null
+        val tag = PLAYER_DATA_TAG.find(html)?.value ?: return null
+        val u = SHELL_U.find(tag)?.groupValues?.get(1)?.trim().orEmpty()
+        if (u.isBlank()) return null
+        val te = SHELL_TE.find(tag)?.groupValues?.get(1)?.trim().orEmpty()
+        val bt = SHELL_BT.find(tag)?.groupValues?.get(1)?.trim().orEmpty()
+        // `data-bt` 实测存在，但缺了也能按约定补 /player/
+        return Shell(u = u, te = te, bt = bt.ifBlank { "/player/" })
+    }
+
+    /** 取流接口地址：`{origin}{bt}mplayer.php` */
+    fun shellApiUrl(pageUrl: String, bt: String): String? {
+        val origin = Regex("^(https?://[^/]+)", RegexOption.IGNORE_CASE)
+            .find(pageUrl.trim())?.groupValues?.get(1) ?: return null
+        val base = bt.ifBlank { "/player/" }
+        val dir = if (base.endsWith("/")) base else "$base/"
+        return origin + dir + "mplayer.php"
+    }
+
+    /**
+     * 从接口返回体里取真地址。
+     *
+     * 形状实测为 `{"code":200,"url":"…m3u8?auth_key=…","tradem":0,…}`；
+     * `code` 不是 200（如 403 `{"code":403,"msg":"m3"}`）就不认，退回嗅探。
+     *
+     * ⚠️ 别信响应里的 `type` 字段（实测它的值是 `"mp4"`，给的却是 m3u8），
+     * 是否 HLS 一律按地址判断。
+     */
+    fun jsonUrl(json: String?): String? {
+        if (json.isNullOrBlank()) return null
+        val o = objOf(json.trim()) ?: return null
+        val code = o.get("code")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+        if (code.isNotBlank() && code != "200") return null
+        val u = o.str("url").trim()
+        return u.takeIf { it.startsWith("http") }
+    }
+
     // ------------------------------------------------------------------ 站点级线路表
 
     /**

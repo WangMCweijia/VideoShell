@@ -100,8 +100,10 @@ object SiteDoctor {
             val host = runCatching { java.net.URI(cover).host }.getOrNull().orEmpty()
             if (host.isNotBlank()) {
                 L("    ${Http.dnsReport(host)}")
-                L("    解读：系统 DNS 若为空/异常而 DoH 正常 ⇒ 域名被污染（App 已自动走 DoH 兜底）；")
-                L("         两边都正常但 HTTP 非 2xx ⇒ 图床按 UA/Referer/IP 拒绝，把状态码发回定位。")
+                L("    解读：")
+                L("      · 系统 DNS 为空/异常 ⇒ 污染；「有答案但连不上」同样算污染 —— 两种都已自动改走 DoH；")
+                L("      · 两边都正常但 HTTP 非 2xx ⇒ 图床按 UA/Referer/IP 拒绝，把状态码发回定位；")
+                L("      · 这里 HTTP 200 而界面仍无图 ⇒ 问题不在网络，在图片加载层（Coil），请连同机型一起反馈。")
             }
         }
 
