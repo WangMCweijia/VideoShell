@@ -89,6 +89,25 @@ class CalibrateActivity : AppCompatActivity() {
     /** 第 3 步选中的播放页地址 —— 第 4 步结束时才真正去解析 / 试播 */
     private var playPickAbs: String = ""
 
+    // ---------------------------------------------------------------- v1.0.29：可跳过某一步
+    //
+    // 站点之间结构差异极大：有的站没有分类页（第一步无从点起），有的站点封面就直接播放
+    // （没有独立详情页，第二步和第三步是同一页）。旧流程强制四步走完，用户只能"随便点一个"
+    // 交差 —— 于是把**错误模板**固化进去，接下来解析全用错规则，
+    // 表现就是「校准完了结果还是没生效」。
+
+    private var skipCat = false
+    private var skipDetail = false
+    private var skipPlay = false
+
+    /**
+     * 配方**真的被写过**。v1.0.29 修 ③ 用：
+     * 旧代码只有 [finishOk] 会 `setResult(RESULT_OK)`，用户点左上角返回时
+     * 返回码是 `CANCELED` ⇒ 站源页的 `onCalibReturned()` 不执行 ⇒
+     * 配方其实已落盘，界面却还是旧的，用户看到的就是"校准结果没生效"。
+     */
+    private var committed = false
+
     /** 第三步走完（别再响应网页点击）；真正收尾看 [resolvingStarted] */
     private var finished = false
 
@@ -124,6 +143,7 @@ class CalibrateActivity : AppCompatActivity() {
         binding.btnRestart.setOnClickListener { restart() }
         binding.btnConfirm.setOnClickListener { confirm() }
         binding.btnReselect.setOnClickListener { reselect() }
+        binding.btnSkip.setOnClickListener { skipStep() }
 
         // 已校准过的话，把上次的规则先亮出来，方便对照着点
         RecipeStore.load(site.baseUrl)?.let {
@@ -136,6 +156,44 @@ class CalibrateActivity : AppCompatActivity() {
     }
 
     // ------------------------------------------------------------------ 引导文案
+
+    /**
+     * 跳过当前这一步（v1.0.29）。
+     *
+     * 跳过 ≠ 什么都不做：它表示「本站确实没有这一步」，所以要**清空**该步的旧规则 ——
+     * 否则 [commit] 里的 `?:` 会把上一次校准的残留留着，越校越错。
+     */
+    private fun skipStep() {
+        if (resolvingStarted) return
+        pending = null
+        when (step) {
+            SiteCalib.Step.CAT -> {
+                skipCat = true
+                catTpl = null
+                navSel = null
+                step = SiteCalib.Step.DETAIL
+                state(getString(R.string.calib_skip_cat))
+            }
+            SiteCalib.Step.DETAIL -> {
+                skipDetail = true
+                detailTpl = null
+                step = SiteCalib.Step.PLAY
+                state(getString(R.string.calib_skip_detail))
+            }
+            SiteCalib.Step.PLAY -> {
+                skipPlay = true
+                playTpl = null
+                // ⚠️ 不清 playPickAbs：如果第 2 步点到的是播放页（"点封面直接播放"的站），
+                // 那个地址就是可用的试播样本，留着还能验一次；从没点过才是空。
+                step = SiteCalib.Step.SEARCH
+                state(getString(R.string.calib_skip_play))
+                binding.webView.loadUrl(site.baseUrl)
+            }
+            // 第 4 步本来就是「按确定后留空 = 跳过」，不再给第二个入口
+            SiteCalib.Step.SEARCH -> state(getString(R.string.calib_skip_none))
+        }
+        render()
+    }
 
     private fun render() {
         // v1.0.20：三步之后还有可选的第 4 步（搜索），标题统一显示步数
@@ -179,6 +237,9 @@ class CalibrateActivity : AppCompatActivity() {
         binding.btnConfirm.visibility = if (show) View.VISIBLE else View.GONE
         binding.btnReselect.visibility =
             if (show && pending != null) View.VISIBLE else View.GONE
+        // 前三步都能跳过；第 4 步本身就是「留空 = 跳过」，不再给第二个入口
+        binding.btnSkip.visibility =
+            if (show && step != SiteCalib.Step.SEARCH) View.VISIBLE else View.GONE
     }
 
     private fun state(msg: String) {
@@ -194,6 +255,9 @@ class CalibrateActivity : AppCompatActivity() {
         playTpl = null
         searchTpl = null
         playPickAbs = ""
+        skipCat = false
+        skipDetail = false
+        skipPlay = false
         binding.pb.visibility = View.GONE
         render()
         state(getString(R.string.calib_restarted))
@@ -422,6 +486,9 @@ class CalibrateActivity : AppCompatActivity() {
         val id = HtmlTemplates.videoIdOf(p.raw, false) ?: HtmlTemplates.videoIdOf(p.abs, false)
         detailTpl = if (isPlay || id.isNullOrBlank()) null
         else HtmlTemplates.detailTplFrom(p.abs, id)
+        // "点封面就直接播放"的站：这个地址本身就是播放页 ⇒ 留作试播样本。
+        // 用户接下来如果跳过第 3 步（那种站第 3 步无从点起），第 4 步结束时照样能试播一次。
+        if (isPlay) playPickAbs = p.abs
         step = SiteCalib.Step.PLAY
         render()
         val tpl = detailTpl
@@ -515,6 +582,18 @@ class CalibrateActivity : AppCompatActivity() {
     // ------------------------------------------------------------------ 解析 + 固化 + 试播
 
     private fun resolveAndPlay(playUrl: String) {
+        // 跳过了第 3 步 ⇒ 没有可试播的样本。别拿空地址去 resolve ——
+        // 那必然返回「播放地址为空」，用户刚跳完就看到"解析失败"，等于白跳。
+        if (playUrl.isBlank()) {
+            commit("", "已跳过试播")
+            AlertDialog.Builder(this)
+                .setTitle(R.string.calib_title_done)
+                .setMessage(getString(R.string.calib_saved_noplay) + "\n\n" + summary())
+                .setCancelable(false)
+                .setNegativeButton(R.string.calib_finish) { _, _ -> finishOk() }
+                .show()
+            return
+        }
         resolvingStarted = true
         renderActions()
         binding.pb.visibility = View.VISIBLE
@@ -608,23 +687,36 @@ class CalibrateActivity : AppCompatActivity() {
      * 写完之后 [com.videoshell.data.site.HtmlAdapter] 在任何新实例里都能直接用。
      */
     private fun commit(playUrl: String, kind: String) {
+        val skipped = buildList {
+            if (skipCat) add("分类")
+            if (skipDetail) add("详情")
+            if (skipPlay) add("分集")
+        }.joinToString("/").ifBlank { "无" }
         val note = "分类形状=" + (catTpl ?: "—") +
                 "；分类容器=" + (navSel ?: "—") +
                 "；详情=" + (detailTpl ?: "—") +
                 "；播放=" + (playTpl ?: "—") +
                 "；搜索=" + (searchTpl ?: "—") +
+                "；跳过=" + skipped +
                 "；$kind；样例=" + short(playUrl)
         RecipeStore.update(site.baseUrl) { r ->
-            r.copy(
-                catTpl = catTpl ?: r.catTpl,
-                navSel = navSel ?: r.navSel,
-                detailTpl = detailTpl ?: r.detailTpl,
-                playTpl = playTpl ?: r.playTpl,
-                searchTpl = searchTpl ?: r.searchTpl,
-                calibAt = System.currentTimeMillis(),
-                calibNote = note
+            // 归并逻辑（学到了 / 没学到 / 明确跳过 三种语义）在 SiteCalib 里 ——
+            // 纯函数、有离线断言，见 `mergeRecipe`。
+            SiteCalib.mergeRecipe(
+                cur = r,
+                catTpl = catTpl,
+                navSel = navSel,
+                detailTpl = detailTpl,
+                playTpl = playTpl,
+                searchTpl = searchTpl,
+                skipCat = skipCat,
+                skipDetail = skipDetail,
+                skipPlay = skipPlay,
+                note = note,
+                now = System.currentTimeMillis()
             )
         }
+        committed = true
         switchToHtmlMode()
         toast(getString(R.string.calib_saved))
     }
@@ -646,6 +738,18 @@ class CalibrateActivity : AppCompatActivity() {
     private fun finishOk() {
         setResult(RESULT_OK)
         finish()
+    }
+
+    /**
+     * 只要配方**真的写过**，无论从哪条路退出都回 `RESULT_OK`（v1.0.29）。
+     *
+     * 旧实现只有 [finishOk] 会 setResult，而用户点左上角返回键（或按系统返回）退出时
+     * 返回码是 `CANCELED` ⇒ 站源页的 `onCalibReturned()` 直接 return ⇒
+     * 配方其实已经落盘，界面却还是校准前的样子 —— 用户看到的就是"校准结果没生效"。
+     */
+    override fun finish() {
+        if (committed) setResult(RESULT_OK)
+        super.finish()
     }
 
     // ------------------------------------------------------------------ 工具

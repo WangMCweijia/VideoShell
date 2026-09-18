@@ -63,8 +63,9 @@ abstract class SiteAdapter(val site: SiteConfig) {
      * 把剧集地址解析为可直接交给播放器的地址：
      * 1) 本身是 m3u8/mp4 -> 直接用
      * 2) 是播放页 -> 尝试直接从 HTML 里抠真实地址（快，不用 WebView）
-     * 3) 页面把地址交给第三方 **jx 解析接口** -> 跟过去取流（新增）
-     * 4) 抠不到 -> 交给网页嗅探
+     * 3) 页面把地址交给第三方 **jx 解析接口** -> 跟过去取流
+     * 4) 页面用 maccms 的 **player_list 解析模板**（`ps:1`）-> 跟到解析页再抠一次（v1.0.29）
+     * 5) 都抠不到 -> 交给网页嗅探
      */
     open suspend fun resolve(episode: Episode): MediaSource {
         val u = episode.url.trim()
@@ -76,10 +77,10 @@ abstract class SiteAdapter(val site: SiteConfig) {
         if (Media.isDirect(u)) return MediaSource.Direct(Media.encodeUrl(u), playHeaders(), Media.isHls(u))
         if (!u.startsWith("http")) return MediaSource.Error("无法识别的播放地址：$u")
 
-        val html = Http.getOrNull(u, referer = site.baseUrl)
-        val real = Media.extractFromHtml(html)
-        if (!real.isNullOrBlank()) {
-            return MediaSource.Direct(Media.encodeUrl(real), playHeaders(), Media.isHls(real))
+        var pageUrl = u
+        var html = Http.getOrNull(pageUrl, referer = site.baseUrl)
+        Media.extractFromHtml(html)?.takeIf { it.isNotBlank() }?.let {
+            return MediaSource.Direct(Media.encodeUrl(it), playHeaders(), Media.isHls(it))
         }
         // jx 解析接口跟随：地址本身是解析接口，或页面里引用了它
         val jx = JxParser.findJxUrl(html).orEmpty().ifBlank {
@@ -91,6 +92,55 @@ abstract class SiteAdapter(val site: SiteConfig) {
                 return MediaSource.Direct(Media.encodeUrl(stream), playHeaders(), Media.isHls(stream))
             }
         }
+        // maccms 第三方解析源跟随（v1.0.29）。
+        // 这类线路的 `player_aaaa.url` 只是一个**令牌**（`co_e5a2tzd6xi4age3dnjrq`），
+        // 真地址在 `parse 模板 + 令牌` 指向的那一层。实测 zqkhmy 6 条线路里 3 条如此，
+        // 以前全数落到嗅探；跟一层就能让其中"解析服务是明文"的站直接播。
+        val host = RecipeStore.hostOf(site.baseUrl)
+        for (i in 0 until MacPlayer.FOLLOW_MAX) {
+            val info = MacPlayer.parseInfo(html) ?: break
+            val next = MacPlayer.playPage(
+                info,
+                linesForPlay(html, pageUrl, host),
+                MacPlayer.parseGlobalParse(html)
+            ) ?: break
+            if (next == pageUrl) break
+            val nextHtml = Http.getOrNull(next, referer = pageUrl) ?: break
+            Media.extractFromHtml(nextHtml)?.takeIf { it.isNotBlank() }?.let {
+                return MediaSource.Direct(Media.encodeUrl(it), playHeaders(), Media.isHls(it))
+            }
+            pageUrl = next
+            html = nextHtml
+        }
+        // 嗅探目标仍是**原始播放页**：WebView 打开它会自然带上正确的 Referer 并完成跳转，
+        // 换成解析页虽然少一跳，但解析页可能校验 Referer —— 不为未验证的收益引入回归。
         return MediaSource.Sniff(u, playHeaders())
+    }
+
+    /**
+     * 取本站的 `player_list`（`from` → `ps` / `parse`）。
+     *
+     * 顺序：播放页内联 → 站点缓存 → 跟着 `playerconfig.js` 抓一次。
+     *
+     * **大多数站的配置不在播放页里**，而在外链的 `/static/js/playerconfig.js`：
+     * 实测 zqkhmy 的播放页 120 KB，里面只有 `<script src="/static/js/playerconfig.js?t=…">`。
+     * 同一站所有播放页共用一份配置，所以抓一次按 host 记下来，之后不再发请求。
+     *
+     * 只有「页面里确实出现了 `player_aaaa`」时调用方才会走到这里，
+     * 因此对非 maccms 站**不会**多出任何请求。
+     */
+    private suspend fun linesForPlay(
+        html: String?,
+        pageUrl: String,
+        host: String
+    ): Map<String, MacPlayer.Line> {
+        val inline = MacPlayer.parseLines(html)
+        if (inline.isNotEmpty()) return inline
+        MacPlayer.cachedLines(host)?.let { return it }
+        val js = MacPlayer.configScriptUrl(html, pageUrl) ?: return emptyMap()
+        val text = Http.getOrNull(js, referer = pageUrl) ?: return emptyMap()
+        val lines = MacPlayer.parseLines(text)
+        MacPlayer.putLines(host, lines)
+        return lines
     }
 }

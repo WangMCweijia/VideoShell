@@ -55,6 +55,37 @@ object SiteCalib {
      * 用户在第 2 步误点了一集时，界面该说的是"这像播放页，详情模板没学到"，
      * 而不是把整条 `-1-1.html` 记成详情模板。
      */
+    /**
+     * 把本次校准学到的规则并进旧配方（v1.0.29）。
+     *
+     * 三种输入的语义必须分清，混起来就会「越校越错」：
+     * - **学到了** → 覆盖；
+     * - **没学到**（判据这次没认出来）→ 保留旧值，别把上一次的成果抹掉；
+     * - **明确跳过**（本站根本没有这一步）→ **清空**，否则旧规则会一直挡在前面，
+     *   用户看到的就是「校准完了结果还是没生效」。
+     */
+    fun mergeRecipe(
+        cur: SiteRecipe,
+        catTpl: String?,
+        navSel: String?,
+        detailTpl: String?,
+        playTpl: String?,
+        searchTpl: String?,
+        skipCat: Boolean,
+        skipDetail: Boolean,
+        skipPlay: Boolean,
+        note: String,
+        now: Long
+    ): SiteRecipe = cur.copy(
+        catTpl = if (skipCat) null else (catTpl ?: cur.catTpl),
+        navSel = if (skipCat) null else (navSel ?: cur.navSel),
+        detailTpl = if (skipDetail) null else (detailTpl ?: cur.detailTpl),
+        playTpl = if (skipPlay) null else (playTpl ?: cur.playTpl),
+        searchTpl = searchTpl ?: cur.searchTpl,
+        calibAt = now,
+        calibNote = note
+    )
+
     fun classify(raw: String, abs: String, step: Step): PickKind {
         val h = raw.trim()
         if (h.isEmpty()) return PickKind.NOT_LINK

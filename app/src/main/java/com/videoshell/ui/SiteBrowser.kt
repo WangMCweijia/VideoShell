@@ -154,8 +154,12 @@ class SiteBrowser(
 
     /** 校准页回来后：配方/站点模式都可能变了，必须换新适配器重来 */
     fun onCalibReturned() {
-        val s = site ?: return
-        val fresh = Store.find(act, s.key) ?: return
+        // 首页在「还没绑定站点」的空态时 site 为 null —— 旧实现直接 return，
+        // 于是从首页进校准、返回后什么都不刷新（用户以为"校准没生效"）。
+        // 兜底：没有当前站点就回到默认站源重绑一次。
+        val cur = site
+        val fresh = if (cur != null) Store.find(act, cur.key) else Store.defaultSite(act)
+        if (fresh == null) return
         site = fresh
         adapter = AdapterFactory.create(fresh)
         webRendered = false

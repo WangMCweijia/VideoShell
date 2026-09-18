@@ -142,6 +142,14 @@
     <string name="calib_search_skipped">已跳过搜索校准</string>
     <string name="calib_search_failed">结果页地址里没找到关键词——先在网页里搜索一次，停在结果页再按「确定」。也可以按「确定」后留空跳过搜索校准。</string>
     <string name="calib_reselect">重选</string>
+
+    <!-- 跳过某一步（v1.0.29）：站点之间结构差异很大，不适配的步不该把用户锁死 -->
+    <string name="calib_skip">跳过</string>
+    <string name="calib_skip_cat">已跳过分类校准 —— 本站没有独立分类页；旧的分类规则已清空，改按首页/导航容器自动识别</string>
+    <string name="calib_skip_detail">已跳过详情页校准 —— 「点封面就直接播放」的站不需要它</string>
+    <string name="calib_skip_play">已跳过选集校准 —— 本次不做试播，下一步直接固化规则</string>
+    <string name="calib_skip_none">这一步按「确定」后留空即可跳过</string>
+    <string name="calib_saved_noplay">规则已保存（本次没做试播）</string>
     <string name="calib_picked_cat">已选中分类「%1$s」—— 按「确定」继续</string>
     <string name="calib_picked_detail">已选中影片「%1$s」—— 按「确定」继续</string>
     <string name="calib_picked_play">已选中分集「%1$s」—— 按「确定」开始解析</string>

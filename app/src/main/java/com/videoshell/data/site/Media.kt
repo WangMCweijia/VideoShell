@@ -284,6 +284,13 @@ object Media {
 
         PLAYER_JSON.find(html)?.let { m ->
             val body = m.groupValues[1]
+            // v1.0.29：先按 `encrypt` 解码 url（maccms 标准：1=百分号编码，2=base64）。
+            // 不解码时 `"url":"aHR0cHM6Ly8…"` / `"url":"https%3A%2F%2F…"` 这类站
+            // 永远抠不到地址 —— 用户看到的就是「点某一集播不了，只能靠嗅探」。
+            MacPlayer.infoFromJson(body)?.url?.let { u ->
+                val dec = innermost(unescape(u))
+                if (looksLikeMedia(dec)) return dec
+            }
             pick(KEY_URL, body)?.let { return it }
             pick(KEY_URL2, body)?.let { return it }
             pick(KEY_FILE, body)?.let { return it }
