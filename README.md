@@ -259,7 +259,7 @@ cd D:/TRAE/releases/.tools/videoshell_verify && python runall.py
 `runlivepic`（**封面线上 8 条**：列表封面统计 + **真取图**验证可达性 + 详情封面回落）、
 `runbs4`（**分集名 + 校准逻辑 60 条**：剧名前缀剥离、分类形状、容器反推、配方优先级与失效自愈、
 点击定性「只提示不拦人」、**校准配方压过 apiMode**）。
-`runresume`（**进度记忆身份 15 条**：`episodeKey`(站|剧|集) + `Media.digest` 取代 32 位 `url.hashCode()`、
+`runresume` 的**历史底座**（`episodeKey`(站|剧|集) + `Media.digest` 取代 32 位 `url.hashCode()`、
 换线路共享 / 换集分离 / 跨剧跨站分离、2000 组唯一性、**源码守卫**（`hashCode()` 写法绝迹））、
 `runhome`（**首页封面 14 条**：「最新」tab 抓的是站点首页 ⇒ SSR payload 0 封面是必然、
 剧名去重率、真分类页 30+30 封面、`homeCat` 过 Gson 往返）、
@@ -267,8 +267,11 @@ cd D:/TRAE/releases/.tools/videoshell_verify && python runall.py
 标签栏整段文本不当组名、盖不全时仍留外层别丢集、标准 maccms tab 映射不变、
 **骚火形状**（`ul.play_list > li` 每条源一个 li ⇒ 子块拆线 + 组名取线路标签栏）、
 **负例**（每集一个 li 的正常结构不许拆）、组名「剧名+尾注」拼合取剧名）。、
-`runsearch`（**搜索模板学习 11 条**：站点搜索表单反推 `?q={kw}` / `?wd={kw}`（厂长 `/nimasile`、骚火 `/s----------.html` 实测形状）、POST 表单与无 name 输入框不认、
-校准第 4 步「结果页地址 + 关键词」反推（解码后替换、找不到词返回 null）、两遍式搜索（严格命中关键词 ⇒ 宽松兜底））、`runresume` 15→17（骚火同名集 52 个「高清」靠序号全唯一）。
+`runsearch`（**搜索模板学习 14 条**：站点搜索表单反推 `?q={kw}` / `?wd={kw}`（厂长 `/nimasile`、骚火 `/s----------.html` 实测形状）、POST 表单与无 name 输入框不认、
+校准第 4 步「结果页地址 + 关键词」反推（解码后替换、找不到词返回 null）、两遍式搜索（严格命中关键词 ⇒ 宽松兜底）、
+**金牌 zanpian 形状**（`/bspvc/-----------s-.html?wd={kw}` 不在固定候选里 ⇒ 固化模板打歪时必须有强制重学路径））、
+`runresume`（**23 条**：v1.0.20 补集序号（骚火 52 个「高清」全唯一）+ v1.0.21 补 `Media.resumeAtEnd`
+续播失效守卫（落点掉进流末尾 15 秒 ⇒ 从头播，治「野果从末尾开始」这类时长变短/换源场景））。
 
 > `runbs4` 是 **UI 之外的那半张网**：校准模式的判据与推导全在 `SiteCalib` / `HtmlTemplates` 里
 > （不在 Activity 里），所以能被离线断言覆盖。校准一旦推错就会被**固化**，比自动学习错了更难发现
