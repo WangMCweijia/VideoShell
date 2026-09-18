@@ -228,6 +228,13 @@ object SiteDoctor {
             is MediaSource.Sniff -> {
                 L("    HTML 抠不到直链 → 需要网页嗅探（第 6 步跳过）")
                 L("    嗅探页：${ms.pageUrl}")
+                // v1.0.31：先把"它是哪一种壳"说清楚。
+                // 写「哪种壳都没认出」⇒ 这是新壳，抓一页补 [PlayerShell] 的分支即可；
+                // 写了具体某种 ⇒ 是分支里的判据没生效，不是新壳。别再抓包猜。
+                runCatching {
+                    val ph = Http.getOrNull(ms.pageUrl, referer = site.baseUrl)
+                    L("    外壳判定：${PlayerShell.describe(ph, ms.pageUrl)}")
+                }
             }
             is MediaSource.Error -> L("    失败：${ms.message}")
             null -> L("    失败：未返回结果")

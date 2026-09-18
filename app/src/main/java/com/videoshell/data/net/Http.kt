@@ -11,6 +11,8 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.net.Inet4Address
 import java.net.InetAddress
@@ -155,21 +157,48 @@ object Http {
     }
 
     /**
-     * 韧性 DNS：系统优先（IPv4 前置），但**答案连不上时**回落阿里 DoH（v1.0.30 起）。
+     * DNS 结果缓存（v1.0.31）。
+     *
+     * 为什么非加不可：设备侧系统 DNS 对图床域名**一条记录都没有**时（野果封面实测就是这个
+     * 状态：系统无记录、DoH 有），每取一张图都要走一次 DoH 的 HTTPS 往返 —— 一个 30 张封面
+     * 的网格就是 30 次，慢到 Coil 直接超时 ⇒ 表现为「自检单张能取到 206、界面却一片空白」。
+     * 命中缓存后常态零额外解析，只是把"每次都问一遍"变成"5 分钟问一遍"。
+     */
+    private data class DnsEntry(val ips: List<InetAddress>, val at: Long)
+
+    private val dnsCache = java.util.concurrent.ConcurrentHashMap<String, DnsEntry>()
+
+    /** 5 分钟：够撑完一次刷页；真改了 IP 也能在几分钟内自己恢复 */
+    private val DNS_TTL_MS = 5 * 60_000L
+
+    /**
+     * 韧性 DNS：系统优先（IPv4 前置），但**答案连不上/根本没有**时回落阿里 DoH（v1.0.30 起）。
      *
      * 封面请求、站点解析、播放器分片、解析服务接口共用这一套；
      * 任何一处因为「答案错」而失败，都会在这里被纠正后重连。
      */
     private val resilientDns = object : Dns {
         override fun lookup(hostname: String): List<InetAddress> {
+            val key = hostname.lowercase()
+            dnsCache[key]?.let { e ->
+                if (e.ips.isNotEmpty() && System.currentTimeMillis() - e.at < DNS_TTL_MS) {
+                    return e.ips
+                }
+            }
             val sys = try {
                 ipv4FirstDns.lookup(hostname)
             } catch (e: Exception) {
                 emptyList()
             }
-            if (sys.isNotEmpty() && sysDnsUsable(hostname, sys)) return sys
-            val doh = runCatching { dohDns.lookup(hostname) }.getOrElse { emptyList() }
-            return if (doh.isNotEmpty()) doh else sys
+            val ips = if (sys.isNotEmpty() && sysDnsUsable(hostname, sys)) {
+                sys
+            } else {
+                // 系统没答案，或有答案但连不上 —— 都去问 DoH；DoH 也没有就还是用系统的
+                val doh = runCatching { dohDns.lookup(hostname) }.getOrElse { emptyList() }
+                if (doh.isNotEmpty()) doh else sys
+            }
+            if (ips.isNotEmpty()) dnsCache[key] = DnsEntry(ips, System.currentTimeMillis())
+            return ips
         }
     }
 
@@ -357,6 +386,74 @@ object Http {
         postForm(url, params, referer, ua, fast)
     } catch (e: Exception) {
         null
+    }
+
+    /**
+     * POST 一段 JSON（v1.0.31）。
+     *
+     * 播放器外壳有一类是「引导对象 + JSON 接口」：页面把 `url` / `t` / `key` 这些令牌**明文**
+     * 摆进 `window.__XXX__={...}`，再用混淆 JS `POST /api/parse` 换真地址 —— 骚火的 hhplayer
+     * 就是这种。**这类接口只认 JSON 体，用表单体过去会被拒**，所以不能复用 [postForm]。
+     * 与 [postForm] 同享重试、CookieJar、NetLog 与韧性 DNS。
+     */
+    suspend fun postJson(
+        url: String,
+        json: String,
+        referer: String? = null,
+        ua: String = UA
+    ): String = withContext(Dispatchers.IO) {
+        var last: Exception? = null
+        for (attempt in 0 until MAX_ATTEMPTS) {
+            if (attempt > 0) delay(RETRY_DELAY_MS[attempt])
+            try {
+                return@withContext oncePostJson(url, json, referer, ua)
+            } catch (e: Exception) {
+                last = e
+                if (!worthRetry(e)) break
+            }
+        }
+        throw last ?: IOException("请求失败：$url")
+    }
+
+    suspend fun postJsonOrNull(
+        url: String,
+        json: String,
+        referer: String? = null,
+        ua: String = UA
+    ): String? = try {
+        postJson(url, json, referer, ua)
+    } catch (e: Exception) {
+        null
+    }
+
+    /** 单次 JSON POST（不含重试） */
+    private fun oncePostJson(url: String, json: String, referer: String?, ua: String): String {
+        val body = json.toRequestBody("application/json; charset=utf-8".toMediaType())
+        val b = Request.Builder().url(url)
+            .post(body)
+            .header("User-Agent", ua)
+            .header("Accept", "application/json, text/plain, */*")
+            .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+        if (!referer.isNullOrBlank()) {
+            b.header("Referer", referer)
+            // 同表单 POST：有 Referer 就补 Origin，免得 WAF 403
+            runCatching { b.header("Origin", originOf(referer)) }
+        }
+        val t0 = System.currentTimeMillis()
+        try {
+            client.newCall(b.build()).execute().use { resp ->
+                val bytes = resp.body?.bytes() ?: ByteArray(0)
+                NetLog.record(url, resp.code, System.currentTimeMillis() - t0)
+                if (!resp.isSuccessful) throw IOException("HTTP ${resp.code} @ $url")
+                return decodeBody(bytes, resp.body?.contentType()?.charset()?.name())
+            }
+        } catch (e: Exception) {
+            if (e !is IOException || !e.message.orEmpty().startsWith("HTTP ")) {
+                NetLog.record(url, -1, System.currentTimeMillis() - t0,
+                    e.javaClass.simpleName + ": " + e.message)
+            }
+            throw e
+        }
     }
 
     /** 单次表单 POST（不含重试） */

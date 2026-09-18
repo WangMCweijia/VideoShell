@@ -121,6 +121,29 @@ abstract class SiteAdapter(val site: SiteConfig) {
             pageUrl = next
             html = nextHtml
         }
+        // v1.0.31：壳并不都是 maccms 线路 —— 还有两种真地址藏在壳里的形状：
+        //   ① 页面本身就是「引导对象 + JSON 接口」壳（骚火 hhplayer）；
+        //   ② 播放器被塞进 iframe，真地址全在那一层（也是骚火这一站的形态）。
+        // 两类都自门控（[PlayerShell] 认不出就返回 null），非此类站零额外请求。
+        bootDirect(html, pageUrl)?.let {
+            return MediaSource.Direct(Media.encodeUrl(it), playHeaders(), Media.isHls(it))
+        }
+        val frame = PlayerShell.iframeOf(html, pageUrl)
+        if (!frame.isNullOrBlank() && frame != pageUrl) {
+            val frameHtml = Http.getOrNull(frame, referer = pageUrl)
+            if (frameHtml != null) {
+                // iframe 那一层可能是明文地址，也可能是另一种壳 —— 三种判据都试一遍
+                Media.extractFromHtml(frameHtml)?.takeIf { it.isNotBlank() }?.let {
+                    return MediaSource.Direct(Media.encodeUrl(it), playHeaders(), Media.isHls(it))
+                }
+                shellDirect(frameHtml, frame)?.let {
+                    return MediaSource.Direct(Media.encodeUrl(it), playHeaders(), Media.isHls(it))
+                }
+                bootDirect(frameHtml, frame)?.let {
+                    return MediaSource.Direct(Media.encodeUrl(it), playHeaders(), Media.isHls(it))
+                }
+            }
+        }
         // 嗅探目标仍是**原始播放页**：WebView 打开它会自然带上正确的 Referer 并完成跳转，
         // 换成解析页虽然少一跳，但解析页可能校验 Referer —— 不为未验证的收益引入回归。
         return MediaSource.Sniff(u, playHeaders())
@@ -172,5 +195,22 @@ abstract class SiteAdapter(val site: SiteConfig) {
         if (sh.te.isNotBlank()) body["token"] = sh.te
         val json = Http.postFormOrNull(api, body, referer = pageUrl) ?: return null
         return MacPlayer.jsonUrl(json)
+    }
+
+    /**
+     * 「引导对象 + JSON 接口」壳 → 真地址（v1.0.31，骚火 hhplayer）。
+     *
+     * 页面把 `url` / `t` / `key` 明文摆进 `window.__XXX__={...}`，混淆 JS 再
+     * `POST {origin}/api/parse` 换真地址。**令牌是页面现成给的，不用重算签名**
+     * （页面里那些混淆 JS 是诱饵，两次踩的经验都是"别去反混淆，看页面就行"）。
+     *
+     * 门控同 [shellDirect]：[PlayerShell.bootOf] 认不出（缺 `url` 或 `key`）⇒ 零请求。
+     * ⚠️ 换回来的地址带 `expires` / `sign`，有 TTL ⇒ 只当次取用，绝不写进配方。
+     */
+    private suspend fun bootDirect(html: String?, pageUrl: String): String? {
+        val boot = PlayerShell.bootOf(html) ?: return null
+        val api = PlayerShell.bootApiUrl(pageUrl) ?: return null
+        val json = Http.postJsonOrNull(api, PlayerShell.bootJson(boot), referer = pageUrl) ?: return null
+        return PlayerShell.jsonUrl(json)
     }
 }
