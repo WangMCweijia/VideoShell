@@ -251,6 +251,11 @@ class CalibrateActivity : AppCompatActivity() {
         finished = false
         resolvingStarted = false
         pending = null
+        // ⚠️ 分类那两项以前没清（只清了详情/播放/搜索）。
+        // 于是"重新校准"时旧形状会一直挂在 `mergeRecipe` 的 `?:` 兜底上，
+        // 用户以为在重新学，实际用的还是上一次的点法 —— 越校越错。
+        catTpl = null
+        navSel = null
         detailTpl = null
         playTpl = null
         searchTpl = null
@@ -637,7 +642,12 @@ class CalibrateActivity : AppCompatActivity() {
                             commit(playUrl, "仅规则")
                             openSniff(playUrl, emptyMap())
                         }
-                        .setNegativeButton(R.string.cancel, null)
+                        // ⚠️ 这里以前直接是 `setNegativeButton(R.string.cancel, null)` ——
+                        // 点"取消"**什么都不写就退出**。用户走完四步、只看到一个疑似失败的面板，
+                        // 随手点个"取消"，整场校准就白做了：配方没写、返回码也不是 RESULT_OK，
+                        // 界面上再没有任何"规则没保存"的痕迹。
+                        // 这正是"校准走完了却没生效"最省事的一种解释 —— 所以必须先确认丢弃。
+                        .setNegativeButton(R.string.cancel) { _, _ -> confirmDiscardCalib() }
                         .show()
                 }
             }
@@ -738,6 +748,32 @@ class CalibrateActivity : AppCompatActivity() {
     private fun finishOk() {
         setResult(RESULT_OK)
         finish()
+    }
+
+    /**
+     * 「取消」= **丢弃本次校准**，所以必须二次确认（v1.0.32）。
+     *
+     * 手工点完四步是这个模式里最贵的一段用户操作（分页导航 + 找剧集 + 点分集 + 去搜索）。
+     * 旧实现里试着播失败后，一个措辞含糊的"取消"就能把这一切静默丢掉 ——
+     * 用户事后只会说「我明明校准过了」，而且没有任何证据留下。
+     */
+    private fun confirmDiscardCalib() {
+        if (committed) {
+            finishOk()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("丢弃本次校准？")
+            .setMessage(
+                "这四步学到的规则**还没有写盘**，丢弃后分类形状/容器、详情模板、播放模板、搜索模板都会丢失。\n\n" +
+                        "只是想跳过试播、但要把规则留下，请选「保留规则」。"
+            )
+            .setPositiveButton("丢弃并退出") { _, _ -> finish() }
+            .setNegativeButton("保留规则") { _, _ ->
+                commit(playPickAbs, "仅规则")
+                finishOk()
+            }
+            .show()
     }
 
     /**

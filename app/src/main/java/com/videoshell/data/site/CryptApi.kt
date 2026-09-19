@@ -37,8 +37,30 @@ data class CryptRecipe(
     /** 前端 bundle 里的 IV 字面量 */
     val ivSpec: String,
     val mode: String = "CBC",
-    val padding: String = "Pkcs7"
-)
+    val padding: String = "Pkcs7",
+    /**
+     * ## 加密图床（v1.0.32）
+     *
+     * 一类站把**图片本身**也 AES 加密后再放到 CDN 上（前端拿到 `arrayBuffer`
+     * 自行解密再 `URL.createObjectURL` 显示）。壳子此前只当普通图片交给 Coil，
+     * 拿到的是**密文** ⇒ 状态码 200、字节数正常、界面一片空白。
+     *
+     * 这种故障最迷惑人：网络全绿、解析全对、图床可达，唯独没有图 ——
+     * 所以它必须有自己的判据，见 [CryptRecipes.mediaRecipeFor]。
+     *
+     * [mediaHosts] 命中的图片域名才走解密；不命中零开销、一个字节都不多读。
+     */
+    val mediaHosts: List<String> = emptyList(),
+    /** 图片解密的密钥（野果是前端 bundle 里的 `media_key`） */
+    val mediaKeySpec: String? = null,
+    /** 图片解密的 IV（野果是 `media_iv`） */
+    val mediaIvSpec: String? = null,
+    val mediaMode: String = "CBC",
+    val mediaPadding: String = "Pkcs7"
+) {
+    /** 这条配方是否带「加密图床」能力 */
+    val hasMedia: Boolean get() = mediaKeySpec != null && mediaIvSpec != null && mediaHosts.isNotEmpty()
+}
 
 object CryptRecipes {
 
@@ -57,15 +79,65 @@ object CryptRecipes {
      *
      * 官方线路有多个域名（`general` 接口下发 `latest_url` / `permanent_url`），
      * 全部列进 [hosts] —— 用户换备用域名后不必改配方。
+     *
+     * ## 加密图床（v1.0.32 补）
+     *
+     * 同一份前端 bundle（`_nuxt/BIgYouz_.js`）里除了 `key`/`iv` 还有一组 `media_key`/`media_iv`，
+     * 由 `_nuxt/DDI21eCO.js` 的 `ae()`（导出名 `t`，函数体里叫 `DecryptImageBuffer`）使用：
+     *
+     * | 项 | 值 |
+     * |---|---|
+     * | 算法 | AES-128-CBC / Pkcs7，**整段一次性解密**（不是分段） |
+     * | 密钥 | `media_key = f5d965df75336270`（ASCII 16 字节） |
+     * | IV | `media_iv = 97b60394abc2fbe1` |
+     * | 图床 | `pic.ndhixj.cn`（CloudFront，`Content-Type: binary/octet-stream`） |
+     *
+     * 实测：`.../2026091823370540510.jpeg` 密文 68720 B ⇒ 明文 JPEG 68707 B（`FFD8FFE0…JFIF`），
+     * 用 `key`/`iv`（接口那组）解出来是乱码 —— **两组密钥不能混用**。
+     *
+     * ⚠️ 图片解密**按图床域名匹配**（[mediaRecipeFor]），**不按站点域名**：
+     * 野果换过多次前端域名（`yeguodj.com` → `capable.fzchosdi.cc` → `agenda.fzchosdi.cc`），
+     * 而图床一直是 `pic.ndhixj.cn`。挂在站点域名上会一换域名就失效。
      */
     private val ALL = listOf(
         CryptRecipe(
             hosts = listOf("yeguodj.com", "ygdj1.com", "ygdj2.com", "ygdj3.com"),
             apiBase = "https://www.yeguodj.com/api.php",
             keySpec = "2acf7e91e9864673",
-            ivSpec = "1c29882d3ddfcfd6"
+            ivSpec = "1c29882d3ddfcfd6",
+            mediaHosts = listOf("ndhixj.cn"),
+            mediaKeySpec = "f5d965df75336270",
+            mediaIvSpec = "97b60394abc2fbe1"
         )
     )
+
+    /** 图片扩展名 —— 只有这些路径才值得过一遍「要不要解密」 */
+    private val IMG_EXT = Regex(
+        "\\.(jpe?g|png|gif|webp|bmp|avif)(?:$|[?#])",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** 这条 URL 看起来是不是一张图（按路径后缀判，够用且不会误伤接口） */
+    fun looksLikeImagePath(url: String): Boolean = IMG_EXT.containsMatchIn(url.trim())
+
+    /**
+     * 找一个能解这条**图片 URL** 的配方；没有返回 null。
+     *
+     * 两道门（任何一道不过 ⇒ 零开销，连响应体都不用读）：
+     * 1. 路径得像图片（[looksLikeImagePath]）；
+     * 2. 主机得命中某条配方的 [CryptRecipe.mediaHosts]（同根域或子域）。
+     */
+    fun mediaRecipeFor(url: String): CryptRecipe? {
+        if (!looksLikeImagePath(url)) return null
+        val h = hostOf(url)
+        if (h.isBlank()) return null
+        return ALL.firstOrNull { r ->
+            r.hasMedia && r.mediaHosts.any { it == h || h.endsWith(".$it") }
+        }
+    }
+
+    /** 自检/诊断用：这条图片 URL 归哪条配方解（人话） */
+    fun mediaHostsOfAll(): List<String> = ALL.flatMap { it.mediaHosts }.distinct()
 
     /** 按主机名找配方；支持同根域与子域（`www.` / `staff-` 等前缀都算） */
     fun forHost(host: String): CryptRecipe? {
@@ -226,6 +298,66 @@ object AesCipher {
             val s = String(pt, Charsets.UTF_8)
             if (s.indexOf('\uFFFD') >= 0) null else s
         }.getOrNull()
+    }
+
+    /**
+     * 解一段**二进制**密文（图片用），返回明文；任何一步不成立都返回 null（**不抛**）。
+     *
+     * 与 [decrypt] 的区别只有「输入不是 base64」这一点：加密图床返回的是裸字节
+     * （`Content-Type: binary/octet-stream`），前端是 `arrayBuffer` 直接喂进
+     * `crypto.subtle.decrypt` 的 —— 所以这边也不能先 base64 解一次。
+     *
+     * Pkcs7 解填充做了**范围校验**（这一条比 [decrypt] 那边更要紧）：
+     * 密文长度不对齐、或站点换了密钥时，最后一字节是随机的，不校验就会返回
+     * "长度正常的一坨乱码"，上层以为成功了，界面上还是没图 —— 又变成悬案。
+     * 校验后返回 null，调用方原样放行原始字节。
+     */
+    fun decryptBytes(
+        raw: ByteArray,
+        keySpec: String,
+        ivSpec: String,
+        mode: String = "CBC",
+        padding: String = "Pkcs7"
+    ): ByteArray? {
+        if (raw.isEmpty() || raw.size % 16 != 0) return null
+        val key = bytesOf(keySpec)
+        val iv = bytesOf(ivSpec)
+        if (key.size != 16 && key.size != 24 && key.size != 32) return null
+        val modePart = if (mode.equals("CBC", true)) "CBC" else "ECB"
+        val padPart = if (padding.equals("Pkcs7", true)) "PKCS5Padding" else "NoPadding"
+        return runCatching {
+            val c = Cipher.getInstance("AES/$modePart/$padPart")
+            c.init(
+                Cipher.DECRYPT_MODE,
+                SecretKeySpec(key, "AES"),
+                if (modePart == "CBC") IvParameterSpec(iv) else null
+            )
+            c.doFinal(raw)
+        }.getOrNull()
+    }
+
+    /**
+     * 这段字节是不是一张**真图片**。
+     *
+     * 判据照抄站点前端 `CEpbvVnF.js` 里那六条（JPEG / PNG / GIF / BMP / TIFF / WEBP）——
+     * 前端就是靠它决定"要不要解密"和"解密算不算成功"的，我们跟着它走，
+     * 两边对"什么算图片"的定义才一致。
+     *
+     * 用途：① 已经是明文图就别解密（幂等）；② 解出来不是图 ⇒ 判定失败，别污染响应。
+     */
+    fun isImage(b: ByteArray?): Boolean {
+        if (b == null || b.size < 12) return false
+        fun m(vararg v: Int) = v.indices.all { (b[it].toInt() and 0xFF) == v[it] }
+        return m(0xFF, 0xD8, 0xFF) ||                         // JPEG
+                m(0x89, 0x50, 0x4E, 0x47) ||                  // PNG
+                m(0x47, 0x49, 0x46, 0x38) ||                  // GIF8
+                m(0x42, 0x4D) ||                              // BMP
+                m(0x00, 0x00, 0x01, 0x00) ||                  // TIFF(LE 序，前端也这么判)
+                m(0x49, 0x49, 0x2A, 0x00) ||                  // TIFF(II)
+                m(0x4D, 0x4D, 0x00, 0x2A) ||                  // TIFF(MM)
+                (b[0].toInt() == 0x52 && b[1].toInt() == 0x49 && b[2].toInt() == 0x46 &&
+                        b[3].toInt() == 0x46 && b[8].toInt() == 0x57 && b[9].toInt() == 0x45 &&
+                        b[10].toInt() == 0x42 && b[11].toInt() == 0x50)   // WEBP
     }
 
     /**

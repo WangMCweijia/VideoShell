@@ -67,6 +67,29 @@ object SiteDoctor {
             L("    原因：" + d.ifBlank { "（未给出，可能是解析不出结构）" })
         }
 
+        // [2a] 校准规则生效性 —— 直接回答「校准走完了为什么还按原规则显示」（v1.0.32）。
+        // 以前报告里只有 [配方] 那一段的"来源：调试校准（人工）"，那只能证明**写盘了**，
+        // 证明不了**用上了**；中间还夹着"命中加密白名单被跳过""形状只命中 1 个静默退回"
+        // 这两条完全不同的路径。这里把适配器这一刻的真实决策摊开。
+        L("")
+        L("[2a] 校准规则是否生效")
+        val recipeNow = RecipeStore.load(site.baseUrl)
+        if (CryptRecipes.forUrl(site.baseUrl) != null && (recipeNow?.calibAt ?: 0L) > 0L) {
+            L("    ⚠️ 本站命中了**加密接口白名单**，适配器固定是 ${a.javaClass.simpleName}：")
+            L("       校准规则**按设计被跳过**（白名单优先级最高，见 AdapterFactory 的注释）。")
+            L("       这是「校准了但没生效」的一种**确定**成因，不是 bug。")
+        }
+        val cd = a.calibDiag
+        if (cd.isNotBlank()) {
+            L("    " + cd.replace("\n", "\n    "))
+            L(
+                "    结论：" + if (a.calibApplied) "校准规则**已生效**（上面 [2] 那栏就是它收的）"
+                else "校准规则**没有生效** —— 按上面 ⚠️ 指的方向处理（改点法 / 重新校准 / 用「站点配方重置」重来）"
+            )
+        } else {
+            L("    （本适配器不参与网页校准 —— 接口型 / 加密型适配器没有「分类形状」这回事）")
+        }
+
         // 3) 列表
         val firstType = cats.firstOrNull()?.id ?: ""
         L("")
@@ -95,15 +118,45 @@ object SiteDoctor {
             L("    列表条目本身没带封面地址 —— 这是解析层的问题，不是图片加载问题")
         } else {
             L("    封面：${cover.take(160)}")
-            val (cst, cinfo) = Http.probe(cover, site.baseUrl, "bytes=0-1023")
-            L("    带 Referer 请求：HTTP $cst" + if (cinfo.isNotBlank()) "   $cinfo" else "")
+            // ⚠️ 加密图床必须**整段取**：Range 拿到的是密文的一段，AES-CBC 解不出来
+            //（旧版固定用 bytes=0-1023，于是永远只看到"206 + 一坨乱码"，
+            //  分不清是图床拒绝还是图片本来就是密的 —— 野果封面就卡在这里）
+            val mediaRecipe = CryptRecipes.mediaRecipeFor(cover)
+            if (mediaRecipe != null) {
+                L("    图床形态：**加密图片**（AES-${mediaRecipe.mediaMode} 密文，不是 JPEG/PNG）")
+                val (code, raw, why) = Http.fetchBytes(cover, site.baseUrl)
+                if (raw == null || raw.isEmpty()) {
+                    L("    整段取图：HTTP $code 取不到字节 ${why.take(80)}")
+                } else {
+                    L("    整段取图：HTTP $code，${raw.size} B")
+                    when {
+                        AesCipher.isImage(raw) ->
+                            L("    字节判定：**已是明文图片**（图床改回明文了，解密层会自动跳过）")
+                        AesCipher.isImage(
+                            AesCipher.decryptBytes(
+                                raw, mediaRecipe.mediaKeySpec!!, mediaRecipe.mediaIvSpec!!,
+                                mediaRecipe.mediaMode, mediaRecipe.mediaPadding
+                            )
+                        ) -> L("    字节判定：密文 → **解密后是真图片** ⇒ 图片链路 OK（App 已自动解密）")
+                        else ->
+                            L("    字节判定：**解密失败** ⇒ 图床多半换了密钥，配方 media_key=${mediaRecipe.mediaKeySpec}")
+                    }
+                }
+            } else {
+                val (cst, cinfo) = Http.probe(cover, site.baseUrl, "bytes=0-1023")
+                L("    带 Referer 请求：HTTP $cst" + if (cinfo.isNotBlank()) "   $cinfo" else "")
+                if (!CryptRecipes.looksLikeImagePath(cover)) {
+                    L("    路径判定：不像图片地址（无图片后缀）—— 可疑，请反馈这个地址")
+                }
+            }
             val host = runCatching { java.net.URI(cover).host }.getOrNull().orEmpty()
             if (host.isNotBlank()) {
                 L("    ${Http.dnsReport(host)}")
                 L("    解读：")
                 L("      · 系统 DNS 为空/异常 ⇒ 污染；「有答案但连不上」同样算污染 —— 两种都已自动改走 DoH；")
+                L("      · HTTP 200/206 但**字节不是图片** ⇒ 加密图床：已在图片层自动解密（见上「字节判定」）；")
                 L("      · 两边都正常但 HTTP 非 2xx ⇒ 图床按 UA/Referer/IP 拒绝，把状态码发回定位；")
-                L("      · 这里 HTTP 200 而界面仍无图 ⇒ 问题不在网络，在图片加载层（Coil），请连同机型一起反馈。")
+                L("      · 上面判定「是真图片」而界面仍无图 ⇒ 问题在图片加载层（Coil），请连同机型一起反馈。")
             }
         }
 

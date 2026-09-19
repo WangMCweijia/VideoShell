@@ -78,6 +78,24 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
     private var calibrated = false
 
     /**
+     * ## 「这次校准到底生效了没有」的三个现场变量（v1.0.32）
+     *
+     * 用户的原始反馈是**无法证伪**的：「校准走完了，但这个站还是按原来的规则显示」。
+     * 这句话背后至少有四种完全不同的成因（见 [SiteAdapter.calibDiag]），
+     * 而界面"看着没变"是分不出来的 —— 所以把适配器这一步的**真实决策**原样记下来，
+     * 由 `SiteDoctor` 打进报告。这是从"应该没生效"到"确定是哪一种"的桥。
+     */
+    @Volatile
+    private var loadedRecipe = false
+
+    /** 配方的结论（本次页面解析后写入）：形状/容器命中了没有、收到几个 */
+    @Volatile
+    private var calibOutcome = ""
+
+    @Volatile
+    private var calibAppliedFlag = false
+
+    /**
      * 「最新」tab（`browse("")`）实际改用哪个分类页。
      *
      * 见 [substituteHome]：首页是 JS 渲染的站，SSR 里根本没有剧集数据。
@@ -97,6 +115,7 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
      */
     init {
         RecipeStore.load(site.baseUrl)?.let { r ->
+            loadedRecipe = true
             // 成功命中过的模板 > 从列表页推测的模板，但两者都比穷举可信
             detailTpl = r.detailTpl
             learnedDetailTpl = r.detailTpl
@@ -137,6 +156,28 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
      */
     override val lastDiag: String
         get() = diag.ifBlank { detailTrace }
+
+    /**
+     * 「这次校准生效了没有」—— `SiteDoctor` 原样打印（见 [SiteAdapter.calibDiag]）。
+     *
+     * 三段拼起来：**配方有没有读到** → **哪来的、学到什么** → **本次页面用上了没有**。
+     * 第三段是以前完全没有的：它是唯一能区分"校准没写盘"和"写了但被静默忽略"的信息。
+     */
+    override val calibDiag: String
+        get() {
+            val head = when {
+                !loadedRecipe -> "无配方（既没校准过，也没自动学到模板）"
+                calibrated -> "调试校准（人工）"
+                else -> "自动学习（**没有人工校准记录** —— 说明校准那一步没写盘，或者本站命中了加密白名单被跳过）"
+            }
+            val shape = "分类形状=" + (manualCatTpl ?: "（无）") +
+                    "｜分类容器=" + (manualNavSel ?: "（无）")
+            val tail = calibOutcome.ifBlank { "（还没解析过分类页）" }
+            return "配方来源：$head｜$shape\n      $tail"
+        }
+
+    /** 校准规则**真的用上了**：形状/容器命中了本次页面（而不是静默退回默认判据） */
+    override val calibApplied: Boolean get() = calibAppliedFlag
 
     /** 最近一次抓取失败的具体原因（异常文本），分类为空时并进 [diag] 一起展示 */
     private var lastFetchErr: String = ""
@@ -309,6 +350,10 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
     /** 从首页 DOM 里解析分类标签（独立成函数便于离线校验） */
     fun categoriesFrom(doc: Document): List<Category> {
         vodIsCategory = detectVodShape(doc)
+        // 每次重解析都从头记录「校准规则这次到底用上了没有」（见 calibOutcome 的注释）。
+        // 不累加：categories() 会按 baseCandidates() 试多个首页地址，累加会变成一串重复结论。
+        calibOutcome = ""
+        calibAppliedFlag = false
 
         val out = LinkedHashMap<String, Category>()
 
@@ -327,15 +372,40 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
             } else {
                 collectByCatTpl(doc, out, tpl)
             }
-            if (out.size >= 2) return out.values.take(40).toList()
+            if (out.size >= 2) {
+                calibAppliedFlag = true
+                calibOutcome = "校准形状已生效：$tpl 在本次页面命中 ${out.size} 个分类（判据要求 ≥2）"
+                return out.values.take(40).toList()
+            }
+            // 这一条是"校准明明写盘了、界面却没变"的第一号成因：
+            // 校准规则**命中了但不够 2 个** ⇒ 静默退回默认逻辑，用户看不出任何差别。
+            calibOutcome = "⚠️ 校准形状 $tpl 在本页只命中 ${out.size} 个（判据要求 ≥2）" +
+                    " ⇒ **已静默退回默认逻辑**（这就是「校准了但显示没变」的常见原因）"
             out.clear()
         }
         manualNavSel?.let { sel ->
             if (doc.select(sel).isNotEmpty()) {
                 collectSlugCategories(doc, out, only = listOf(sel))
                 collectCategories(doc.select("$sel a"), out)
-                if (out.size >= 2) return out.values.take(40).toList()
+                if (out.size >= 2) {
+                    calibAppliedFlag = true
+                    calibOutcome = "校准容器已生效：$sel 命中 ${out.size} 个分类"
+                    return out.values.take(40).toList()
+                }
+                if (calibOutcome.isBlank()) {
+                    calibOutcome = "⚠️ 校准容器 $sel 在本页只命中 ${out.size} 个（判据要求 ≥2）⇒ 退回默认逻辑"
+                }
                 out.clear()
+            } else if (calibOutcome.isBlank()) {
+                calibOutcome = "⚠️ 校准容器 $sel 在本页选不中任何元素（站点改版了？）⇒ 退回默认逻辑"
+            }
+        }
+        if (calibOutcome.isBlank()) {
+            calibOutcome = when {
+                calibrated && manualCatTpl == null && manualNavSel == null ->
+                    "⚠️ **这次校准没有学到分类规则**（第 1 步可能被跳过、或没点中分类）" +
+                            " ⇒ 分类栏用的仍是默认判据"
+                else -> "本次解析没走到校准规则（无配方或已退回默认判据）"
             }
         }
 

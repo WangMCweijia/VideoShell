@@ -231,6 +231,10 @@ object Http {
             .followRedirects(true)
             .cookieJar(cookieJar)
             .addInterceptor(uaFallback)
+            // 加密图床（野果那类）：图片本身是 AES 密文，必须在这里解一层，
+            // 否则 Coil 拿到的是「200 + 一坨非图片字节」，界面永远没有封面。
+            // 三道门在 ImageCipher 里，非白名单图床零开销。
+            .addInterceptor(ImageCipher.interceptor)
             .build()
     }
 
@@ -499,6 +503,36 @@ object Http {
         val m = Regex("^(https?://[^/]+)", RegexOption.IGNORE_CASE).find(url)
         return m?.groupValues?.get(1) ?: url
     }
+
+    /**
+     * 自检用：**整段取字节**（不解密、不转字符串）。
+     *
+     * 为什么需要它：加密图床用 Range 只能拿到**密文的一段**，AES-CBC 脱离块边界
+     * 解不出来 —— 自检若还用 `bytes=0-1023`，看到的永远是"206 + 一坨乱码"，
+     * 分不清是图床拒绝还是图片本来就是密的（v1.0.32 野果封面就卡在这里）。
+     *
+     * @return `(状态码, 字节, 失败原因)`；字节为 null 表示没读到
+     */
+    suspend fun fetchBytes(url: String, referer: String? = null): Triple<Int, ByteArray?, String> =
+        withContext(Dispatchers.IO) {
+            val b = Request.Builder().url(url)
+                .header("User-Agent", UA)
+                .header("Accept", "image/*,*/*;q=0.8")
+            if (!referer.isNullOrBlank()) b.header("Referer", referer)
+            val t0 = System.currentTimeMillis()
+            try {
+                client.newCall(b.build()).execute().use { resp ->
+                    val bytes = resp.body?.bytes()
+                    NetLog.record(url, resp.code, System.currentTimeMillis() - t0, tag = "取字节 ${bytes?.size ?: 0}B")
+                    Triple(resp.code, bytes, "")
+                }
+            } catch (e: Exception) {
+                val ms = System.currentTimeMillis() - t0
+                val why = e.javaClass.simpleName + ": " + (e.message ?: "")
+                NetLog.record(url, -1, ms, why)
+                Triple(-1, null, why)
+            }
+        }
 
     /** 只取状态码（自检用）：不抛异常，任何情况都返回一个可读结果 */
     suspend fun probe(url: String, referer: String? = null, range: String? = null): Pair<Int, String> =
