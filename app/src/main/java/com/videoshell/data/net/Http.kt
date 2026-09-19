@@ -534,6 +534,54 @@ object Http {
             }
         }
 
+    /**
+     * 自检用：**整段取原始字节，绕过图片解密层**（v1.0.33）。
+     *
+     * [fetchBytes] 走的是 [client]，而 [client] 上挂着 [ImageCipher.interceptor] ——
+     * 于是自检拿到手的字节**已经是被解密过的明文**。它因此再也分不清
+     * 「图床本来就是明文」和「图床是密文、App 替你解开了」。
+     *
+     * v1.0.32 的自检报告正是这样自相矛盾的：同一份报告里 HTTP 记录写着
+     * 「[加密图已解密 65472->65471B image/jpeg]」，而 [3a] 那节写着
+     * 「字节判定：**已是明文图片**（图床改回明文了，解密层会自动跳过）」——
+     * 用户据此会以为图床改版了，进而怀疑该不该删掉那对 media_key/media_iv。
+     *
+     * 要如实**分层**汇报，就必须拿得到响应原样字节：这里重建一个去掉了解密拦截器的
+     * client（UA 兜底 / DNS / CookieJar / 其余拦截器全部沿用），拿到的就是 CDN 真正发来的东西。
+     * **只在自检里用，不进任何业务链路。**
+     */
+    private val clientRaw: OkHttpClient by lazy {
+        client.newBuilder().apply { interceptors().remove(ImageCipher.interceptor) }.build()
+    }
+
+    /**
+     * 同 [fetchBytes]，但**不经过解密层**，返回 CDN 原样字节。
+     * @return `(状态码, 字节, 失败原因)`；字节为 null 表示没读到
+     */
+    suspend fun fetchBytesRaw(url: String, referer: String? = null): Triple<Int, ByteArray?, String> =
+        withContext(Dispatchers.IO) {
+            val b = Request.Builder().url(url)
+                .header("User-Agent", UA)
+                .header("Accept", "image/*,*/*;q=0.8")
+            if (!referer.isNullOrBlank()) b.header("Referer", referer)
+            val t0 = System.currentTimeMillis()
+            try {
+                clientRaw.newCall(b.build()).execute().use { resp ->
+                    val bytes = resp.body?.bytes()
+                    NetLog.record(
+                        url, resp.code, System.currentTimeMillis() - t0,
+                        tag = "取原样字节(未解密) ${bytes?.size ?: 0}B"
+                    )
+                    Triple(resp.code, bytes, "")
+                }
+            } catch (e: Exception) {
+                val ms = System.currentTimeMillis() - t0
+                val why = e.javaClass.simpleName + ": " + (e.message ?: "")
+                NetLog.record(url, -1, ms, why)
+                Triple(-1, null, why)
+            }
+        }
+
     /** 只取状态码（自检用）：不抛异常，任何情况都返回一个可读结果 */
     suspend fun probe(url: String, referer: String? = null, range: String? = null): Pair<Int, String> =
         withContext(Dispatchers.IO) {

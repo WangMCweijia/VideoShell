@@ -158,6 +158,20 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
         get() = diag.ifBlank { detailTrace }
 
     /**
+     * 人工校准的 `searchTpl` 被自动学习顶掉时的**留痕**（v1.0.33）。
+     *
+     * 搜索的两遍式是"谁有结果用谁"，并把打中的候选**固化**进配方（见 [searchPass]）。
+     * 这对自愈是必要的 —— 野果实测就是这样救回来的：人工校准存下的
+     * `/search/drama/{kw}/` 是**200 空壳（0 条结果）**，而自动学到的 `/?s={kw}` 出 58 条。
+     *
+     * 但**静默**覆盖掉用户亲手校准的那一条是不可接受的：配方从此与它的 `calibNote`
+     * 各说各话（实测：note 写着 `/search/drama/{kw}/`，配方里存的却是 `/?s={kw}`），
+     * 让下一次排查变成猜谜。所以这一条必须留痕、并进 [calibDiag]。
+     */
+    @Volatile
+    private var searchTplSwap: String? = null
+
+    /**
      * 「这次校准生效了没有」—— `SiteDoctor` 原样打印（见 [SiteAdapter.calibDiag]）。
      *
      * 三段拼起来：**配方有没有读到** → **哪来的、学到什么** → **本次页面用上了没有**。
@@ -173,7 +187,8 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
             val shape = "分类形状=" + (manualCatTpl ?: "（无）") +
                     "｜分类容器=" + (manualNavSel ?: "（无）")
             val tail = calibOutcome.ifBlank { "（还没解析过分类页）" }
-            return "配方来源：$head｜$shape\n      $tail"
+            val swap = searchTplSwap?.let { "\n      ⚠️ $it" } ?: ""
+            return "配方来源：$head｜$shape\n      $tail$swap"
         }
 
     /** 校准规则**真的用上了**：形状/容器命中了本次页面（而不是静默退回默认判据） */
@@ -446,6 +461,39 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
         collectCategories(doc.select("a[href]"), alt, forceCategory = true)
         val clean = alt.filterValues { it.name.length <= 6 && it.name.none { ch -> ch.isDigit() } }
         return clean.values.take(40).toList()
+    }
+
+    /**
+     * 校准「当场自证」：这条分类形状在这份首页 HTML 上**真能收到几个分类**。
+     *
+     * 关键在"复用"：这里调用的就是 [categoriesFrom] 第 0 步那两个收集器
+     * （[collectSlashDirCategories] / [collectByCatTpl]），所以"校准当场数出来的数"
+     * 与"运行时判 ≥2 的那个数"**必然相等**。判据只能有一份 —— 否则就是
+     * 「校准界面说学到了、运行时另一套判据不认」这类最难查的不一致。
+     *
+     * 为什么需要它（v1.0.33 野果实测）：
+     * 用户在校准第 1 步点的是**侧栏导航项** `<a href="/explore/drama/">探索分类</a>`。
+     * [HtmlTemplates.catTplFrom] 会把它的末段当成可变别名，老老实实泛化成
+     * `/explore/{slug}/` —— 而站点真分类是 `/tag/{slug}/`，两者**形状完全一样**。
+     * 形状永远分不开，只有数量能分开：首页 330 个 `<a>` 里 `/explore/{slug}/` 只有 **1 条**，
+     * `/tag/{slug}/` 有 **252 条**。
+     *
+     * 旧行为：这一条照样写进配方 ⇒ 运行时命中 1 个（判据要求 ≥2）⇒ 静默退回默认逻辑
+     * ⇒ 用户看到「校准走完了，但用起来跟没校准一样」，而且**永远查不出为什么**。
+     * 现在交给校准界面当场拦下，并告诉他点错了什么。
+     */
+    override fun countCatTplHits(html: String, tpl: String): Int {
+        if (tpl.isBlank()) return -1
+        val doc = runCatching { Jsoup.parse(html, site.baseUrl) }.getOrNull() ?: return -1
+        val tmp = LinkedHashMap<String, Category>()
+        return runCatching {
+            if (HtmlTemplates.isSlashCatTpl(tpl)) {
+                collectSlashDirCategories(doc, tmp, expectDir = HtmlTemplates.dirOfSlashCatTpl(tpl))
+            } else {
+                collectByCatTpl(doc, tmp, tpl)
+            }
+            tmp.size
+        }.getOrDefault(-1)
     }
 
     /**
@@ -858,8 +906,15 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
                 fresh.none { it.name.contains(keyword, ignoreCase = true) }
             ) continue
             if (strict && searchTpl != tpl) {
+                val was = searchTpl
                 searchTpl = tpl
                 RecipeStore.update(site.baseUrl) { it.copy(searchTpl = tpl) }
+                // 留痕：[was] 可能是**人工校准**那一条。野果实测就是这样救回来的
+                //（校准存的 `/search/drama/{kw}/` 是 200 空壳、0 条结果，
+                //  自动学到的 `/?s={kw}` 出 58 条）。替换本身是对的，但**不能悄悄做** ——
+                // 否则配方与它的 calibNote 各说各话，下一次排查就只剩猜（见 [searchTplSwap]）。
+                searchTplSwap = "搜索模板已被替换：$was → $tpl" +
+                        "（原模板在严格遍一条结果都没有，已改用实测有结果的那条）"
             }
             return fresh
         }

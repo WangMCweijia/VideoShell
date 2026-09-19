@@ -124,24 +124,38 @@ object SiteDoctor {
             val mediaRecipe = CryptRecipes.mediaRecipeFor(cover)
             if (mediaRecipe != null) {
                 L("    图床形态：**加密图片**（AES-${mediaRecipe.mediaMode} 密文，不是 JPEG/PNG）")
-                val (code, raw, why) = Http.fetchBytes(cover, site.baseUrl)
-                if (raw == null || raw.isEmpty()) {
-                    L("    整段取图：HTTP $code 取不到字节 ${why.take(80)}")
-                } else {
-                    L("    整段取图：HTTP $code，${raw.size} B")
-                    when {
-                        AesCipher.isImage(raw) ->
-                            L("    字节判定：**已是明文图片**（图床改回明文了，解密层会自动跳过）")
-                        AesCipher.isImage(
-                            AesCipher.decryptBytes(
-                                raw, mediaRecipe.mediaKeySpec!!, mediaRecipe.mediaIvSpec!!,
-                                mediaRecipe.mediaMode, mediaRecipe.mediaPadding
-                            )
-                        ) -> L("    字节判定：密文 → **解密后是真图片** ⇒ 图片链路 OK（App 已自动解密）")
-                        else ->
-                            L("    字节判定：**解密失败** ⇒ 图床多半换了密钥，配方 media_key=${mediaRecipe.mediaKeySpec}")
-                    }
-                }
+                // 必须**分层取两次**，否则两层会被混成一句自相矛盾的话。
+                //
+                // v1.0.32 就是这么错的：那次只走 `fetchBytes`（它挂在带解密拦截器的
+                // `Http.client` 上）⇒ 拿到手的字节**已经是解密的明文**，于是报告里写着
+                // 「字节判定：已是明文图片（图床改回明文了，解密层会自动跳过）」，
+                // 而同一份报告的 HTTP 记录却写着「[加密图已解密 65472->65471B image/jpeg]」。
+                // 用户据此以为图床改版了、甚至可能去删掉那对 media_key/media_iv。
+                //
+                // 现在：① 原样字节（绕过解密层）= CDN 真正发来的东西；
+                //       ② 取图链路（含解密层）= App 界面上真正会发生的事。
+                // 两者一对照，"是不是密文""解密层有没有生效"就都成了可证伪的事实。
+                val (rawCode, rawBytes, rawWhy) = Http.fetchBytesRaw(cover, site.baseUrl)
+                val (appCode, appBytes, appWhy) = Http.fetchBytes(cover, site.baseUrl)
+                val rawIsImg = AesCipher.isImage(rawBytes)
+                val appIsImg = AesCipher.isImage(appBytes)
+                val cdnLine = if (rawBytes == null || rawBytes.isEmpty()) "取不到（${rawWhy.take(60)}）"
+                else "${rawBytes.size} B，" + (if (rawIsImg) "本身就是图片" else "**不是图片**")
+                val appLine = if (appBytes == null || appBytes.isEmpty()) "取不到（${appWhy.take(60)}）"
+                else "${appBytes.size} B，" + (if (appIsImg) "**是真图片**" else "**不是图片**")
+                L("    ① CDN 原样响应（绕过解密层）：HTTP $rawCode，$cdnLine")
+                L("    ② 取图链路（App 真实路径，含解密层）：HTTP $appCode，$appLine")
+                L("    " + when {
+                    appIsImg && rawIsImg ->
+                        "判定：**图床本来就是明文图片** —— 解密层会自动跳过，封面链路正常"
+                    appIsImg ->
+                        "判定：密文 → **解密后是真图片** ⇒ 封面链路 OK（App 已自动解密，media_key 有效）"
+                    rawIsImg ->
+                        "判定：原样是图片、链路反而解不出 ⇒ 解密层误伤明文，请反馈这一条"
+                    else ->
+                        "判定：**解密失败** ⇒ 原样与解密后都不是图片。图床多半换了密钥，" +
+                                "配方 media_key=${mediaRecipe.mediaKeySpec}"
+                })
             } else {
                 val (cst, cinfo) = Http.probe(cover, site.baseUrl, "bytes=0-1023")
                 L("    带 Referer 请求：HTTP $cst" + if (cinfo.isNotBlank()) "   $cinfo" else "")
@@ -154,9 +168,9 @@ object SiteDoctor {
                 L("    ${Http.dnsReport(host)}")
                 L("    解读：")
                 L("      · 系统 DNS 为空/异常 ⇒ 污染；「有答案但连不上」同样算污染 —— 两种都已自动改走 DoH；")
-                L("      · HTTP 200/206 但**字节不是图片** ⇒ 加密图床：已在图片层自动解密（见上「字节判定」）；")
+                L("      · ① 不是图片、而 ② 是**真图片** ⇒ 加密图床，App 已在图片层解开（属正常，别去删 media_key）；")
                 L("      · 两边都正常但 HTTP 非 2xx ⇒ 图床按 UA/Referer/IP 拒绝，把状态码发回定位；")
-                L("      · 上面判定「是真图片」而界面仍无图 ⇒ 问题在图片加载层（Coil），请连同机型一起反馈。")
+                L("      · ② 已是真图片、界面仍无图 ⇒ 问题在图片加载层（Coil），请连同机型一起反馈。")
             }
         }
 

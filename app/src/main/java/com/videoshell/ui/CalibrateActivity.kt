@@ -468,21 +468,54 @@ class CalibrateActivity : AppCompatActivity() {
      * 而分类标签会散落在主菜单 / 二级面板 / 底部导航里，认形状才能一次全收。
      *
      * 形状没认出来（`catTpl == null`）**也照样推进** —— 容器 / 默认逻辑还在，不该把用户锁在第一步。
+     *
+     * ## v1.0.33：学到形状之后，**当场数一遍**再决定收不收
+     *
+     * 野果实测（2026-09-19）：用户点的是侧栏导航项 `<a href="/explore/drama/">探索分类</a>`。
+     * 它会被 [HtmlTemplates.catTplFrom] 泛化成 `/explore/{slug}/`，与站点真分类 `/tag/{slug}/`
+     * 形状**完全一样**（同一个文件的注释早就点名 `/explore/drama/` 是"功能页形状"）；
+     * 但首页 330 个 `<a>` 里它只出现 **1 次**，而 `/tag/{slug}/` 有 **252 条**。
+     * 运行时判据要求 ≥2 ⇒ 这一条规则**永远不可能生效**。
+     *
+     * 于是就有了那句查不出原因的反馈：「校准走完了，但还是按原规则显示」。
+     * 现在改成当场拦下并说明白：**不收、并告诉用户他点的是导航项而不是分类列表**。
+     *
+     * ⚠️ 拒收时**保留旧配方**（`catTpl = null`，`mergeRecipe` 按「没学到」处理）。
+     * 点错一次不等价于"本站没有分类"，不能拿它抹掉上一次学对的规则；
+     * 真要清规则，走站源页的「站点配方重置」。
      */
     private suspend fun pickCategory(p: Pick) {
-        catTpl = HtmlTemplates.catTplFrom(p.abs)
+        val shape = HtmlTemplates.catTplFrom(p.abs)
+        // -1 = 数不出来（抓不到页面 / 不是 HTML 适配器）⇒ 放弃判断，绝不误杀用户的点击
+        val hits = if (shape != null) {
+            runCatching { Http.getOrNull(site.baseUrl, referer = site.baseUrl) }.getOrNull()
+                ?.let { html ->
+                    runCatching { AdapterFactory.create(site).countCatTplHits(html, shape) }
+                        .getOrDefault(-1)
+                } ?: -1
+        } else -1
+        val rejected = hits in 0..1
+
+        catTpl = if (rejected) null else shape
+        navSel = if (rejected) null
+        else (deriveNavSel(p.abs) ?: p.jsSel.takeIf { it.isNotBlank() })
         step = SiteCalib.Step.DETAIL
         render()
+
         val head = getString(R.string.calib_got_cat, p.text.ifBlank { p.abs })
-        val shape = catTpl?.let { getString(R.string.calib_cat_tpl, it) }
-            ?: getString(R.string.calib_cat_tpl_none)
-        state("$head　$shape")
-        val sel = deriveNavSel(p.abs) ?: p.jsSel.takeIf { it.isNotBlank() }
-        navSel = sel
-        val tail = sel?.let { getString(R.string.calib_nav_sel, it) }
-            ?: getString(R.string.calib_nav_sel_none)
+        val shapeText = when {
+            rejected -> "⚠️ 已跳过这条形状（$shape 在本页只命中 $hits 条，判据要求 ≥2）"
+            catTpl != null -> getString(R.string.calib_cat_tpl, catTpl!!)
+            else -> getString(R.string.calib_cat_tpl_none)
+        }
+        val tail = when {
+            rejected ->
+                "它多半是**一个导航项**、不是分类列表 —— 返回上一步，改点页面上真正的那一串分类标签。"
+            navSel != null -> getString(R.string.calib_nav_sel, navSel!!)
+            else -> getString(R.string.calib_nav_sel_none)
+        }
         // 用户可能已经点到第 2 步了，别把新提示覆盖掉
-        if (step == SiteCalib.Step.DETAIL) state("$head　$shape　$tail")
+        if (step == SiteCalib.Step.DETAIL) state("$head　$shapeText　$tail")
     }
 
     /** ② 影片：反推详情页模板。没学到也推进（退用默认逻辑），只有"这像播放页"会额外说一句。 */
@@ -568,6 +601,22 @@ class CalibrateActivity : AppCompatActivity() {
         state(getString(R.string.calib_got_search, tpl))
         resolveAndPlay(playPickAbs)
     }
+
+    // ⚠️ v1.0.33 试过在这里加一道「搜索模板当场自证」（真取一次结果页、数结果链接），
+    //    已**撤销** —— 判据不成立，见下面的实测记录，别再犯：
+    //
+    //    野果（agenda.fzchosdi.cc）实测：
+    //      · `/?s=<任意词>`  —— 连 `zzzq不存在的词` 都返回**与首页 sha256 完全相同**的页面
+    //        ⇒ 这是**软 404 回首页**，不是搜索结果页。它首页自带 50 个推荐卡片，
+    //        其中 3 处提到「庆余年」，于是"严格遍要求标题含关键词"被**首页噪声**蒙混过关，
+    //        适配器还把它固化成了搜索模板 ⇒ 表现就是「搜什么都一样」。
+    //      · `/search/drama/{kw}/` —— HTTP 200 但 5.4 KB 空壳、0 条结果（JS 渲染）。
+    //    ⇒ 对**客户端渲染**的搜索页，"数 SSR HTML 里的结果链接"得出的数字
+    //      既可能把首页噪声数成"可用"，也可能把正常的 JS 空壳数成"无效"。
+    //      两个方向都会给出**自信而错误**的结论 —— 比不给结论更糟。
+    //    真正的判据必须是"结果页与首页内容是否相同"（软 404），而不是"数到几个链接"；
+    //    且该站搜索**本身就依赖 JS 渲染**，属另一条线（WebRender / 站点搜索 API），
+    //    需要单独一轮来做。
 
     // ------------------------------------------------------------------ 分类容器反推
 
