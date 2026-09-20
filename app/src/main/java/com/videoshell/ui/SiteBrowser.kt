@@ -426,6 +426,14 @@ class SiteBrowser(
         page = 1
         videoAdapter.clear()
         showState(null)
+        // 搜索态把站点自己的分类条（ chips 行 + 「分类 N 个」提示）一起收掉（v1.0.40）。
+        // 搜索结果跟站点分类无关，留着会让人以为这排标签还在参与过滤；
+        // 卡片副标题的藏标签是 v1.0.39 做的，但只藏了卡片、没藏这条 —— 漏了这一层。
+        // 判据与 setSearchKeyword 完全一致（mode == MODE_SEARCH），
+        // 三条 mode 变更路径（doSearch / onCategory / 收起搜索行）都汇入 reload()，一处收口。
+        val searching = mode == MODE_SEARCH
+        b.rvCats.visibility = if (searching) View.GONE else View.VISIBLE
+        b.catHintRow.visibility = if (searching) View.GONE else View.VISIBLE
         b.pb.visibility = View.VISIBLE
         load(1, false)
     }
