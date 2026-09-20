@@ -168,6 +168,32 @@ object HlsPlaylistFixer {
     }
 
     /**
+     * 相对地址的**解析基准**（v1.0.40）。
+     *
+     * ⚠️ 必须优先用「**重定向后的最终地址**」，而不是我们发出去的那个地址。
+     *
+     * 实测（枫叶影院 `co` 线路，v1.0.39 用户真机日志 = 清单 200 / 分片全 402）：
+     * ```
+     * 请求清单 …/cloud/flv/<a>/<b>/x.m3u8?auth_key=…
+     *   302 →  …/ufile/flv/qq/<长hash>/<name>_@lirose_tv.m3u8        ⇒ 200（openresty）
+     * 分片是**相对地址**（`<sid>-N.ts?tg=@lirose_tv`），于是基准决定一切：
+     *   以【请求地址】为基准 ⇒ …/cloud/flv/<a>/<b>/<sid>-N.ts
+     *         ⇒ 又被 302 甩去 `https://www.aibox.eu.org/110`
+     *         ⇒ **HTTP 402 `X-Vercel-Error: DEPLOYMENT_DISABLED`**（12/12 次，重试无用）
+     *   以【最终地址】为基准 ⇒ …/ufile/flv/qq/<hash>/<sid>-N.ts
+     *         ⇒ **200，1 690 120 B，`Content-Type: video/MP2T`，首字节 0x47**（真分片）
+     * ```
+     * 网页端（hls.js）用的是后者 —— 这就是「**网页能播、App 一直转圈**」的分界：
+     * 不是网络、不是请求头（9 种组合测过，7 种 402，与 UA/Referer 无关）、
+     * 也不是分片本身坏了，而是**我们把相对分片拼到了错的目录上**。
+     *
+     * 所以判据只有一句：**服务器最后把清单放在哪，分片就相对于哪里**。
+     * 拿不到最终地址时（老路径/异常）退回请求地址 —— 维持 v1.0.39 以前的行为。
+     */
+    fun baseFor(requestUrl: String, finalUrl: String?): String =
+        if (finalUrl.isNullOrBlank()) requestUrl else finalUrl
+
+    /**
      * playlist 所在目录（含 scheme://authority，供相对分片拼接）。
      *
      * ⚠️ **必须先剥掉 query / fragment 再找斜杠**（v1.0.38 修的）。
@@ -221,14 +247,27 @@ class HlsFixDataSource(private val upstream: DataSource) : DataSource {
         pos = 0
         closed = false
         val len = upstream.open(dataSpec)
+        // ⚠️ 必须**紧接 open** 取，且取的是 `upstream.uri`（= 跟随重定向后的地址），
+        //    不是 `dataSpec.uri`（我们发出去的那个）—— 两者在"清单被 302 到另一个目录"
+        //    的站上完全不同，用错一个就是"清单 200、分片全 402、一直转圈"（v1.0.40 真踩）。
+        val servedUrl = runCatching { upstream.uri?.toString() }.getOrNull()
         // 只处理完整请求的 playlist
         if (dataSpec.position != 0L) return len
         if (!isPlaylist(dataSpec)) return len
 
         val bytes = readAll()
         val text = String(bytes, Charsets.UTF_8)
+        val requested = dataSpec.uri.toString()
+        val base = HlsPlaylistFixer.baseFor(requested, servedUrl)
+        if (base != requested) {
+            // 把"换了基准"这件事写进播放记录：这类站一旦出问题，症状（分片 402/404）
+            // 与"流坏了"一模一样，只有这行字能一眼定性。
+            PlayLog.record(
+                "⇄ 清单被重定向 ⇒ 分片基准改为 " + dirShort(base) + "（仍按请求地址拼会 402/404）"
+            )
+        }
         buffered = if (text.trimStart().startsWith("#EXTM3U")) {
-            HlsPlaylistFixer.fix(text, dataSpec.uri.toString()).toByteArray(Charsets.UTF_8)
+            HlsPlaylistFixer.fix(text, base).toByteArray(Charsets.UTF_8)
         } else {
             bytes
         }
@@ -292,4 +331,19 @@ class HlsFixDataSourceFactory(
     private val upstreamFactory: DataSource.Factory
 ) : DataSource.Factory {
     override fun createDataSource(): DataSource = HlsFixDataSource(upstreamFactory.createDataSource())
+}
+
+/**
+ * 只留"能认出目录"的那一小段（host + path，去掉 query），供播放记录里一行放下。
+ * query 里通常是一串 `auth_key=…`，留着只会把真正有用的目录信息挤出去。
+ */
+private fun dirShort(u: String): String {
+    val s = u.substringBefore('?').substringBefore('#')
+    val i = s.indexOf("://")
+    if (i < 0) return if (s.length <= 60) s else s.take(30) + "…" + s.takeLast(26)
+    val rest = s.substring(i + 3)
+    val host = rest.substringBefore('/')
+    val path = rest.substringAfter('/', "")
+    val msg = if (path.isEmpty()) host else "$host/$path"
+    return if (msg.length <= 60) msg else msg.take(30) + "…" + msg.takeLast(26)
 }
