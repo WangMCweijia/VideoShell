@@ -25,6 +25,7 @@ import com.videoshell.data.net.Http
 import com.videoshell.data.net.NetLog
 import com.videoshell.data.site.AdapterFactory
 import com.videoshell.data.site.AggSearch
+import com.videoshell.data.model.VideoRow
 import com.videoshell.data.site.CryptFamily
 import com.videoshell.data.site.RecipeStore
 import com.videoshell.data.site.SearchEngine
@@ -263,7 +264,14 @@ class SiteBrowser(
             if (act.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) 5 else 3
         b.rvCats.layoutManager = LinearLayoutManager(act, RecyclerView.HORIZONTAL, false)
         b.rvCats.adapter = catAdapter
-        b.rvVideos.layoutManager = GridLayoutManager(act, span)
+        // 分组标题必须**独占整行**（v1.0.39）：在 3/5 列的网格里，标题若只占一格、
+        // 和卡片并排，分组边界反而比不加标题更糊 —— 那正是这次要解决的问题。
+        b.rvVideos.layoutManager = GridLayoutManager(act, span).apply {
+            spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
+                override fun getSpanSize(position: Int): Int =
+                    if (videoAdapter.isHeader(position)) span else 1
+            }
+        }
         b.rvVideos.adapter = videoAdapter
         b.rvVideos.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(rv: RecyclerView, dx: Int, dy: Int) {
@@ -439,6 +447,10 @@ class SiteBrowser(
 
         act.lifecycleScope.launch {
             var items: List<VideoItem>
+            // 聚合那条路提交的单位是**行**（每块前面多一行分组标题，v1.0.39）；
+            // 单站那条路是纯卡片。两条路在这里汇合到同一个提交点，
+            // 所以用一个可空变量区分，而不是把提交代码写两遍。
+            var aggRows: List<VideoRow>? = null
             var why = ""
             var summary: String? = null
             var failures: List<AggSearch.SiteHits> = emptyList()
@@ -452,15 +464,16 @@ class SiteBrowser(
                     b.tvScopeHint.setOnClickListener(null)   // 清掉上一轮搜索挂的失败入口
                     val slots = arrayOfNulls<AggSearch.SiteHits>(sites.size)
                     var arrived = 0
-                    videoAdapter.highlight = keyword
+                    videoAdapter.setSearchKeyword(keyword)
                     AggSearch.runStreaming(sites, keyword, p) { i, h ->
                         slots[i] = h
                         arrived++
-                        // 插入位置由 AggSearch 算（= 排在它前面、且已到达的那些站的条数），
-                        // 与最终 merge 同源 ⇒ 不会出现"铺出来的"和"收尾算出来的"对不上
+                        // 插入位置由 AggSearch 算（= 排在它前面、且已到达的那些站占的**行数**），
+                        // 与最终 mergeRows 同源 ⇒ 不会出现"铺出来的"和"收尾算出来的"对不上。
+                        // ⚠️ 单位是**行**不是卡片：每块前面还有一行分组标题（v1.0.39）。
                         videoAdapter.insertBlock(
                             AggSearch.insertAt(slots.toList(), i),
-                            AggSearch.block(h)
+                            AggSearch.rows(h)
                         )
                         val shown = AggSearch.mergeArrived(slots.toList()).size
                         if (shown > 0) showState(null)
@@ -479,8 +492,8 @@ class SiteBrowser(
                     if (items.isEmpty()) {
                         showAggEmpty(summary, failures)
                     } else {
-                        // ⚠️ 这里**不能再 submit(items)**：网格在回调里已经逐块插好了，
-                        // 再整表 submit 一次会把所有卡片重绑，用户盯着看时会闪一下
+                        // ⚠️ 这里**不能再整表提交**：网格在回调里已经逐块插好了，
+                        // 再提交一次会把所有卡片重绑，用户盯着看时会闪一下
                         page = p
                         attachFailures(failures)
                     }
@@ -489,6 +502,7 @@ class SiteBrowser(
                 // ---- 翻页：等齐即可（用户那时已经在看内容了，不必再流式）----
                 val hits = AggSearch.run(sites, keyword, p)
                 items = AggSearch.merge(hits)
+                aggRows = AggSearch.mergeRows(hits)
                 summary = AggSearch.summary(hits)
                 failures = AggSearch.failures(hits)
             } else {
@@ -541,11 +555,14 @@ class SiteBrowser(
                 return@launch
             }
             if (summary != null) b.tvScopeHint.text = summary
-            // 搜索模式：片名里标出关键词（切回分类/换站时自动清掉）。
-            // 就放在 submit 前 —— `submit(…, false)` 走 notifyDataSetChanged，会立刻用新值重绑所有卡片；
+            // 搜索模式：片名里标出关键词、并隐掉分类标签（v1.0.39）。
+            // 两样由一个入口一起设，切回分类/换站时空串自动复原。
+            // 就放在提交前 —— `submit(…, false)` 走 notifyDataSetChanged，会立刻用新值重绑所有行；
             // 分散到 doSearch / onCategory / bindSite 各写一遍反而容易漏（本项目踩过"漏传回调"的坑）。
-            videoAdapter.highlight = if (mode == MODE_SEARCH) keyword else ""
-            videoAdapter.submit(items, append)
+            videoAdapter.setSearchKeyword(if (mode == MODE_SEARCH) keyword else "")
+            val rows = aggRows
+            if (rows != null) videoAdapter.submitRows(rows, append)
+            else videoAdapter.submit(items, append)
             page = p
             showState(null)
             attachFailures(failures)

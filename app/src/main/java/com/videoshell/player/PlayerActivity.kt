@@ -167,6 +167,16 @@ class PlayerActivity : AppCompatActivity() {
     /** 本次播放是否已经因为"卡住"换过源（同一个源别反复切） */
     private var stalledSwitched = false
 
+    /**
+     * 本集已经自动「重新解析」过几次（v1.0.39）。
+     *
+     * 为什么需要它：`stalledSwitched` 每次 `playUrl` 都会被重置，而"重新解析"这条自愈路径
+     * **自己会再走一次 `playEpisode` → `playUrl`** —— 拿它当次数上限等于没有上限，
+     * 一旦源真的坏了就是一集一集地无限重解析。所以这条计数**只在用户主动换集/换源时清零**
+     * （`playEpisode` 的非自愈分支），自愈路径只加不减。
+     */
+    private var stallReResolveTries = 0
+
     /** 标题栏分辨率标签（如 "1080P"），取到画面尺寸前为空 */
     private var resLabel = ""
 
@@ -849,8 +859,16 @@ class PlayerActivity : AppCompatActivity() {
         playEpisode(target)
     }
 
-    private fun playEpisode(index: Int) {
+    /**
+     * 播放第 [index] 集。
+     *
+     * @param autoHeal 由「卡住」看门狗发起（v1.0.39）。**必须与用户主动换集区分开**：
+     *   自愈走的也是这条路，若在这里清零 [stallReResolveTries]，一次卡住会被无限重解析下去。
+     *   所以只有用户发起的（默认 false）才清零，也就是"用户动一下 = 给一次新的自愈预算"。
+     */
+    private fun playEpisode(index: Int, autoHeal: Boolean = false) {
         val ep = PlayQueue.episodes().getOrNull(index) ?: return
+        if (!autoHeal) stallReResolveTries = 0
         // ⚠️ 换集前先把"正在看的这一集"的进度落盘。之前只在 onStop 写盘，
         // 而 Activity 内部换集不会走 onStop ⇒ 上一集看到一半的位置直接丢。
         savePosition()
@@ -955,6 +973,25 @@ class PlayerActivity : AppCompatActivity() {
             handler.postDelayed({ if (!isFinishing) nextSniffSource() }, 300)
             return
         }
+        // 非嗅探源（直链 / 解析出来的地址）卡住 ⇒ **重新解析本集**（v1.0.39）。
+        //
+        // 为什么是「重新解析」而不是「把同一个地址再试一遍」：这类线路（枫叶影院的 ps:1 线路
+        // 就是）的播放地址是**播放时现取**的，地址里带 psid / auth_key 这种**按会话、按时间**
+        // 的令牌。令牌一旦作废，playlist 往往早就拿到手了（所以**时长显示正常**），
+        // 但分片会整片取不到 —— 正是用户说的「能读到时長、一直转圈」。
+        // 同一个地址再取一遍是白费（令牌没变），必须**重新解析**换一份新的。
+        // 这也正是用户自己会做的动作（退回详情页再点一次），我们只是替他把这一步做了。
+        val maxReResolve = 2
+        if (!fromSniff && stallReResolveTries < maxReResolve) {
+            stallReResolveTries++
+            PlayLog.record("⚠ 卡住 ⇒ 重新解析本集（第 $stallReResolveTries/$maxReResolve 次）换取新令牌")
+            showHud(getString(R.string.stall_reparse))
+            handler.postDelayed(
+                { if (!isFinishing) playEpisode(PlayQueue.episodeIndex, autoHeal = true) },
+                300
+            )
+            return
+        }
         showStallPanel(buffered, dur, live)
     }
 
@@ -969,6 +1006,13 @@ class PlayerActivity : AppCompatActivity() {
         sb.append("已缓冲 ").append(formatTime(buffered)).append(" / ")
             .append(if (dur > 0L) formatTime(dur) else "时长未知").append('\n')
         sb.append("地址：").append(shorten(currentUrl)).append('\n')
+        // 「转圈」这两个字里没有任何可查的东西。把播放器这一侧**最后一条失败的请求**摆出来：
+        // 分片是被拒了（402/403）、超时了，还是压根没人回 —— 少了这一行就只能靠猜，
+        // 而"猜"正是这个问题拖了这么久的唯一原因。
+        val lastFail = NetLog.lastFailure()
+        if (lastFail.isNotBlank()) {
+            sb.append("最近一次失败请求：").append(lastFail.take(180)).append('\n')
+        }
         sb.append("数据源：OkHttp（与自检同栈）")
         binding.tvDiag.text = sb.toString()
         binding.tvDiagTitle.text = if (fromSniff && SniffQueue.candidates.isNotEmpty()) {

@@ -2,6 +2,7 @@ package com.videoshell.data.site
 
 import com.videoshell.data.model.SiteConfig
 import com.videoshell.data.model.VideoItem
+import com.videoshell.data.model.VideoRow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -15,7 +16,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  * ## 为什么拆成一个独立对象
  *
  * 扇出（并发发请求）与拼接（纯函数）是两件事，**只有后者需要被断言**。
- * [block] / [merge] / [growPlan] / [summary] 不碰网络、不碰 Android，可以在离线 harness
+ * [rows] / [mergeRows] / [growPlan] / [summary] 不碰网络、不碰 Android，可以在离线 harness
  * 里逐条验证；把它们塞在 Activity 里就永远只能靠肉眼。
  *
  * ## 三个刻意的设计
@@ -34,9 +35,19 @@ import kotlinx.coroutines.withTimeoutOrNull
  * 用户就得对着空网格干等十几秒 —— 而那时前九个站的结果早就到手了。
  *
  * 流式版本（[runStreaming]）每有一个站返回就把它那一**块**插进去。为了让"插到哪里"
- * 不靠 diff 猜，这里把单站结果切块这件事抽成纯函数 [block]：
- * 一格一格的块拼起来 == [merge] 的结果，所以界面只要数"比我靠前的站各有多少条"就能
+ * 不靠 diff 猜，这里把单站结果切块这件事抽成纯函数 [rows]：
+ * 一格一格的块拼起来 == [mergeRows] 的结果，所以界面只要数"比我靠前的站各占多少行"就能
  * 算出插入位置，**永远不会和最终结果对不上**。
+ *
+ * ## v1.0.39：**块与块之间要有标题行**
+ *
+ * v1.0.38 及以前，一个站的一整块是**紧挨着**铺下去的，界面上靠卡片副标题里那点灰色小字
+ * 区分来源。实际看起来就是一整片没有边界的大网格 —— 而"这条来自哪个站"恰恰是聚合搜索
+ * 唯一要说的事。所以每块前面加一行 [VideoRow.Header]（站名 + 条数）。
+ *
+ * 由此[行]成了网格的基本单位：界面按行插入、[insertAt] 按**行**计数。
+ * 卡片视图（[block] / [merge]）仍然保留，它是行视图的投影，供"进度行里先显示 N 条"
+ * 与那些以卡片为单位的断言使用 —— **两份判据同源，不是两套实现**。
  */
 object AggSearch {
 
@@ -56,10 +67,10 @@ object AggSearch {
     }
 
     /**
-     * 纯函数：**一个站**贡献的那一块（已打上 `siteKey`、已限量、已滤掉无名条目）。
+     * 纯函数：**一个站**贡献的那一块**卡片**（已打上 `siteKey`、已限量、已滤掉无名条目）。
      *
-     * [merge] 就是"把各站的块按顺序拼起来"，[growPlan] 则靠它算出插入位置。
-     * 两处共用这一个函数 ⇒ 界面增量铺出来的列表与一次性 [merge] 的结果**逐条相等**。
+     * 这是"卡片视图"：与 [rows] 同源（[rows] = 本函数的结果前面加一行分组标题）。
+     * 进度行的条数、以及那些"以卡片为单位"的断言用它。
      */
     fun block(h: SiteHits, perSite: Int = PER_SITE): List<VideoItem> {
         if (h.key.isBlank()) return emptyList()
@@ -74,49 +85,85 @@ object AggSearch {
     }
 
     /**
-     * 纯函数：各站结果 → 一份网格列表。
+     * 纯函数：**一个站**贡献的那一块**网格行** = 1 行分组标题 + 它自己的卡片（v1.0.39）。
+     *
+     * 空块（没搜到 / 整批被丢 / key 为空）**不产出标题** —— 否则会出现一个下面什么都
+     * 没有的站名，看起来像"这个站的结果没显示出来"。
+     *
+     * 注意 [VideoRow.Header.count] 是**卡片数**（不含标题行自己），标题上写的"N 条"就是它。
+     */
+    fun rows(h: SiteHits, perSite: Int = PER_SITE): List<VideoRow> {
+        val cards = block(h, perSite)
+        if (cards.isEmpty()) return emptyList()
+        val out = ArrayList<VideoRow>(cards.size + 1)
+        out += VideoRow.Header(h.key, h.name.ifBlank { h.key }, cards.size)
+        cards.forEach { out += VideoRow.Card(it) }
+        return out
+    }
+
+    /**
+     * 纯函数：各站结果 → 一份网格**行**列表（含每个站的分组标题）。
      *
      * 站点顺序**按传入顺序保留**（= Store 的顺序，最近添加的在前），
      * 不做"哪个站结果多就排前面"的花活：顺序会被用户当成"哪个站更好"的暗示，
      * 而结果条数与片源质量毫无关系。
      */
-    fun merge(hits: List<SiteHits>, perSite: Int = PER_SITE): List<VideoItem> =
-        hits.flatMap { block(it, perSite) }
+    fun mergeRows(hits: List<SiteHits>, perSite: Int = PER_SITE): List<VideoRow> =
+        hits.flatMap { rows(it, perSite) }
 
     /**
      * 流式铺网格时的"还没到达"占位：[slots] 与站点列表等长，未返回的位置是 null。
      *
-     * 等价于"先丢掉没到的，再 [merge]" —— 所以**站点顺序与最终结果完全一致**，
+     * 等价于"先丢掉没到的，再 [mergeRows]" —— 所以**站点顺序与最终结果完全一致**，
      * 早到的站不会插到别人前面去。
      */
-    fun mergeArrived(slots: List<SiteHits?>, perSite: Int = PER_SITE): List<VideoItem> =
-        merge(slots.filterNotNull(), perSite)
+    fun mergeRowsArrived(slots: List<SiteHits?>, perSite: Int = PER_SITE): List<VideoRow> =
+        mergeRows(slots.filterNotNull(), perSite)
 
     /**
-     * 纯函数：第 [index] 个站的块应该插到哪个下标。
+     * 纯函数：各站结果 → 一份**卡片**列表（不含分组标题）= [mergeRows] 的卡片投影。
      *
-     * = 排在它前面、**且已经到达**的那些站的条数之和。用 [block] 数，所以与 [merge] 同源。
+     * 只用来数条数（进度行的"先显示 N 条"数的是片子不是行）。
+     */
+    fun merge(hits: List<SiteHits>, perSite: Int = PER_SITE): List<VideoItem> =
+        cards(mergeRows(hits, perSite))
+
+    /** [mergeRowsArrived] 的卡片投影。**顺序按站点顺序，不是到达顺序** */
+    fun mergeArrived(slots: List<SiteHits?>, perSite: Int = PER_SITE): List<VideoItem> =
+        cards(mergeRowsArrived(slots, perSite))
+
+    /** 行列表 → 卡片列表（丢掉标题行）。投影只有这一份实现 */
+    private fun cards(rows: List<VideoRow>): List<VideoItem> =
+        rows.mapNotNull { (it as? VideoRow.Card)?.item }
+
+    /**
+     * 纯函数：第 [index] 个站的**行块**应该插到哪个下标。
+     *
+     * = 排在它前面、**且已经到达**的那些站的**行数**之和。用 [rows] 数，所以与 [mergeRows] 同源。
+     *
+     * ⚠️ 单位是**行**，不是卡片（v1.0.39 改）。界面上那个列表装的就是行，
+     * 插入下标必须同单位 —— 差一行就会把标题插进上一站的卡片中间。
      */
     fun insertAt(slots: List<SiteHits?>, index: Int, perSite: Int = PER_SITE): Int {
         var at = 0
         for (i in 0 until index.coerceAtMost(slots.size)) {
-            slots.getOrNull(i)?.let { at += block(it, perSite).size }
+            slots.getOrNull(i)?.let { at += rows(it, perSite).size }
         }
         return at
     }
 
     /**
-     * 纯函数：检查"把第 [index] 个站的块插到 [at] 上"是否与全量 [merge] 一致。
+     * 纯函数：检查"把第 [index] 个站的行块插到 [at] 上"是否与全量 [mergeRows] 一致。
      *
      * 存在的意义是**把界面那点算术钉死**：判定式不是"插入看起来对不对"，
-     * 而是"插入之后逐条等于一次性 merge"。断言里用的就是它。
+     * 而是"插入之后逐行等于一次性 mergeRows"。断言里用的就是它。
      */
     fun growPlan(
         slots: List<SiteHits?>,
         index: Int,
         perSite: Int = PER_SITE
-    ): Pair<Int, List<VideoItem>> = insertAt(slots, index, perSite) to
-        (slots.getOrNull(index)?.let { block(it, perSite) } ?: emptyList())
+    ): Pair<Int, List<VideoRow>> = insertAt(slots, index, perSite) to
+        (slots.getOrNull(index)?.let { rows(it, perSite) } ?: emptyList())
 
     /**
      * 一行汇总，直接给界面显示。

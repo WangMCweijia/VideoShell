@@ -281,6 +281,8 @@
     <string name="stall_copied">诊断已复制</string>
     <string name="stall_switched">这一路卡住了，已换到下一路</string>
     <string name="stall_no_next">已经是最后一个源了</string>
+    <!-- v1.0.39：非嗅探源卡住时自动"重新解析本集"（换取新令牌）时给用户的提示 -->
+    <string name="stall_reparse">这一路卡住了，正在重新取播放地址…</string>
 
     <string name="err_network">网络请求失败：%1$s</string>
     <string name="err_no_video_site">未能识别为视频站。可尝试「用网页嗅探打开」或手动添加。</string>

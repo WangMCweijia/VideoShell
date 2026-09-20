@@ -13,79 +13,179 @@ import androidx.recyclerview.widget.RecyclerView
 import coil.load
 import com.videoshell.R
 import com.videoshell.data.model.VideoItem
+import com.videoshell.data.model.VideoRow
+import com.videoshell.databinding.ItemSiteHeaderBinding
 import com.videoshell.databinding.ItemVideoBinding
 
+/**
+ * 影片网格适配器。**列表里装的是"行"（[VideoRow]）而不是清一色的卡片**（v1.0.39）。
+ *
+ * 两种行：分组标题（「搜全站源」时每个站一块的开头）与影片卡片。
+ * 单站浏览 / 分类浏览只产出卡片行，行为与 v1.0.38 完全一致。
+ */
 class VideoAdapter(
     private val onClick: (VideoItem) -> Unit,
     /**
-     * `siteKey` → 站名（v1.0.37）。
+     * `siteKey` → 站名。
      *
      * 「搜全站源」的聚合结果里，**站名是这张卡片最要紧的信息之一**：同一部剧在几个站上都有，
-     * 用户要选的是"哪个站"，而不是"哪部剧"。所以把它排在副标题最前面（那行是 ellipsize=end，
-     * 排后面的信息会被截掉）。单站浏览时 `siteKey` 为空 ⇒ 一个字都不显示，行为与以前完全一致。
+     * 用户要选的是"哪个站"，而不是"哪部剧"。
+     *
+     * ⚠️ v1.0.39 起它的主要用途变成了**分组标题**（[VideoRow.Header] 的站名由 `AggSearch.rows`
+     * 直接从 `SiteHits.name` 带进来）。卡片副标题里**只在搜索展示之外的场合**才会出现站名，
+     * 而那时 `siteKey` 本来是空的。留着这个回调是为了收藏页等复用方，以及单站场景的兼容。
      */
     private val siteNameOf: (String) -> String = { "" }
-) : RecyclerView.Adapter<VideoAdapter.VH>() {
+) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
-    private val items = ArrayList<VideoItem>()
+    companion object {
+        /** 一张影片卡片 */
+        const val TYPE_CARD = 0
+
+        /** 一个站的分组标题（独占整行，靠 GridLayoutManager 的 SpanSizeLookup 实现） */
+        const val TYPE_HEADER = 1
+    }
+
+    private val rows = ArrayList<VideoRow>()
 
     /**
      * 当前搜索关键词：命中时在片名里标出来（加粗 + 品牌色）。空串 = 不标。
      *
-     * 为什么需要它：站点的搜索是宽匹配（标题/标签/演员/简介都算），标出片名里的命中词，
-     * 用户一眼就能分清「这条是标题匹配」和「那条是靠标签进来的（角标会写明）」。
-     * 收藏页等其它复用方不设这个字段，行为与以前完全一致。
+     * 为什么不直接给外部写：它和 [hideTags] 是**同一件事的两面**，必须同时设置 ——
+     * 详见 [setSearchKeyword]。
      */
     var highlight: String = ""
+        private set
 
-    fun submit(list: List<VideoItem>, append: Boolean) {
-        if (!append) items.clear()
-        val start = items.size
-        items.addAll(list)
+    /**
+     * 搜索展示时副标题里**不显示分类标签**（类型 / 年份 / 地区）。
+     *
+     * 取值口径与 [highlight] 严格一致，只能通过 [setSearchKeyword] 改。
+     */
+    var hideTags: Boolean = false
+        private set
+
+    /**
+     * 进入 / 退出「搜索展示」。**这是唯一入口**（v1.0.39）。
+     *
+     * 一次设置两样东西：
+     *  - [highlight]：片名里命中关键词的那一段标黄，用户一眼看清"为什么这条会出现"；
+     *  - [hideTags]：副标题里的分类标签（类型 / 年份 / 地区）不再显示。
+     *
+     * ## 为什么搜索时不显示分类标签
+     *
+     * 分类浏览时"电影 / 2024 / 美国"是有用的——你在按分类翻片子。
+     * 但搜索时用户已经知道自己在找什么，这一行标签只剩下噪音；更要紧的是，
+     * 聚合搜索里**同一部剧在几个站上都有**，那一行真正该占位置的信息是"来自哪个站"，
+     * 而不是三行通用的元数据。
+     *
+     * ## 为什么合成一个入口而不是两个 `var`
+     *
+     * 这两个字段永远是同一件事的两面（有搜索词 = 在看搜索结果）。留成两个公开字段，
+     * 就一定会有某一处只设了其中一个 —— 本项目踩过"字段漏传 ⇒ 功能静默失效"的坑，
+     * 能只给一个入口就不给两个。空串 = 退出搜索展示，行为与 v1.0.38 完全一致。
+     */
+    fun setSearchKeyword(keyword: String) {
+        highlight = keyword
+        hideTags = keyword.isNotBlank()
+    }
+
+    fun submitRows(list: List<VideoRow>, append: Boolean) {
+        if (!append) rows.clear()
+        val start = rows.size
+        rows.addAll(list)
         if (append) notifyItemRangeInserted(start, list.size) else notifyDataSetChanged()
     }
 
+    /** 只有卡片（单站浏览 / 分类浏览 / 收藏页）：把每个条目包成一行卡片 */
+    fun submit(list: List<VideoItem>, append: Boolean) =
+        submitRows(list.map { VideoRow.Card(it) }, append)
+
     /**
-     * 「搜全站源」流式铺网格专用：把**一个站的一整块**插到 [at] 位置（v1.0.38）。
+     * 「搜全站源」流式铺网格专用：把**一个站的一整块行**插到 [at] 位置。
      *
-     * 为什么不复用 [submit]：流式的每一站都要插到"排在它前面的那些站之后"，
+     * 为什么不复用 [submitRows]：流式的每一站要插到"排在它前面的那些站之后"，
      * 那个位置**不在尾部**。这条路径用 `notifyItemRangeInserted` 而不是
      * `notifyDataSetChanged` —— 前者让 RecyclerView 按"插入"处理，
      * 已经显示出来的卡片不会被整表重绑（重绑会让用户在盯着看时闪一下）。
      *
-     * 插入位置由 `AggSearch.insertAt` 算，**与最终全量结果同源**，这里不做任何判断。
+     * 插入位置由 `AggSearch.insertAt` 算（**以行为单位**），与最终全量结果同源，
+     * 这里不做任何判断。
      */
-    fun insertBlock(at: Int, block: List<VideoItem>) {
+    fun insertBlock(at: Int, block: List<VideoRow>) {
         if (block.isEmpty()) return
-        val pos = at.coerceIn(0, items.size)
-        items.addAll(pos, block)
+        val pos = at.coerceIn(0, rows.size)
+        rows.addAll(pos, block)
         notifyItemRangeInserted(pos, block.size)
     }
 
-    /** 当前列表的只读快照（断言与自检用） */
-    fun snapshot(): List<VideoItem> = ArrayList(items)
+    /** 卡片投影（断言与自检用）。分组标题不是内容，不进这里 */
+    fun snapshot(): List<VideoItem> = rows.mapNotNull { (it as? VideoRow.Card)?.item }
 
-    fun size(): Int = items.size
+    /** 行快照（自检用）：能验"每个标题行是不是恰好落在它那一块的开头" */
+    fun rowSnapshot(): List<VideoRow> = ArrayList(rows)
+
+    /** 卡片条数（不含分组标题）。进度行的"先显示 N 条"与它同口径 */
+    fun size(): Int = rows.count { it is VideoRow.Card }
+
+    /**
+     * 该位置是不是分组标题。
+     *
+     * 给 `GridLayoutManager.SpanSizeLookup` 用：标题必须**独占整行**，
+     * 否则在 3/5 列的网格里它会和卡片挤在一行，分组边界反而更糊。
+     */
+    fun isHeader(position: Int): Boolean = rows.getOrNull(position) is VideoRow.Header
 
     fun clear() {
-        items.clear()
+        rows.clear()
         notifyDataSetChanged()
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH =
-        VH(ItemVideoBinding.inflate(LayoutInflater.from(parent.context), parent, false))
+    override fun getItemViewType(position: Int): Int =
+        if (rows[position] is VideoRow.Header) TYPE_HEADER else TYPE_CARD
 
-    override fun getItemCount(): Int = items.size
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+        val inf = LayoutInflater.from(parent.context)
+        return if (viewType == TYPE_HEADER) {
+            HeaderVH(ItemSiteHeaderBinding.inflate(inf, parent, false))
+        } else {
+            VH(ItemVideoBinding.inflate(inf, parent, false))
+        }
+    }
 
-    override fun onBindViewHolder(holder: VH, position: Int) = holder.bind(items[position])
+    override fun getItemCount(): Int = rows.size
+
+    override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+        val row = rows[position]
+        when {
+            holder is HeaderVH && row is VideoRow.Header -> holder.bind(row)
+            holder is VH && row is VideoRow.Card -> holder.bind(row.item)
+        }
+    }
+
+    /** 分组标题：站名 + 这一块的条数 */
+    inner class HeaderVH(private val b: ItemSiteHeaderBinding) :
+        RecyclerView.ViewHolder(b.root) {
+        fun bind(h: VideoRow.Header) {
+            b.tvHeaderSite.text = h.name
+            b.tvHeaderCount.text = "${h.count} 条"
+        }
+    }
 
     inner class VH(private val b: ItemVideoBinding) : RecyclerView.ViewHolder(b.root) {
         fun bind(v: VideoItem) {
             b.tvName.text = markedName(v.name)
 
+            // v1.0.39：搜索展示时不显示分类标签。
+            //  - 全站搜索：副标题只剩来源站名 —— 正是聚合搜索唯一要说的事；
+            //  - 单站搜索：副标题整行消失（没有站名可显示），列表更干净。
             val site = if (v.siteKey.isNotBlank()) siteNameOf(v.siteKey).trim() else ""
-            val sub = (listOf(site, v.typeName, v.year, v.area))
-                .filter { it.isNotBlank() }.joinToString(" · ")
+            val sub = if (hideTags) {
+                site
+            } else {
+                listOf(site, v.typeName, v.year, v.area)
+                    .filter { it.isNotBlank() }.joinToString(" · ")
+            }
             b.tvSub.text = sub
             b.tvSub.visibility = if (sub.isBlank()) View.GONE else View.VISIBLE
 

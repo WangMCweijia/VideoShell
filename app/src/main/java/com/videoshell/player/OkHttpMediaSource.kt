@@ -82,24 +82,57 @@ class OkHttpDataSource(
             builder.header("Range", "bytes=$pos-$tail")
         }
 
+        // ---- 瞬时失败就地重试（v1.0.39）----
+        // CDN 限流（402/429）、边缘抖动（5xx）、连接/读超时都是**会自己好**的，
+        // 而 ExoPlayer 自带的策略把 4xx 当"内容的错"直接判死。所以在这一层就把它们抹掉：
+        // 退避几百毫秒原样再取，最多 PlayRetry.MAX_RETRY 次（最坏多等 2.1 秒）。
+        // 判据在 PlayRetry 里，可被离线断言逐条钉住；这里只负责执行。
+        val request = builder.build()
         val t0 = System.currentTimeMillis()
-        val r: Response = try {
-            client.newCall(builder.build()).execute()
-        } catch (e: IOException) {
-            val ms = System.currentTimeMillis() - t0
-            NetLog.record(spec.uri.toString(), -1, ms,
-                e.javaClass.simpleName + ": " + e.message, TAG)
-            PlayLog.request(spec.uri.toString(), -1, ms)
-            throw HttpDataSource.HttpDataSourceException.createForIOException(
-                e, spec, HttpDataSource.HttpDataSourceException.TYPE_OPEN
-            )
+        var attempt = 0
+        var r: Response
+        while (true) {
+            r = try {
+                client.newCall(request).execute()
+            } catch (e: IOException) {
+                if (attempt < PlayRetry.MAX_RETRY) {
+                    NetLog.record(spec.uri.toString(), -1, System.currentTimeMillis() - t0,
+                        "打开失败（${e.javaClass.simpleName}）⇒ 第 ${attempt + 1} 次重试", TAG)
+                    try {
+                        Thread.sleep(PlayRetry.delayMs(attempt))
+                    } catch (ie: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                    }
+                    attempt++
+                    continue
+                }
+                val ms = System.currentTimeMillis() - t0
+                NetLog.record(spec.uri.toString(), -1, ms,
+                    e.javaClass.simpleName + ": " + e.message, TAG)
+                PlayLog.request(spec.uri.toString(), -1, ms)
+                throw HttpDataSource.HttpDataSourceException.createForIOException(
+                    e, spec, HttpDataSource.HttpDataSourceException.TYPE_OPEN
+                )
+            }
+            // 成功，或拿到的是"重试也没用"的状态 ⇒ 这就是定局，跳出
+            if (r.isSuccessful || !PlayRetry.shouldRetry(attempt, r.code)) break
+            NetLog.record(spec.uri.toString(), r.code, System.currentTimeMillis() - t0,
+                "HTTP ${r.code}（瞬时）⇒ 等 ${PlayRetry.delayMs(attempt)}ms 后第 ${attempt + 1} 次重试", TAG)
+            runCatching { r.close() }
+            try {
+                Thread.sleep(PlayRetry.delayMs(attempt))
+            } catch (ie: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+            attempt++
         }
 
         response = r
         status = r.code
         headers = r.headers.toMultimap()
         val cost = System.currentTimeMillis() - t0
-        NetLog.record(spec.uri.toString(), r.code, cost, null, TAG)
+        NetLog.record(spec.uri.toString(), r.code, cost,
+            if (attempt > 0) "重试 $attempt 次后 HTTP ${r.code}" else null, TAG)
         PlayLog.request(spec.uri.toString(), r.code, cost)
 
         if (!r.isSuccessful) {

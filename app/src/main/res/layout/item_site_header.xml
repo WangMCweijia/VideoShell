@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  「搜全站源」里每个站的分组标题行（v1.0.39）。
+  SpanSizeLookup 会让它独占整行，所以在 GridLayoutManager 下也总是整行宽。
+
+  为什么要有这一行：聚合结果是按站分块铺的。卡片副标题里那点 11sp 灰字（v1.0.37）
+  在滚动中几乎看不见，于是几十条结果连成一片，看不出"这块是甲站的、那块是乙站的"——
+  而"这条来自哪个站"正是这个功能唯一要说的事。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="4dp"
+    android:paddingTop="12dp"
+    android:paddingEnd="4dp"
+    android:paddingBottom="4dp">
+
+    <!-- 品牌色竖条：给"这块从这里开始"一个不依赖文字也能看见的边界 -->
+    <View
+        android:layout_width="3dp"
+        android:layout_height="14dp"
+        android:background="@color/brand" />
+
+    <TextView
+        android:id="@+id/tvHeaderSite"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="7dp"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="@color/text_primary"
+        android:textSize="13sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/tvHeaderCount"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="6dp"
+        android:maxLines="1"
+        android:textColor="@color/text_hint"
+        android:textSize="11sp" />
+
+</LinearLayout>
