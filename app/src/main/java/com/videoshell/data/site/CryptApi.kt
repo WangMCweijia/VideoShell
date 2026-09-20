@@ -56,7 +56,26 @@ data class CryptRecipe(
     /** 图片解密的 IV（野果是 `media_iv`） */
     val mediaIvSpec: String? = null,
     val mediaMode: String = "CBC",
-    val mediaPadding: String = "Pkcs7"
+    val mediaPadding: String = "Pkcs7",
+    /**
+     * ## 域名会轮换，所以 apiBase 不该是唯一入口（v1.0.35）
+     *
+     * [apiBase] 是站点的**官方线路**（它自己的客户端用的那个）。实测站方会把同一个
+     * `api.php` **反代到自己当前的前端域名**下：`https://agenda.fzchosdi.cc/api.php/...`
+     * 与 `https://www.yeguodj.com/api.php/...` 返回**同一个信封**（`errcode` + 密文 `data`）。
+     *
+     * 这一条是野果「搜索无效」的根因所在：站点把前端域名从 `yeguodj.com` 换到
+     * `agenda.fzchosdi.cc` 之后，[CryptRecipes.forUrl] 的域名白名单不再命中 ⇒
+     * 悄悄退回 HTML 适配 ⇒ 而本站搜索**只走接口**（页面里根本没有结果节点）
+     * ⇒ 用户看到的就是「App 搜不出东西，但网页端能搜」。
+     *
+     * 所以运行时**优先用 `{当前站点 origin}/api.php`**，[apiBase] 退成备选。
+     * 见 [CryptRecipes.apiBasesFor] 与 [CryptApi.probe]。
+     */
+    /** 家族自证探测用的接口路径（配置接口返回 49 KB JSON，最适合当指纹） */
+    val probePath: String = "/api/home/config",
+    /** 握手参数（前端 bundle 的 `Sl` 对象；实测服务端不校验签名，一起带上更保险） */
+    val baseParams: Map<String, String> = emptyMap()
 ) {
     /** 这条配方是否带「加密图床」能力 */
     val hasMedia: Boolean get() = mediaKeySpec != null && mediaIvSpec != null && mediaHosts.isNotEmpty()
@@ -153,6 +172,67 @@ object CryptRecipes {
             .find(url.trim())?.groupValues?.get(1)?.lowercase().orEmpty()
 
     fun isCryptSite(url: String): Boolean = forUrl(url) != null
+
+    // ------------------------------------------------------------------ v1.0.35 家族自证
+
+    /** 白名单里的默认模板：自证命中 / 挖到新密钥时都以它为底（媒体域名等静态信息都在上面） */
+    fun template(): CryptRecipe = ALL.first()
+
+    /**
+     * 家族握手参数 —— 前端 bundle 里 `Sl` 对象原样搬过来。
+     *
+     * 实测服务端**不校验签名**（正确的 sign / 故意错的 sign / 完全不带的 sign，
+     * 三次都返回**同一份** 49499 B 配置），所以这一条**不作为判据**，
+     * 带上只是对齐官方客户端姿态。这也意味着：将来站点轮换 `sign_key` 不会伤到我们。
+     */
+    val HANDSHAKE: Map<String, String> = mapOf(
+        "bundleId" to "com.pwa.mater",
+        "version" to "1.3.2",
+        "oauth_type" to "web",
+        "language" to "zh",
+        "via" to "pwa",
+        "oauth_id" to "7d05538c4b8a5e74e82f93c0dab0163c",
+        "token" to "",
+        "trace_id" to "7d05538c4b8a5e74e82f93c0dab0163c"
+    )
+
+    /**
+     * 给一个站点 origin，列出**自证**该试的 API 基址 —— v1.0.35 起**只有本站自己**。
+     *
+     * ## 为什么官方线路必须从这里拿掉（实测出来的，不是洁癖）
+     *
+     * 这里曾经把 [ALL] 的官方线路也排在候选里，当作"站点没反代 `api.php` 时的退路"。
+     * 那是**把两件不同的事混成了一件**：
+     *
+     * - 白名单站点的**取数**基址 —— 已经确定是本族，只是找一个连得上的入口 ⇒ 官方线合理；
+     * - 未知域名的**血缘自证** —— 现场判定"这个站到底是不是本族" ⇒ 官方线**致命**。
+     *
+     * 因为自证的判据是"我们的密钥解得开它的响应"，而官方线**今天仍然解得开**。
+     * 实测（`_yg_family_probe.py`）：`www.yeguodj.com`、`yeguodj.com`、`www.ygdj2.com`、
+     * `www.ygdj3.com` 四个基址都回同一份密文（77248 B → 明文 57932 B）。
+     *
+     * 于是任何一个**毫不相干**的站：自己域名的 `api.php` 一试就失败 → 接着试官方线 →
+     * **解得开** → 判成"本族自证命中" ⇒ 被路由到 [YeguoAdapter] ⇒
+     * **用户输入的是 A 站，看到的却是野果的内容**。这类"错收"比"漏收"严重得多
+     * （同 [CryptRecipes] 里 HTML 判据那条取舍）。
+     *
+     * 所以自证候选**只能**从本站 origin 推导，判据收紧成"**本站自己**提供本族接口" ——
+     * 这样"是我族"和"数据从哪来"才是同一句话。
+     * 站点没在自己域名下反代 `api.php` 时退化成"判不出来 → 走网页解析"（漏收），
+     * 这是刻意接受的代价。
+     *
+     * 入参宽容：传整条地址（`https://a.cc/x/y/z`）也**只取 origin** —— 换域名时调用方
+     * 拿到的常常是**当时正在看的那个地址**（可能带路径），不剥离就会去试
+     * `https://a.cc/x/y/z/api.php` 这种不存在的位置，白等一轮超时。
+     */
+    private val ORIGIN = Regex("^(https?://[^/]+)", RegexOption.IGNORE_CASE)
+
+    fun apiBasesFor(origin: String): List<String> {
+        val o = ORIGIN.find(origin.trim())?.groupValues?.get(1)?.trimEnd('/')
+            ?: origin.trim().trimEnd('/')
+        if (!o.startsWith("http", true)) return emptyList()
+        return listOf("$o/api.php")
+    }
 }
 
 /**
@@ -378,6 +458,44 @@ object CryptApi {
     /** 最近一次失败原因（UI 诊断用；成功时清空） */
     var lastError: String = ""
         private set
+
+    /** 最近一次家族自证的过程说明（每个候选基址试出来什么；自检原样打印） */
+    var lastProbeNote: String = ""
+        private set
+
+    /**
+     * ## 家族自证（v1.0.35）
+     *
+     * 判定一个站是不是**用我们这套密钥的那一族**，判据只有一条：
+     *
+     * > 拿密钥去解它的接口响应，**解得开**。
+     *
+     * 为什么别的判据都不行：
+     * - **域名不可靠** —— 野果换过 3 次前端域名（见 [CryptRecipes.apiBasesFor]）；
+     * - **状态码不可靠** —— 站方对未知路径也回 200（实测 `/api/zzz/nothing` 也是 200）；
+     * - **外层形状不可靠** —— 别的家族也可能长成 `{errcode,data}`。
+     *
+     * 只有"解得开"这道门过不去一半：里面是 AES-CBC + Pkcs7，密钥错一位就解不出 JSON，
+     * 也过不了 `JsonParser`。所以它同时是**充分**且几乎不会假阳性的判据。
+     *
+     * @return 自证成功时返回**已按该站 origin 修正过 apiBase** 的配方；否则 null
+     */
+    suspend fun probe(recipe: CryptRecipe, origin: String, referer: String): CryptRecipe? {
+        val log = ArrayList<String>()
+        for (base in CryptRecipes.apiBasesFor(origin)) {
+            val r = recipe.copy(apiBase = base, baseParams = CryptRecipes.HANDSHAKE)
+            val resp = call(r, r.probePath, r.baseParams, referer)
+            val short = base.removePrefix("https://").removePrefix("http://").trimEnd('/')
+            if (resp != null) {
+                log += "$short → 解得开✅"
+                lastProbeNote = log.joinToString("；")
+                return r
+            }
+            log += "$short → ${lastError.take(48)}"
+        }
+        lastProbeNote = log.joinToString("；")
+        return null
+    }
 
     /**
      * 调一个加密接口，返回**解密后**的 JSON（通常是 `{data:..., status:1, msg:"ok"}`）。

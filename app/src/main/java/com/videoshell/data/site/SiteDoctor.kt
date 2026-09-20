@@ -74,9 +74,13 @@ object SiteDoctor {
         L("")
         L("[2a] 校准规则是否生效")
         val recipeNow = RecipeStore.load(site.baseUrl)
-        if (CryptRecipes.forUrl(site.baseUrl) != null && (recipeNow?.calibAt ?: 0L) > 0L) {
-            L("    ⚠️ 本站命中了**加密接口白名单**，适配器固定是 ${a.javaClass.simpleName}：")
-            L("       校准规则**按设计被跳过**（白名单优先级最高，见 AdapterFactory 的注释）。")
+        val famNow = CryptFamily.cachedState(site.baseUrl)
+        val byWhitelist = CryptRecipes.forUrl(site.baseUrl) != null
+        if ((byWhitelist || famNow is CryptFamily.State.Hit) && (recipeNow?.calibAt ?: 0L) > 0L) {
+            L("    ⚠️ 本站是**加密接口站**（${if (byWhitelist) "域名白名单" else "家族自证"}命中），" +
+                    "适配器固定是 ${a.javaClass.simpleName}：")
+            L("       校准规则**按设计被跳过**（这一族在 HTML 里没有可解析内容，")
+            L("       接口是唯一能搜、能取全集的路径，优先级见 AdapterFactory 的注释）。")
             L("       这是「校准了但没生效」的一种**确定**成因，不是 bug。")
         }
         val cd = a.calibDiag
@@ -136,6 +140,32 @@ object SiteDoctor {
                 )
             }
         }
+
+        // [2c] 数据来源 / 搜索降级链（v1.0.35）
+        //
+        // 「App 搜不到、但网页端能搜」的完整答案就在这一段。网页端把 JS 跑完了，
+        // 调的是站点自己的 JSON 接口；我们抓的是 SSR 出来的 HTML，结果节点根本不在里面
+        // （野果：`/?s=` 是软 404 回首页、`/search/drama/{kw}/` 是 5.4 KB 的 JS 空壳）。
+        // 所以这一族的适配器**必须**走接口 —— 这一段就是「走没走、为什么没走」的举证。
+        L("")
+        L("[2c] 数据来源 / 搜索降级链")
+        val famC = CryptFamily.cachedState(site.baseUrl)
+        L("    适配器：${a.javaClass.simpleName}")
+        L("    血缘判定：${CryptFamily.describe(site.baseUrl)}")
+        if (CryptApi.lastProbeNote.isNotBlank()) L("    自证过程：${CryptApi.lastProbeNote}")
+        if (CryptDiscovery.lastNote.isNotBlank()) L("    密钥挖掘：${CryptDiscovery.lastNote}")
+        L(
+            "    ⇒ " + when (famC) {
+                is CryptFamily.State.Hit ->
+                    "分类/搜索/详情**全程走站点自带 JSON 接口**（HTML 里没有可解析内容）。\n" +
+                            "        网页端能搜、App 以前搜不到，就是这一层缺失 —— 现在补上了。"
+                is CryptFamily.State.Absent ->
+                    "已判定**不是**加密接口族。搜索按链条走：URL 模板（见 [2b]）" +
+                            " → 站点搜索表单自动学习 → UI 层预渲染（WebRender）。"
+                is CryptFamily.State.Unknown ->
+                    "尚未判定（本适配器不参与家族探测：要么是采集接口站，要么走了白名单/缓存命中）。"
+            }
+        )
 
         // 3) 列表
         val firstType = cats.firstOrNull()?.id ?: ""

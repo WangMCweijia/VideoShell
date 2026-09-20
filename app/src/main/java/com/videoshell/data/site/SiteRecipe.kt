@@ -57,6 +57,23 @@ data class SiteRecipe(
      */
     val homeCat: String? = null,
     /**
+     * ## 形状普查**固化**下来的分类形状（v1.0.35，第三笔债）
+     *
+     * [HtmlTemplates.shapeCensus] 提议的形状，v1.0.34 时刻意只活在 `HtmlAdapter` 实例内存里
+     * —— "先测量，再固化"（当时的教训：没验证的规则一旦写盘，就变成下一轮排查的谜题）。
+     *
+     * 现在它已经是**被证明可靠的判据**了（两道阈值：不同别名 ≥2 且不同文字 ≥2，
+     * 且归纳与接收复用运行时同一套收集器），于是按这三条规则固化：
+     *
+     * - **只有真的收出 ≥2 个分类才写盘** —— 写盘的形状一定是"用过且有效"的，不是提议；
+     * - **活证据优先** —— 每次解析仍会现场普查一遍，新形状排在固化值**前面**，
+     *   站点改版后新形状立刻顶掉旧的；旧值只在现场全部不成立时当退路；
+     * - **人工校准仍然最优先** —— 校准形状（[catTpl]）在第 1 步就被试，普查排在第 2.6 步。
+     */
+    val learnedCatTpl: String? = null,
+    /** 自动普查形状的固化时间（0 = 没有）。自检里显示，一眼看出"这条是哪来的" */
+    val learnedCatAt: Long = 0L,
+    /**
      * 人工校准完成时间；> 0 表示这份配方是**校准模式**固化下来的。
      */
     val calibAt: Long = 0L,
@@ -70,7 +87,8 @@ data class SiteRecipe(
 
     val isEmpty: Boolean
         get() = detailTpl == null && playTpl == null && listTpl == null &&
-                searchTpl == null && navSel == null && catTpl == null && homeCat == null
+                searchTpl == null && navSel == null && catTpl == null && homeCat == null &&
+                learnedCatTpl == null
 }
 
 object RecipeStore {
@@ -139,6 +157,11 @@ object RecipeStore {
         lines += "播放页模板：" + (r.playTpl ?: "—")
         lines += "列表页模板：" + (r.listTpl ?: "—")
         lines += "搜索页模板：" + (r.searchTpl ?: "—")
+        // 自动普查固化值单独一行：它和"人工校准"是两个来源，混在一行会让人以为是校准
+        if (!r.learnedCatTpl.isNullOrBlank()) {
+            lines += "自动普查：  " + r.learnedCatTpl +
+                    if (r.learnedCatAt > 0) "（固化了，活证据仍优先）" else ""
+        }
         lines += "站点结构：  " + if (r.vodIsCategory) "详情页 + 播放页分离" else "单页/未知"
         r.calibNote?.takeIf { it.isNotBlank() }?.let { lines += "校准记录：" + it }
         if (r.updatedAt > 0) {

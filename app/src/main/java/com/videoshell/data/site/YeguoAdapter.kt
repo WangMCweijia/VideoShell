@@ -50,7 +50,10 @@ class YeguoAdapter(site: SiteConfig, private val recipe: CryptRecipe) : SiteAdap
     // ------------------------------------------------------------------ 接口
 
     private suspend fun api(path: String, params: Map<String, String> = emptyMap()): JsonObject? {
-        val resp = CryptApi.call(recipe, path, params, referer = root)
+        // ⚠️ 必须带上配方的握手参数：**自证时用的就是这一组**，
+        // 运行时如果少发，就变成"验过的姿势"和"跑的姿势"不是同一个（本项目明令禁止）。
+        // 实测服务端不校验签名，但姿态一致才谈得上"验过"。
+        val resp = CryptApi.call(recipe, path, recipe.baseParams + params, referer = root)
         if (resp == null) {
             diag = CryptApi.lastError
             return null

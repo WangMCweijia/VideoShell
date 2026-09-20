@@ -23,6 +23,7 @@ import com.videoshell.data.model.SiteConfig
 import com.videoshell.data.model.VideoItem
 import com.videoshell.data.net.NetLog
 import com.videoshell.data.site.AdapterFactory
+import com.videoshell.data.site.CryptFamily
 import com.videoshell.data.site.RecipeStore
 import com.videoshell.data.site.SiteAdapter
 import com.videoshell.data.site.SiteDoctor
@@ -371,6 +372,9 @@ class SiteBrowser(
     private fun resetRecipe() {
         val s = site ?: return
         RecipeStore.clear(s.baseUrl)
+        // 「血缘判定」也要一起忘掉：否则一个被自证成加密接口族的域名
+        // reset 之后仍会立刻被路由回接口，用户会觉得"重置了没反应"（v1.0.35）
+        CryptFamily.forget(s.baseUrl)
         adapter = AdapterFactory.create(s)
         webRendered = false
         cats = emptyList()

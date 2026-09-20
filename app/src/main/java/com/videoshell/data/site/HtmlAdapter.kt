@@ -44,16 +44,19 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
     private var learnedDetailTpl: String? = null
 
     /**
-     * ## 从**形状普查**学到的分类形状（v1.0.34）
+     * ## 从**形状普查**学到的分类形状（v1.0.34 提出 → v1.0.35 固化）
      *
      * 与 [learnedDetailTpl] 同一个思路：能从页面当场测出来的东西，就别指望用户去校准。
      *
-     * 只活在实例内存里，**刻意不落盘**：普查是一个"提议"而不是"结论"，
-     * 先让它在真实运行里证明自己（这一步的判据与运行时完全同源，见
-     * [HtmlTemplates.shapeCensus]），确认稳定之后再考虑固化。这是本项目一贯的顺序 ——
-     * 先测量，再固化（v1.0.32 的教训：没验证的规则一旦写盘，就变成下一轮排查的谜题）。
+     * v1.0.34 只让它活在实例内存里（"先测量，再固化"）；现在判据已被证明可靠
+     * （两道阈值 + 归纳与接收复用同一套收集器），于是**收出 ≥2 个分类就写盘**
+     * （[SiteRecipe.learnedCatTpl]）。固化后冷启动不必再扫全文档，
+     * 而且**活证据优先** —— 现场普查的形状排在固化值前面，站点改版能立刻自愈。
      */
     private var learnedCatTpl: String? = null
+
+    /** 磁盘上那份普查形状（用来避免重复写盘；与 [learnedCatTpl] 可能暂时不同） */
+    private var savedCatTpl: String? = null
 
     /** 最近一次分类栏是靠哪个规则得到的（普查 / 校准 / 默认），自检报告里展示 */
     @Volatile
@@ -144,6 +147,9 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
             manualNavSel = r.navSel?.takeIf { it.isNotBlank() }
             calibrated = r.calibAt > 0
             homeCat = r.homeCat?.takeIf { it.isNotBlank() }
+            // 形状普查的固化值（v1.0.35）：冷启动直接排进候选，不必再扫一遍全文档
+            learnedCatTpl = r.learnedCatTpl?.takeIf { it.isNotBlank() }
+            savedCatTpl = learnedCatTpl
         }
     }
 
@@ -484,8 +490,12 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
         //      运行时一定认；而"够不够 2 个"这个终判仍然交给真收集器 —— 判据只有一份。
         //
         //      代价：一次全文档扫描，且只在前面所有形状家族都失败时才走到这里（极少）。
-        val censusTries = LinkedHashSet<String>()
-        learnedCatTpl?.let { censusTries += it }
+        //
+        //      固化（v1.0.35）：一旦某个形状**真的收出 ≥2 个分类**，就写盘
+        //      （[SiteRecipe.learnedCatTpl]）—— 写盘的形状因此一定是"用过且有效"的，不是提议。
+        //      顺序上**活证据优先**：本次现场普查出来的排在固化值前面，
+        //      站点改版后新形状立刻顶掉旧的，旧值只在现场全部不成立时当退路。
+        val fresh = LinkedHashSet<String>()
         runCatching {
             HtmlTemplates.shapeCensus(doc) { n ->
                 n.isNotBlank() && n.length <= 10 &&
@@ -493,7 +503,12 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
             }
         }.getOrDefault(emptyList())
             .filter { it.aliases >= 2 && it.names >= 2 }
-            .forEach { censusTries += it.tpl }
+            .forEach { fresh += it.tpl }
+
+        val censusTries = LinkedHashSet<String>()
+        censusTries += fresh
+        learnedCatTpl?.takeIf { it.isNotBlank() }?.let { censusTries += it }   // 固化值垫底
+
         for (tpl in censusTries) {
             val tmp = LinkedHashMap<String, Category>()
             runCatching {
@@ -505,7 +520,14 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
             }
             if (tmp.size >= 2) {
                 learnedCatTpl = tpl
-                censusDiag = "分类形状来自**形状普查**（免校准）：$tpl 命中 ${tmp.size} 个"
+                if (savedCatTpl != tpl) {
+                    savedCatTpl = tpl
+                    RecipeStore.update(site.baseUrl) {
+                        it.copy(learnedCatTpl = tpl, learnedCatAt = System.currentTimeMillis())
+                    }
+                }
+                censusDiag = "分类形状来自**形状普查**（免校准）：$tpl 命中 ${tmp.size} 个" +
+                        if (tpl in fresh) "（本次现场普查）" else "（沿用上次固化，本次现场无新结论）"
                 return tmp.values.take(40).toList()
             }
         }
