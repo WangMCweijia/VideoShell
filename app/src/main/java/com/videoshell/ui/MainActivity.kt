@@ -17,6 +17,7 @@ import com.videoshell.data.model.SiteConfig
 import com.videoshell.data.model.VideoItem
 import com.videoshell.data.net.Http
 import com.videoshell.data.site.Media
+import com.videoshell.data.site.SearchScope
 import com.videoshell.data.site.SiteDetector
 import com.videoshell.databinding.ActivityMainBinding
 import com.videoshell.player.PlayerActivity
@@ -75,6 +76,7 @@ class MainActivity : AppCompatActivity() {
         // ---- 站源：添加入口 ----
         binding.btnDetect.setOnClickListener { detect() }
         binding.btnSniff.setOnClickListener { sniffFromInput() }
+        binding.btnBrowseWeb.setOnClickListener { browseWeb() }
         binding.btnPlayDirect.setOnClickListener { playDirect() }
         binding.inputUrl.doAfterTextChanged { updateDirectButton() }
         binding.inputUrl.setOnEditorActionListener { _, actionId, _ ->
@@ -276,6 +278,33 @@ class MainActivity : AppCompatActivity() {
         }
         startActivity(
             SniffActivity.intent(this, url, hostOf(url), mapOf("User-Agent" to Http.UA))
+        )
+    }
+
+    /**
+     * 打开「网页浏览」（v1.0.37）。
+     *
+     * 不填网址 ⇒ 打开搜索引擎（= 搜全网的入口）；填了 ⇒ 直接打开那个网址。
+     *
+     * 走的是同一个 [SniffActivity]，只是带 `browse = true` —— **浏览模式不自动播**，
+     * 而且页面上多了「识别并添加 / 手动校准」两个按钮。
+     * 与「用网页嗅探打开」的区别只有这一条：那个是"我要播这一页"，这个是"我要逛"。
+     */
+    private fun browseWeb() {
+        val raw = binding.inputUrl.text.toString().trim()
+        val target = when {
+            raw.isEmpty() -> SearchScope.webHomeUrl()
+            raw.startsWith("http") -> raw
+            else -> "http://$raw"
+        }
+        startActivity(
+            SniffActivity.intent(
+                this,
+                target,
+                getString(R.string.web_browse_title),
+                mapOf("User-Agent" to Http.UA),
+                browse = true
+            )
         )
     }
 

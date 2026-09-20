@@ -59,6 +59,21 @@
     <string name="no_result">没有找到结果</string>
     <string name="search">搜索</string>
 
+    <!-- 搜索范围（v1.0.37）：三个 chip 解决三件不同的事，文案必须各自说清"搜哪儿、结果在哪看" -->
+    <string name="scope_site">本站</string>
+    <string name="scope_all">全站</string>
+    <string name="scope_web">全网</string>
+    <string name="scope_hint_site">只搜当前站源</string>
+    <string name="scope_hint_all">同时搜 %1$d 个已保存站源</string>
+    <string name="scope_hint_all_empty">还没有站点可搜</string>
+    <string name="scope_hint_web">用 Bing 搜全网，在网页里浏览</string>
+    <string name="scope_web_searching">已用 Bing 打开「%1$s」—— 在网页里点开结果，看到影片页可「识别并添加」</string>
+    <string name="scope_agg_empty">全站都没有「%1$s」—— 可换「全网」用搜索引擎找</string>
+    <string name="scope_fail_detail">查看失败的 %1$d 个站</string>
+    <string name="scope_fail_title">这几个站没返回结果</string>
+    <string name="btn_browse_web">浏览网页（可搜全网 / 打开任意网址）</string>
+    <string name="web_browse_title">网页浏览</string>
+
     <string name="detail_summary">剧情简介</string>
     <string name="detail_info">影片信息</string>
     <string name="episode_count">共 %1$d 集</string>
@@ -215,6 +230,27 @@
     <string name="sniffer_play">播放</string>
     <string name="sniffer_title">嗅探中</string>
     <string name="sniffer_manual">手动输入播放地址</string>
+
+    <!-- 网页嗅探模式里的「把这一页变成站源」（v1.0.37）：
+         嗅探页是唯一能看到真实网页的地方，识别/校准的入口就该在这儿，不要逼用户复制网址再回去粘贴 -->
+    <string name="sniffer_browse">浏览模式：点开影片页后按「识别并添加」</string>
+    <string name="sniffer_browse_title">网页浏览</string>
+    <string name="sniffer_grab">识别并添加</string>
+    <string name="sniffer_calib">手动校准</string>
+    <string name="sniffer_grab_running">正在识别本站…</string>
+    <string name="sniffer_grab_ok_title">已添加为站源</string>
+    <string name="sniffer_grab_ok_msg">%1$s\n\n可以马上打开浏览，也可以留在网页里继续找。</string>
+    <string name="sniffer_grab_open">打开浏览</string>
+    <string name="sniffer_grab_stay">继续浏览</string>
+    <string name="sniffer_calib_added">本站不在列表里，已先按「网页模式」添加：%1$s\n\n接下来按四步点一遍（分类 → 影片 → 分集 → 搜索），点完规则就固化了。</string>
+    <string name="sniffer_calib_title">手动校准本站</string>
+    <string name="sniffer_no_url">当前没有可操作的网页地址</string>
+    <string name="sniffer_url_line">当前页：%1$s</string>
+    <string name="sniffer_url_loading">当前页：加载中…</string>
+    <string name="sniffer_browse_hint">提示：先在这个网页里找到影片播放页，再点下方两个按钮</string>
+    <string name="sniffer_browse_found">浏览模式：已抓到 %1$d 个媒体地址，可点下方按钮把本站收进来</string>
+    <string name="sniffer_close_web">关闭网页</string>
+    <string name="web_reload">刷新</string>
 
     <string name="err_network">网络请求失败：%1$s</string>
     <string name="err_no_video_site">未能识别为视频站。可尝试「用网页嗅探打开」或手动添加。</string>

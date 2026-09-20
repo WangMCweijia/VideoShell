@@ -16,7 +16,15 @@ import com.videoshell.data.model.VideoItem
 import com.videoshell.databinding.ItemVideoBinding
 
 class VideoAdapter(
-    private val onClick: (VideoItem) -> Unit
+    private val onClick: (VideoItem) -> Unit,
+    /**
+     * `siteKey` → 站名（v1.0.37）。
+     *
+     * 「搜全站源」的聚合结果里，**站名是这张卡片最要紧的信息之一**：同一部剧在几个站上都有，
+     * 用户要选的是"哪个站"，而不是"哪部剧"。所以把它排在副标题最前面（那行是 ellipsize=end，
+     * 排后面的信息会被截掉）。单站浏览时 `siteKey` 为空 ⇒ 一个字都不显示，行为与以前完全一致。
+     */
+    private val siteNameOf: (String) -> String = { "" }
 ) : RecyclerView.Adapter<VideoAdapter.VH>() {
 
     private val items = ArrayList<VideoItem>()
@@ -55,7 +63,9 @@ class VideoAdapter(
         fun bind(v: VideoItem) {
             b.tvName.text = markedName(v.name)
 
-            val sub = listOf(v.typeName, v.year, v.area).filter { it.isNotBlank() }.joinToString(" · ")
+            val site = if (v.siteKey.isNotBlank()) siteNameOf(v.siteKey).trim() else ""
+            val sub = (listOf(site, v.typeName, v.year, v.area))
+                .filter { it.isNotBlank() }.joinToString(" · ")
             b.tvSub.text = sub
             b.tvSub.visibility = if (sub.isBlank()) View.GONE else View.VISIBLE
 

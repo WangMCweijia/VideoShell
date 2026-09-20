@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  小圆片文字色：选中 = 品牌底 ⇒ 白字；未选中 = 浅底 ⇒ 正文色。
+  两者必须成对出现，只改一个就会出现「选中了但字看不见」（或反之）。
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:color="@color/white" android:state_selected="true" />
+    <item android:color="@color/text_primary" />
+</selector>

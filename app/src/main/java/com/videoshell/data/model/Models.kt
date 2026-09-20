@@ -12,7 +12,18 @@ data class VideoItem(
     val typeName: String = "",
     val score: String = "",
     val year: String = "",
-    val area: String = ""
+    val area: String = "",
+    /**
+     * 这条结果来自哪个站源（`SiteConfig.key`）。
+     *
+     * 单站浏览时留空（"就是当前站"）；只有**搜全站源**的聚合结果会填它。
+     *
+     * ⚠️ 为什么必须带上：影片 id 是**站点内**的编号，两个站完全可能都用 `3381`。
+     * 聚合结果若不带来源，点进去就会拿着 A 站的 id 去 B 站查 —— 表现为"有一条点开是空的"，
+     * 而且只在特定站点组合下复现（id 没撞上时又正常），是最难查的那类不一致。
+     * 有它才能"从哪来、回哪去"。
+     */
+    val siteKey: String = ""
 )
 
 /** 一集 */

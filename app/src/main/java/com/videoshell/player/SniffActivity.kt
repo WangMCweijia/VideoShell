@@ -17,17 +17,22 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.videoshell.R
+import com.videoshell.data.Store
 import com.videoshell.data.net.Http
 import com.videoshell.data.net.NetLog
 import com.videoshell.data.site.JxParser
 import com.videoshell.data.site.SniffSession
+import com.videoshell.data.site.WebSiteKit
 import com.videoshell.databinding.ActivitySniffBinding
+import com.videoshell.ui.CalibrateActivity
+import com.videoshell.ui.SiteActivity
 import com.videoshell.ui.adapter.CandidateAdapter
 import com.videoshell.util.toast
 import kotlinx.coroutines.launch
@@ -56,6 +61,16 @@ class SniffActivity : AppCompatActivity() {
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_HEADERS = "headers"
 
+        /**
+         * 浏览模式（v1.0.37）：把这个页面**当网页用**，而不是当"某一集的播放页"用。
+         *
+         * 差别只有一条，但影响很大：浏览模式**不做自动播放**。原始嗅探的逻辑是
+         * "认得出的正片就自动跳播放器"，那是播放页该有的行为；可一旦用它来浏览
+         * （搜索引擎结果页 → 点进一个影片站 → 再点别的），自动跳走会把用户的浏览打断，
+         * 而且他并不知道自己是怎么被带走的。候选照常收集、照常可以手点。
+         */
+        private const val EXTRA_BROWSE = "browse"
+
         /** 首个候选出现后先等一会儿再动手：让页面把该发的请求都发出来，免得"先到的广告"被当成唯一选项 */
         private const val SETTLE_MS = 2_500L
 
@@ -67,10 +82,17 @@ class SniffActivity : AppCompatActivity() {
 
         private const val MAX_TICKS = 240
 
-        fun intent(context: Context, pageUrl: String, title: String, headers: Map<String, String>): Intent =
+        fun intent(
+            context: Context,
+            pageUrl: String,
+            title: String,
+            headers: Map<String, String>,
+            browse: Boolean = false
+        ): Intent =
             Intent(context, SniffActivity::class.java).apply {
                 putExtra(EXTRA_URL, pageUrl)
                 putExtra(EXTRA_TITLE, title)
+                putExtra(EXTRA_BROWSE, browse)
                 putExtra(
                     EXTRA_HEADERS,
                     Gson().toJson(headers, object : TypeToken<Map<String, String>>() {}.type)
@@ -82,6 +104,12 @@ class SniffActivity : AppCompatActivity() {
     private lateinit var pageUrl: String
     private var title: String = ""
     private var pageHeaders: Map<String, String> = emptyMap()
+
+    /** 浏览模式：不自动播、不自动探测，只把网页当网页用（见 [EXTRA_BROWSE] 说明） */
+    private var browse = false
+
+    /** 「识别并添加」正在进行中：防连点（每次识别都要真发几个请求） */
+    private var grabbing = false
 
     /** 播放页地址里的视频 id —— 候选地址含它时是很强的正面信号 */
     private var videoId: String = ""
@@ -121,12 +149,15 @@ class SniffActivity : AppCompatActivity() {
         override fun run() {
             if (!polling) return
             ticks++
-            if (ticks > MAX_TICKS) {
+            // 浏览模式没有"超时"这回事：用户可能在一个网页上停很久再往下点，
+            // 到点就停会让"当前页"不再更新、候选也不再收集 —— 看起来就是功能坏了。
+            if (!browse && ticks > MAX_TICKS) {
                 polling = false
                 updateStatus()
                 return
             }
             collectJs()
+            refreshUrlLine()
             maybeProbeAndAutoPlay()
             handler.postDelayed(this, 1000)
         }
@@ -140,6 +171,7 @@ class SniffActivity : AppCompatActivity() {
 
         pageUrl = intent.getStringExtra(EXTRA_URL).orEmpty()
         title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
+        browse = intent.getBooleanExtra(EXTRA_BROWSE, false)
         videoId = Regex("(\\d{4,})").find(pageUrl.substringBefore('?'))?.value.orEmpty()
         pageHeaders = runCatching {
             val t = object : TypeToken<Map<String, String>>() {}.type
@@ -154,17 +186,33 @@ class SniffActivity : AppCompatActivity() {
 
         SniffQueue.clear()
 
-        binding.tvTitle.text = title.ifBlank { "嗅探中" }
+        binding.tvTitle.text = title.ifBlank {
+            getString(if (browse) R.string.sniffer_browse_title else R.string.sniffer_title)
+        }
         binding.btnBack.setOnClickListener { finish() }
 
         binding.rvCandidates.layoutManager = LinearLayoutManager(this)
         binding.rvCandidates.adapter = candidateAdapter
 
+        // ---- 浏览模式：把"这一页变成一个站源"的两个入口摆出来 ----
+        if (browse) {
+            binding.webBack.visibility = View.VISIBLE
+            binding.webActionRow.visibility = View.VISIBLE
+            binding.tvCurUrl.visibility = View.VISIBLE
+            binding.tvStatus.text = getString(R.string.sniffer_browse)
+            // 浏览模式下左上角是「关闭网页」，左边的箭头才是「网页后退」——
+            // 两个图标必须看得出区别，否则用户按哪个都是猜
+            binding.btnBack.setImageResource(R.drawable.ic_close)
+            binding.btnBack.contentDescription = getString(R.string.sniffer_close_web)
+            // 「重新嗅探」在浏览语境下就是「刷新这一页」—— 叫法要跟着用途走
+            binding.btnRetry.setText(R.string.web_reload)
+            binding.webBack.setOnClickListener { backInWeb() }
+            binding.btnGrab.setOnClickListener { recognizeAndAdd() }
+            binding.btnCalib.setOnClickListener { manualCalibrate() }
+        }
+
         binding.btnToggleWeb.setOnClickListener {
-            webVisible = !webVisible
-            binding.webView.alpha = if (webVisible) 1f else 0f
-            binding.btnToggleWeb.text =
-                getString(if (webVisible) R.string.sniffer_hide_web else R.string.sniffer_show_web)
+            showWeb(!webVisible)
         }
         binding.btnRetry.setOnClickListener { restart() }
 
@@ -176,6 +224,28 @@ class SniffActivity : AppCompatActivity() {
         setupWebView()
         loadPage()
         startPolling()
+    }
+
+    private fun showWeb(show: Boolean) {
+        webVisible = show
+        binding.webView.alpha = if (show) 1f else 0f
+        binding.btnToggleWeb.text =
+            getString(if (show) R.string.sniffer_hide_web else R.string.sniffer_show_web)
+    }
+
+    /**
+     * 浏览模式下的「返回」= **网页后退**。
+     *
+     * 用户从搜索结果点进一个站，想回结果页继续挑下一个 —— 这里若直接关掉整个页面，
+     * 他得重新搜一次。退无可退才真正退出（这一点与 [CalibrateActivity] 的处理一致）。
+     */
+    private fun backInWeb() {
+        if (binding.webView.canGoBack()) binding.webView.goBack() else finish()
+    }
+
+    override fun onBackPressed() {
+        if (browse && binding.webView.canGoBack()) binding.webView.goBack()
+        else super.onBackPressed()
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -237,6 +307,7 @@ class SniffActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 injectHook()
                 binding.webView.alpha = if (webVisible) 1f else 0f
+                refreshUrlLine()
                 // 会话记忆：把'这个站该带什么 Referer'留下，播放/解析复用（换集、从历史进来都受益）
                 SniffSession.remember(pageUrl, pageUrl, Http.UA)
             }
@@ -266,7 +337,9 @@ class SniffActivity : AppCompatActivity() {
         loginWords = ""
         pageError = ""
         loggedOneShot = false
-        binding.tvStatus.text = getString(R.string.sniffer_running)
+        binding.tvStatus.text = getString(
+            if (browse) R.string.sniffer_browse else R.string.sniffer_running
+        )
         binding.rvCandidates.visibility = View.GONE
         binding.pb.visibility = View.VISIBLE
         binding.webView.reload()
@@ -352,6 +425,10 @@ class SniffActivity : AppCompatActivity() {
         SniffRank.rank(candidates.values, videoId, tsHits)
 
     private fun maybeProbeAndAutoPlay() {
+        // 浏览模式：一个请求都不替用户发，也绝不自动跳播放器。
+        // 这不是"少做一点"—— 用嗅探页当浏览器时，用户点的每一个链接都是他自己的意图，
+        // 我们替他挑一个源并跳走，等于把他的浏览打断在自己不知道的地方。
+        if (browse) return
         if (autoPlayed) return
         if (candidates.isEmpty()) {
             maybeDetectLoginWall()
@@ -399,6 +476,17 @@ class SniffActivity : AppCompatActivity() {
 
     private fun updateStatus() {
         val n = candidates.size
+        if (browse) {
+            // 浏览模式的状态行只说两件事：正在浏览、抓到了几个地址。
+            // 刻意**不报**"超时 / 要求登录"—— 用户不是在这儿等嗅探，他是在看网页；
+            // 一个永远转的进度圈会让他以为这页还没加载好。
+            binding.tvStatus.text = if (n == 0) getString(R.string.sniffer_browse)
+            else getString(R.string.sniffer_browse_found, n)
+            binding.pb.visibility = View.GONE
+            candidateAdapter.submit(ranked())
+            binding.rvCandidates.visibility = if (n == 0) View.GONE else View.VISIBLE
+            return
+        }
         binding.tvStatus.text = when {
             n == 0 && loginWall -> getString(R.string.sniffer_login_wall, loginWords)
             n == 0 && pageError.isNotBlank() -> getString(R.string.sniffer_page_error, pageError)
@@ -425,6 +513,85 @@ class SniffActivity : AppCompatActivity() {
             }
             PlayLog.record("✗ 嗅探失败：$why  页=${PlayLog.shortenPublic(pageUrl)}")
         }
+    }
+
+    // ------------------------------------------------------------------ 浏览模式：识别并添加 / 手动校准
+
+    /** 当前真实所在页。`webView.url` 是唯一跟得上站内跳转（pushState / AJAX）的来源 */
+    private fun currentWebUrl(): String =
+        binding.webView.url.orEmpty().trim().ifBlank { pageUrl }
+
+    private fun refreshUrlLine() {
+        val u = currentWebUrl()
+        binding.tvCurUrl.text = if (u.isBlank()) getString(R.string.sniffer_url_loading)
+        else getString(R.string.sniffer_url_line, u)
+    }
+
+    /**
+     * 一键「识别并添加」：把当前这一页当成一个视频站，走一遍完整识别并入库。
+     *
+     * 判据与出口全部在 [WebSiteKit] —— 与「手动校准」共用同一套匹配逻辑，
+     * 不会出现"识别说已添加、校准又说找不到"的矛盾。
+     */
+    private fun recognizeAndAdd() {
+        if (grabbing) return
+        val url = currentWebUrl()
+        if (url.isBlank()) {
+            toast(getString(R.string.sniffer_no_url))
+            return
+        }
+        grabbing = true
+        binding.btnGrab.isEnabled = false
+        binding.tvStatus.text = getString(R.string.sniffer_grab_running)
+        lifecycleScope.launch {
+            val r = runCatching { WebSiteKit.recognizeAndAdd(this@SniffActivity, url) }.getOrNull()
+            grabbing = false
+            binding.btnGrab.isEnabled = true
+            updateStatus()
+            if (r == null) {
+                toast("识别失败：网络异常")
+                return@launch
+            }
+            if (!r.ok || r.site == null) {
+                // 失败也必须说清楚原因（"还在结果页上"和"这站不是视频站"是两件事）
+                toast(r.message)
+                return@launch
+            }
+            PlayLog.record("网页浏览识别成功：${r.site.name}  host=${Store.hostOf(r.site.baseUrl)}")
+            AlertDialog.Builder(this@SniffActivity)
+                .setTitle(R.string.sniffer_grab_ok_title)
+                .setMessage(getString(R.string.sniffer_grab_ok_msg, r.message))
+                .setPositiveButton(R.string.sniffer_grab_open) { _, _ ->
+                    startActivity(SiteActivity.intent(this@SniffActivity, r.site.key))
+                }
+                .setNegativeButton(R.string.sniffer_grab_stay, null)
+                .show()
+        }
+    }
+
+    /**
+     * 手动校准：先确保本站**在库里有配置**，再进四步校准。
+     *
+     * 不先 [WebSiteKit.ensureSite] 的话，`CalibrateActivity` 第一件事 `Store.find(key)`
+     * 就会拿到 null 并 `finish()` —— 用户从网页里点「手动校准」会被无声弹回，
+     * 表现就是"点了没反应"。这类"静默 exit"是本项目踩过最多次的一类。
+     */
+    private fun manualCalibrate() {
+        val url = currentWebUrl()
+        if (url.isBlank()) {
+            toast(getString(R.string.sniffer_no_url))
+            return
+        }
+        // ⚠️ 站点名要取**网页自己的标题**，不能取 [title]（那是我们带进来的 intent 标题：
+        //    从「全网搜索」进来时它是关键词，拿它当站名会把站叫成"庆余年"）。
+        val e = WebSiteKit.ensureSite(this, url, binding.webView.title.orEmpty())
+        if (e == null) {
+            toast(getString(R.string.sniffer_no_url))
+            return
+        }
+        // 刚建的那一条要解释一句：用户会奇怪"我没添加过啊，怎么列表里多了个站"
+        if (e.created) toast(getString(R.string.sniffer_calib_added, e.site.name))
+        startActivity(CalibrateActivity.intent(this, e.site.key))
     }
 
     private val LOGIN_WORDS = listOf(

@@ -28,6 +28,19 @@
             android:src="@drawable/ic_back"
             android:tint="@color/white" />
 
+        <!-- 浏览模式专用：网页后退（真正的返回箭头）。只在 browse 时出现（默认 gone）。
+             两个按钮的图标刻意区分开：左上角那个在浏览模式下会换成「×（关闭）」，
+             否则两个一模一样的箭头挨在一起，用户没法预测按哪个会发生什么。 -->
+        <ImageButton
+            android:id="@+id/webBack"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/back"
+            android:src="@drawable/ic_back"
+            android:tint="@color/white"
+            android:visibility="gone" />
+
         <TextView
             android:id="@+id/tvTitle"
             android:layout_width="0dp"
@@ -109,6 +122,52 @@
                 android:text="@string/sniffer_retry"
                 android:textColor="@color/brand"
                 android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- v1.0.37：把"这一页变成一个站源"的入口放在这里。
+             嗅探页是全 App 唯一能看到**真实网页**的地方（校准页只管点四步），
+             让用户"复制网址 → 返回 → 粘贴 → 识别"是把最顺的路堵上。 -->
+        <TextView
+            android:id="@+id/tvCurUrl"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:ellipsize="middle"
+            android:maxLines="1"
+            android:textColor="#B3FFFFFF"
+            android:textSize="11sp"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/webActionRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/btnGrab"
+                android:layout_width="0dp"
+                android:layout_height="34dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_btn_brand"
+                android:gravity="center"
+                android:text="@string/sniffer_grab"
+                android:textColor="@color/white"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/btnCalib"
+                android:layout_width="0dp"
+                android:layout_height="34dp"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chip_dark"
+                android:gravity="center"
+                android:text="@string/sniffer_calib"
+                android:textColor="@color/white"
+                android:textSize="13sp" />
         </LinearLayout>
 
         <androidx.recyclerview.widget.RecyclerView

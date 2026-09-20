@@ -51,4 +51,21 @@
         <item name="android:background">@drawable/bg_surface</item>
     </style>
 
+    <!--
+      搜索范围/动作类小圆片。选中态由 `bg_chip` 的 state_selected 给底色，
+      文字颜色必须跟着换（深底 + 深字 = 看不见），所以走 @color/chip_text 这个 state list。
+      不要用 android:textColor 直接写死品牌色：选中时品牌色底 + 品牌色字 = 一片糊。
+    -->
+    <style name="ChipSmall">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">30dp</item>
+        <item name="android:background">@drawable/bg_chip</item>
+        <item name="android:gravity">center</item>
+        <item name="android:paddingStart">12dp</item>
+        <item name="android:paddingEnd">12dp</item>
+        <item name="android:textColor">@color/chip_text</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:maxLines">1</item>
+    </style>
+
 </resources>

@@ -21,13 +21,17 @@ import com.videoshell.data.Store
 import com.videoshell.data.model.Category
 import com.videoshell.data.model.SiteConfig
 import com.videoshell.data.model.VideoItem
+import com.videoshell.data.net.Http
 import com.videoshell.data.net.NetLog
 import com.videoshell.data.site.AdapterFactory
+import com.videoshell.data.site.AggSearch
 import com.videoshell.data.site.CryptFamily
 import com.videoshell.data.site.RecipeStore
+import com.videoshell.data.site.SearchScope
 import com.videoshell.data.site.SiteAdapter
 import com.videoshell.data.site.SiteDoctor
 import com.videoshell.databinding.ViewSiteBrowserBinding
+import com.videoshell.player.SniffActivity
 import com.videoshell.ui.adapter.CategoryAdapter
 import com.videoshell.ui.adapter.VideoAdapter
 import com.videoshell.util.toast
@@ -61,9 +65,24 @@ class SiteBrowser(
     private var adapter: SiteAdapter? = null
 
     private val catAdapter = CategoryAdapter { index, c -> onCategory(index, c) }
-    private val videoAdapter = VideoAdapter { item ->
-        site?.let { onOpenDetail(it.key, item) }
-    }
+
+    /**
+     * `siteKey` → 站名 的查询表，「搜全站源」时给卡片标出来源站。
+     *
+     * 为什么要先存成一张表：`siteNameOf` 会在**每一张卡片绑定时**被调用，
+     * 里面若去 `Store.sites()` 就是每次绑定读一次 SharedPreferences ⇒
+     * 滚动时每帧一次磁盘读，网格会明显发涩。存表只读内存。
+     */
+    private val siteNames = HashMap<String, String>()
+
+    private val videoAdapter = VideoAdapter(
+        onClick = { item ->
+            // 聚合结果自带来源站；单站浏览时它为空 ⇒ 回落到当前站
+            val k = item.siteKey.ifBlank { site?.key.orEmpty() }
+            if (k.isNotBlank()) onOpenDetail(k, item)
+        },
+        siteNameOf = { key -> siteNames[key].orEmpty() }
+    )
 
     private var cats: List<Category> = emptyList()
     private var page = 1
@@ -72,13 +91,20 @@ class SiteBrowser(
     private var currentType = ""
     private var keyword = ""
 
+    /** 搜索范围：本站 / 全站 / 全网（持久化 —— 选过一次，下次进来还得是它） */
+    private var scope = SearchScope.SITE
+
     /** 首页那次「预渲染兜底」只试一次，别把每次翻页都拖成 WebView 加载 */
     private var webRendered = false
 
     init {
+        scope = SearchScope.of(Store.searchScope(act))
         b.btnSearchToggle.setOnClickListener {
             val show = b.searchRow.visibility != View.VISIBLE
             b.searchRow.visibility = if (show) View.VISIBLE else View.GONE
+            // 范围选择与搜索框同生共死：单看"全站"两个字，没有任何意义
+            b.scopeRow.visibility = if (show) View.VISIBLE else View.GONE
+            renderScope()
             if (!show && mode == MODE_SEARCH) {
                 mode = MODE_CATEGORY
                 catAdapter.select(0)
@@ -93,10 +119,75 @@ class SiteBrowser(
                 true
             } else false
         }
+        b.scopeSite.setOnClickListener { setScope(SearchScope.SITE) }
+        b.scopeAll.setOnClickListener { setScope(SearchScope.ALL) }
+        b.scopeWeb.setOnClickListener { setScope(SearchScope.WEB) }
         b.btnCatRetry.setOnClickListener { loadCategories() }
         b.tvCatHint.setOnClickListener { showCategoryPicker() }
         b.btnDoctor.setOnClickListener { runDoctor() }
         b.btnCalib.setOnClickListener { site?.let { launchCalib(it.key) } }
+    }
+
+    // ------------------------------------------------------------------ 搜索范围
+
+    private fun setScope(s: SearchScope) {
+        if (scope == s) {
+            renderScope()
+            return
+        }
+        val before = scope
+        scope = s
+        Store.setSearchScope(act, s.name)
+        renderScope()
+        if (mode != MODE_SEARCH || keyword.isBlank()) return
+        // 已经在搜了 ⇒ 按新范围重来一遍。唯独 WEB 不重来网格（结果不在网格里，在网页里）
+        when (s) {
+            SearchScope.WEB -> openWebSearch(keyword)
+            SearchScope.ALL -> { refreshSiteNames(); reload() }
+            SearchScope.SITE -> if (before == SearchScope.ALL) reload()
+        }
+    }
+
+    private fun renderScope() {
+        b.scopeSite.isSelected = scope == SearchScope.SITE
+        b.scopeAll.isSelected = scope == SearchScope.ALL
+        b.scopeWeb.isSelected = scope == SearchScope.WEB
+        b.tvScopeHint.text = when (scope) {
+            SearchScope.SITE -> act.getString(R.string.scope_hint_site)
+            SearchScope.ALL -> {
+                val n = Store.sites(act).size
+                if (n == 0) act.getString(R.string.scope_hint_all_empty)
+                else act.getString(R.string.scope_hint_all, n)
+            }
+            SearchScope.WEB -> act.getString(R.string.scope_hint_web)
+        }
+    }
+
+    /**
+     * 全网搜索：**不做抓取解析**，直接把 Bing 结果页当网页打开。
+     *
+     * 理由见 [SearchScope] 的注释 —— 抓搜索引擎结果再解析，等于把"站点的适配难题"
+     * 换成"搜索引擎的适配难题"，而且对方改版我们必挂。打开网页则一次也不用修。
+     */
+    private fun openWebSearch(kw: String) {
+        b.tvScopeHint.text = act.getString(R.string.scope_web_searching, kw)
+        act.startActivity(
+            SniffActivity.intent(
+                act,
+                SearchScope.webSearchUrl(kw),
+                kw,
+                mapOf("User-Agent" to Http.UA),
+                browse = true
+            )
+        )
+    }
+
+    /** 站名表只在「要用到聚合搜索」时刷一次（新增/改名/删除站点后都够新） */
+    private fun refreshSiteNames() {
+        siteNames.clear()
+        Store.sites(act).forEach {
+            siteNames[it.key] = it.name.ifBlank { Store.hostOf(it.baseUrl) }
+        }
     }
 
     /** 首次接线：拿不到视图尺寸的东西都在这里定 */
@@ -118,6 +209,8 @@ class SiteBrowser(
                 }
             }
         })
+        renderScope()
+        refreshSiteNames()
     }
 
     /** 一个站点都没有：给首页用的空态 */
@@ -246,6 +339,13 @@ class SiteBrowser(
         }
         keyword = kw
         mode = MODE_SEARCH
+        if (scope == SearchScope.WEB) {
+            // 全网：结果在网页里看。**刻意不清空网格** —— 清空会让人以为"没搜到"，
+            // 而真相是结果换了地方显示；留着旧内容，视线自然跟着新开的网页走。
+            openWebSearch(kw)
+            return
+        }
+        if (scope == SearchScope.ALL) refreshSiteNames()
         reload()
     }
 
@@ -257,28 +357,55 @@ class SiteBrowser(
         load(1, false)
     }
 
+    /**
+     * 拉一页。
+     *
+     * 两条路：**单站**（`adapter` 干活，原有逻辑）与**全站聚合**（每个站都搜一遍再拼起来）。
+     * 聚合那条路故意不走 [webRendered] 预渲染兜底：兜底要"开一个 WebView 把页面跑一遍"，
+     * 而聚合是多站 —— 给每个站都开一次就等于批量拉网页，代价与收益完全不成比例。
+     */
     private fun load(p: Int, append: Boolean) {
-        val a = adapter ?: return
         if (loading) return
+        val agg = mode == MODE_SEARCH && scope == SearchScope.ALL
+        val a = adapter
+        // 聚合不需要"当前站"的适配器；单站搜索/分类浏览没有它则无从加载
+        if (!agg && a == null) return
         loading = true
 
         act.lifecycleScope.launch {
-            val res = runCatching {
-                if (mode == MODE_SEARCH) a.search(keyword, p) else a.browse(currentType, p)
-            }
-            var items = res.getOrElse { emptyList() }
+            var items: List<VideoItem>
+            var why = ""
+            var summary: String? = null
+            var failures: List<AggSearch.SiteHits> = emptyList()
 
-            // ⑥ 预渲染兜底：首屏一条都解析不出来时，用 WebView 把页面真正跑一遍再取 DOM 解析。
-            // 纯客户端渲染的站（模板注入、JS 拼卡片）在这里被救回来。
-            // 接口型适配器不参与（supportsWebRender=false）—— 它的数据不在 DOM 里，
-            // 白开一次 WebView 只是让用户多等几秒，然后必然还是空。
-            if (items.isEmpty() && !append && !webRendered && a.supportsWebRender) {
-                webRendered = true
-                val url = currentTargetUrl(a)
-                if (url != null) {
-                    b.pb.visibility = View.VISIBLE
-                    val html = WebRender.html(act, url)
-                    if (!html.isNullOrBlank()) items = a.parseListFromHtml(html, p)
+            if (agg) {
+                val hits = AggSearch.run(Store.sites(act), keyword, p)
+                items = AggSearch.merge(hits)
+                summary = AggSearch.summary(hits)
+                failures = AggSearch.failures(hits)
+            } else {
+                val ad = a!!
+                val res = runCatching {
+                    if (mode == MODE_SEARCH) ad.search(keyword, p) else ad.browse(currentType, p)
+                }
+                items = res.getOrElse { emptyList() }
+
+                // ⑥ 预渲染兜底：首屏一条都解析不出来时，用 WebView 把页面真正跑一遍再取 DOM 解析。
+                // 纯客户端渲染的站（模板注入、JS 拼卡片）在这里被救回来。
+                // 接口型适配器不参与（supportsWebRender=false）—— 它的数据不在 DOM 里，
+                // 白开一次 WebView 只是让用户多等几秒，然后必然还是空。
+                if (items.isEmpty() && !append && !webRendered && ad.supportsWebRender) {
+                    webRendered = true
+                    val url = currentTargetUrl(ad)
+                    if (url != null) {
+                        b.pb.visibility = View.VISIBLE
+                        val html = WebRender.html(act, url)
+                        if (!html.isNullOrBlank()) items = ad.parseListFromHtml(html, p)
+                    }
+                }
+                if (items.isEmpty()) {
+                    why = res.exceptionOrNull()
+                        ?.let { it.javaClass.simpleName + ": " + it.message }.orEmpty()
                 }
             }
 
@@ -286,22 +413,41 @@ class SiteBrowser(
             b.pb.visibility = View.GONE
 
             if (items.isEmpty()) {
-                if (!append) {
-                    val why = res.exceptionOrNull()?.let { it.javaClass.simpleName + ": " + it.message }
+                if (append) {
+                    act.toast(act.getString(R.string.no_more))
+                    return@launch
+                }
+                if (agg) {
+                    // 汇总行常驻：**"几个站有结果/几个站失败"必须说出来**，
+                    // 否则用户只看到"没有结果"，会把我们的问题（某站挂了）当成"这片全网都没有"。
+                    b.tvScopeHint.text = summary.orEmpty()
+                    val txt = buildString {
+                        append(act.getString(R.string.scope_agg_empty, keyword))
+                        if (failures.isNotEmpty()) {
+                            append("（")
+                            append(act.getString(R.string.scope_fail_detail, failures.size))
+                            append("）")
+                        }
+                    }
+                    showState(txt)
+                    // 失败详情要能点开看，"几个站失败"这种没有主语的句子等于没说
+                    if (failures.isNotEmpty()) {
+                        b.tvState.setOnClickListener { showFailures(failures) }
+                    }
+                } else {
                     val net = NetLog.lastFailure()
                     showState(
                         when {
-                            !why.isNullOrBlank() -> act.getString(R.string.err_prefix, why)
+                            why.isNotBlank() -> act.getString(R.string.err_prefix, why)
                             net.isNotBlank() -> "暂无数据（$net）"
                             mode == MODE_SEARCH -> act.getString(R.string.no_result)
                             else -> "暂无数据，可换个分类试试"
                         }
                     )
-                } else {
-                    act.toast(act.getString(R.string.no_more))
                 }
                 return@launch
             }
+            if (summary != null) b.tvScopeHint.text = summary
             // 搜索模式：片名里标出关键词（切回分类/换站时自动清掉）。
             // 就放在 submit 前 —— `submit(…, false)` 走 notifyDataSetChanged，会立刻用新值重绑所有卡片；
             // 分散到 doSearch / onCategory / bindSite 各写一遍反而容易漏（本项目踩过"漏传回调"的坑）。
@@ -310,6 +456,18 @@ class SiteBrowser(
             page = p
             showState(null)
         }
+    }
+
+    /** 聚合搜索里失败站点的原因清单（用户点一下状态行就能看到） */
+    private fun showFailures(fs: List<AggSearch.SiteHits>) {
+        val msg = fs.joinToString("\n\n") {
+            it.name.ifBlank { it.key } + "\n" + it.error.orEmpty()
+        }
+        AlertDialog.Builder(act)
+            .setTitle(R.string.scope_fail_title)
+            .setMessage(msg)
+            .setPositiveButton(R.string.ok, null)
+            .show()
     }
 
     /** 预渲染兜底要打开的地址：分类/首页的第一个候选 */
@@ -325,6 +483,9 @@ class SiteBrowser(
     private fun showState(msg: String?) {
         b.tvState.text = msg.orEmpty()
         b.tvState.visibility = if (msg == null) View.GONE else View.VISIBLE
+        // 聚合搜索会在状态行上挂"查看失败的 N 个站"；状态位一旦清空，
+        // 那个入口必须一起退场 —— 留着一个"看不见但能点"的区域，是最难复现的那种 bug。
+        if (msg == null) b.tvState.setOnClickListener(null)
     }
 
     // ------------------------------------------------------------------ 站点自检 / 重学

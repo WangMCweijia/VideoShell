@@ -140,6 +140,17 @@
                     android:textColor="@color/brand"
                     android:textSize="13sp"
                     android:visibility="gone" />
+
+                <!-- v1.0.37：网页浏览入口。不填网址 = 打开搜索引擎（全网），
+                     填了 = 直接打开那个网址 —— 浏览时能「识别并添加」/「手动校准」。 -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnBrowseWeb"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:text="@string/btn_browse_web"
+                    android:textColor="@color/brand"
+                    android:textSize="13sp" />
             </LinearLayout>
 
             <TextView

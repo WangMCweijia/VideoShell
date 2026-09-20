@@ -19,7 +19,10 @@ import kotlinx.coroutines.launch
 class FavActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityFavBinding
-    private val adapter = VideoAdapter { open(it) }
+    // ⚠️ 必须**具名**传 onClick：VideoAdapter 现在有两个函数型参数
+    // （第二个是「聚合搜索时给卡片标来源站」），尾随 lambda 语法会绑到最后一个上，
+    // 而且要等到类型不匹配时才报错（v1.0.37 真踩过）。
+    private val adapter = VideoAdapter(onClick = { open(it) })
     private var favs: List<com.videoshell.data.FavEntry> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {

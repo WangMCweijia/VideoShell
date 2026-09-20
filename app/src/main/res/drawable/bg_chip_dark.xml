@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  深色浮层（bg_panel）上的次要按钮。
+  刻意**不用 `bg_chip`**：那个是按亮/暗模式取色的（亮色底 + 深字），
+  放到这个始终是深色的浮层上，暗色模式下会变成"深底 + 浅字压深底"——看不清。
+  浮层不跟随主题，所以这里写死半透明白底 + 白字。
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#4DFFFFFF" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#26FFFFFF" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+</selector>
