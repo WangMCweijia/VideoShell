@@ -141,6 +141,18 @@
     <string name="calib_got_search">搜索模板已固化：%1$s</string>
     <string name="calib_search_skipped">已跳过搜索校准</string>
     <string name="calib_search_failed">结果页地址里没找到关键词——先在网页里搜索一次，停在结果页再按「确定」。也可以按「确定」后留空跳过搜索校准。</string>
+    <string name="calib_search_skip">跳过（直接完成）</string>
+    <string name="calib_search_fail_title">没学到搜索模板</string>
+    <string name="calib_search_fail_msg">当前页地址是：\n%1$s\n\n里面没有「%2$s」—— 多半是这个站的搜索结果不体现在网址上（JS 渲染），或者还没真的搜过。\n\n前三步学到的规则不受影响，可以直接完成校准。</string>
+    <string name="calib_search_fail_finish">跳过并完成</string>
+    <string name="calib_search_fail_retry">我再去搜一次</string>
+    <string name="calib_search_retrying">好，请在网页里搜索一次、停在结果页，然后按「确定」</string>
+    <string name="calib_cat_shape_builtin">形状：站点自带判据已认得（数字分类 id）</string>
+    <string name="calib_cat_shape_none2">形状未识别</string>
+    <string name="calib_nav_sel_off_page">容器 %1$s（取自你点的那一页）</string>
+    <string name="calib_nav_sel_none_tried">容器未识别（已在首页与你点的那一页各找过一遍）</string>
+    <string name="calib_got_play_sample">已把这一页记作试播样本：%1$s</string>
+    <string name="calib_play_tpl_none_named">播放页模板没学到（本站不是 maccms 的 /{目录}/{id}-{sid}-{nid}.html 形状）—— 分集仍从详情页取，播放走实测过的这一页，不影响使用</string>
     <string name="calib_reselect">重选</string>
 
     <!-- 跳过某一步（v1.0.29）：站点之间结构差异很大，不适配的步不该把用户锁死 -->
@@ -162,10 +174,10 @@
     <string name="calib_inject_failed">⚠ 点击监听没挂上（%1$s）—— 这一页点不动。请按「重来」重新加载网页；若一直不行，可能是网页禁用了脚本</string>
 
     <!-- 判据不认时的**软提示**：只提醒，不拦人 -->
-    <string name="calib_soft_cat">⚠ 这不像标准分类链接，形状没学到（仍可继续 —— 之后会退回容器 / 默认逻辑）</string>
-    <string name="calib_soft_detail">⚠ 这里没有影片编号，详情模板没学到（仍可继续 —— 之后用默认逻辑）</string>
+    <string name="calib_soft_cat">⚠ 这条链接归纳不出形状（`/riju` 这类单段别名就是这样）—— 形状规则跳过，改用你点所在的容器兜底，仍可继续</string>
+    <string name="calib_soft_detail">⚠ 这一条里没有影片编号（详情页形状认不出）—— 仍可继续，之后按默认详情候选试</string>
     <string name="calib_soft_detail_is_play">⚠ 这像播放页链接，详情模板没学到（仍可继续 —— 下一步正好要点分集）</string>
-    <string name="calib_soft_play">⚠ 这不像分集链接，播放页模板没学到（仍可继续 —— 会靠网页嗅探）</string>
+    <string name="calib_soft_play">⚠ 这一条不是 maccms 的播放页形状（`/{目录}/{id}-{sid}-{nid}.html`）—— 仍可继续，会把你点的这一页直接当作试播样本</string>
 
     <string name="calib_got_cat">已记下分类「%1$s」</string>
     <string name="calib_cat_tpl">形状 %1$s</string>

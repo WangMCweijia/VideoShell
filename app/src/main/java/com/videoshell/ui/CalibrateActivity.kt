@@ -123,8 +123,21 @@ class CalibrateActivity : AppCompatActivity() {
      */
     private var pending: Pick? = null
 
-    /** 一次点击的原始信息 */
-    private data class Pick(val raw: String, val abs: String, val text: String, val jsSel: String)
+    /**
+     * 一次点击的原始信息。
+     *
+     * [page] 是**点击发生时那一页的地址**（JS 报的 `location.href`，比 `pageUrl` 实时 ——
+     * SPA 里 `history.pushState` 不触发 `onPageFinished`，`pageUrl` 会停在很久以前那一次）。
+     * v1.0.36 起两处依赖它：① 容器反推时可以退到"用户真正点的那一页"；
+     * ② 第 4 步点结果页时能记住地址（搜索模板就是从这个地址里学的）。
+     */
+    private data class Pick(
+        val raw: String,
+        val abs: String,
+        val text: String,
+        val jsSel: String,
+        val page: String
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -402,17 +415,22 @@ class CalibrateActivity : AppCompatActivity() {
      */
     private fun handlePick(json: String) {
         if (finished || resolvingStarted) return
-        if (step == SiteCalib.Step.SEARCH) {
-            // 第 4 步靠「结果页地址」不靠点击；点了也给个说明，免得像没反应
-            state(getString(R.string.calib_hint4))
-            return
-        }
         val o = runCatching { JSONObject(json) }.getOrNull() ?: return
         val raw = o.optString("href").trim()
         val text = o.optString("text").trim()
         val jsSel = o.optString("sel").trim()
         val page = o.optString("url").trim().ifBlank { pageUrl }
 
+        if (step == SiteCalib.Step.SEARCH) {
+            // 第 4 步不用点击判据，但**要靠地址**：搜索大多不换页（AJAX / pushState），
+            // 而 pushState 不触发 onPageFinished ⇒ [pageUrl] 会一直停在首页，
+            // 于是用户在结果页上点任何东西，我们都记不到"他现在在哪一页"。
+            // JS 每次点击都上报 `location.href`，这里就把它收下来。
+            // （v1.0.36：这是「填了关键词点确定却永远学不到模板」的直接成因。）
+            if (page.isNotBlank()) pageUrl = page
+            state(getString(R.string.calib_hint4))
+            return
+        }
         val abs = absUrl(raw, page)
         when (SiteCalib.classify(raw, abs, step)) {
             SiteCalib.PickKind.NOT_LINK -> {
@@ -426,7 +444,7 @@ class CalibrateActivity : AppCompatActivity() {
             else -> Unit
         }
 
-        val p = Pick(raw, abs, text, jsSel)
+        val p = Pick(raw, abs, text, jsSel, page)
         pending = p
         renderActions()
         state(pickedHint(p))
@@ -497,8 +515,20 @@ class CalibrateActivity : AppCompatActivity() {
         val rejected = hits in 0..1
 
         catTpl = if (rejected) null else shape
+
+        // ⚠️ 拒收时**容器也不收**（v1.0.34 的实测结论，别改回去）：
+        //    用户点的是导航项 `/explore/drama/`，而从**同一次点击**推出来的容器是
+        //    `div.app-layout` 这种**页面外壳**，不是分类列表 —— 收下它只会让
+        //    HtmlAdapter 的 manualNavSel 分支提前 return，把本来好用的默认判据顶掉。
+        //    （野果实测：默认判据给出 40 个真分类。）
+        //
+        // v1.0.36 改的是**另一件事**：形状没被拒收、只是归纳不出来时（`/riju` 这类
+        // 单段别名、maccms 的数字分类 id），容器照推 —— 那时推出来的是真容器。
+        // 并且**先试用户点的那一页再试首页**：用户常在二级页面上点分类，
+        // 首页里根本没有那条链接，只说"未识别"会让人以为白点了。
+        val nav: NavPick? = if (rejected) null else deriveNavSel(p.abs, p.page)
         navSel = if (rejected) null
-        else (deriveNavSel(p.abs) ?: p.jsSel.takeIf { it.isNotBlank() })
+        else (nav?.sel ?: p.jsSel.takeIf { it.isNotBlank() })
         step = SiteCalib.Step.DETAIL
         render()
 
@@ -506,24 +536,50 @@ class CalibrateActivity : AppCompatActivity() {
         val shapeText = when {
             rejected -> "⚠️ 已跳过这条形状（$shape 在本页只命中 $hits 条，判据要求 ≥2）"
             catTpl != null -> getString(R.string.calib_cat_tpl, catTpl!!)
-            else -> getString(R.string.calib_cat_tpl_none)
+            // 「不需要学」与「没学到」必须分开说。站点自带判据本来就能认的数字分类 id
+            // （maccms 的 `/vodshow/id/6.html`）形状归纳不出来，但它根本不需要形状规则。
+            HtmlTemplates.isCategoryHref(p.abs, false) -> getString(R.string.calib_cat_shape_builtin)
+            else -> getString(R.string.calib_cat_shape_none2)
         }
-        val tail = when {
-            rejected ->
-                "它多半是**一个导航项**、不是分类列表 —— 返回上一步，改点页面上真正的那一串分类标签。"
-            navSel != null -> getString(R.string.calib_nav_sel, navSel!!)
-            else -> getString(R.string.calib_nav_sel_none)
-        }
-        // 用户可能已经点到第 2 步了，别把新提示覆盖掉
-        if (step == SiteCalib.Step.DETAIL) state("$head　$shapeText　$tail")
+        // 拒收这条要说清"为什么不写" —— 用户看到"什么都没学到"会以为白点了，
+        // 而真相是**故意不写**（写了会把上一次学对的规则挡掉）。
+        val tail = if (rejected)
+            "它多半是**一个导航项**、不是分类列表 —— 本次**不写入任何分类规则**" +
+                    "（写了反而会把上一次学对的规则挡掉；容器也只从这一次点击推、那只是页面外壳）。" +
+                    "本站分类继续走默认判据；要学形状，请返回上一步、点页面上真正的那一串分类标签。"
+        else navTail(nav, navSel)
+        state("$head　$shapeText　$tail")
+    }
+
+    /** 容器反推的结果：[sel] 是选择器，[fromPage] = 取自"用户点的那一页"而不是首页 */
+    private data class NavPick(val sel: String, val fromPage: Boolean)
+
+    /**
+     * 「容器」那一句人话。
+     *
+     * 取自**用户点的那一页**时要说明 —— 用户常常是在二级页面上点分类（先点进一个分类、
+     * 再点另一个），首页里本来就没有那条链接；把这种情况说成"未识别"会让人以为白点了。
+     */
+    private fun navTail(nav: NavPick?, fallback: String?): String = when {
+        nav != null && nav.fromPage -> getString(R.string.calib_nav_sel_off_page, nav.sel)
+        nav != null -> getString(R.string.calib_nav_sel, nav.sel)
+        fallback != null -> getString(R.string.calib_nav_sel, fallback)
+        else -> getString(R.string.calib_nav_sel_none_tried)
     }
 
     /** ② 影片：反推详情页模板。没学到也推进（退用默认逻辑），只有"这像播放页"会额外说一句。 */
     private fun pickDetail(p: Pick) {
         val isPlay = HtmlTemplates.isPlayLink(p.raw) || HtmlTemplates.isPlayLink(p.abs)
         val id = HtmlTemplates.videoIdOf(p.raw, false) ?: HtmlTemplates.videoIdOf(p.abs, false)
-        detailTpl = if (isPlay || id.isNullOrBlank()) null
-        else HtmlTemplates.detailTplFrom(p.abs, id)
+        // v1.0.36：学习顺序必须与**运行时**一致 —— HtmlAdapter 学详情模板时用的就是
+        // `videoIdOf + detailTplFrom`，再退到 `tplFromNumericSegment`（自研站的 `/…/{id}/`）。
+        // 校准这里少写一条，用户点对了却会被告知"没学到"。
+        detailTpl = when {
+            isPlay -> null
+            id != null -> HtmlTemplates.detailTplFrom(p.abs, id)
+                ?: HtmlTemplates.tplFromNumericSegment(p.abs)
+            else -> HtmlTemplates.tplFromNumericSegment(p.abs)
+        }
         // "点封面就直接播放"的站：这个地址本身就是播放页 ⇒ 留作试播样本。
         // 用户接下来如果跳过第 3 步（那种站第 3 步无从点起），第 4 步结束时照样能试播一次。
         if (isPlay) playPickAbs = p.abs
@@ -545,15 +601,23 @@ class CalibrateActivity : AppCompatActivity() {
      *
      * v1.0.21：进第 4 步时**自动回到站点首页** —— 第 4 步的任务是"去站内搜一次"，
      * 而用户此刻还停在第三步选中的播放页上；搜索框在首页，不回去就没法搜。
+     *
+     * v1.0.36：学习顺序与运行时 `learnPlayTpl` 对齐（maccms 形状 → 自研站 numeric segment），
+     * 并把"这一页已经记作试播样本"这件事说出来 —— 模板学不到**不等于**这一步白点。
      */
     private fun pickPlay(p: Pick) {
-        playTpl = HtmlTemplates.playTplFrom(p.abs)
+        val t = HtmlTemplates.playTplFrom(p.abs)
+            ?: HtmlTemplates.tplFromNumericSegment(p.abs)?.takeIf { it != detailTpl }
+        playTpl = t
         playPickAbs = p.abs
         step = SiteCalib.Step.SEARCH
         render()
         state(
-            playTpl?.let { getString(R.string.calib_got_play, it) }
-                ?: getString(R.string.calib_soft_play)
+            when {
+                t != null -> getString(R.string.calib_got_play, t)
+                else -> getString(R.string.calib_got_play_sample, short(p.abs)) + "\n" +
+                        getString(R.string.calib_play_tpl_none_named)
+            }
         )
         binding.webView.loadUrl(site.baseUrl)
     }
@@ -563,9 +627,14 @@ class CalibrateActivity : AppCompatActivity() {
     /**
      * 问用户刚才搜的词。留空 = 跳过搜索校准（规则照常固化、照常试播）。
      *
-     * v1.0.21：填了词却学不到模板（pageUrl 里没有关键词 —— 多半是还没去搜索、
-     * 或站点的搜索地址不走 URL）⇒ **留在第 4 步**，让用户去搜完再按一次「确定」；
-     * 旧行为是直接 resolveAndPlay 收尾，用户一次没搜对，整个校准就结束了。
+     * v1.0.21：填了词却学不到模板（当前页地址里没有关键词 —— 多半是还没去搜索、
+     * 或站点的搜索地址不走 URL）⇒ **留在第 4 步**，让用户去搜完再按一次「确定」。
+     *
+     * ⚠️ v1.0.36：那条"留在第 4 步"必须**给得出路**。实测用户会卡死在这里：
+     * 站点的搜索是 AJAX / pushState（网址不变）⇒ 永远学不到模板；
+     * 而唯一能往下走的那个按钮写着「取消」—— 没人会把「取消」理解成
+     * 「跳过搜索校准、把前三步固化掉并完成」。于是症状就是用户报的
+     * **「填写搜索关键字后点确定，流程不会结束」**。
      */
     private fun askSearchKeyword() {
         val input = android.widget.EditText(this).apply {
@@ -579,7 +648,8 @@ class CalibrateActivity : AppCompatActivity() {
             .setPositiveButton(R.string.ok) { _, _ ->
                 applySearchCalib(input.text.toString().trim())
             }
-            .setNegativeButton(R.string.cancel) { _, _ ->
+            // 按钮文案必须是它**实际做的事**：跳过搜索校准 → 固化前三步 → 收尾。
+            .setNegativeButton(R.string.calib_search_skip) { _, _ ->
                 applySearchCalib("")
             }
             .show()
@@ -591,10 +661,30 @@ class CalibrateActivity : AppCompatActivity() {
             resolveAndPlay(playPickAbs)
             return
         }
-        val tpl = SiteCalib.searchTplFromUrl(pageUrl, kw)
+        // 取"现在"的地址：WebView 自己的 url 在 pushState 之后会更新，而 [pageUrl]
+        // 只由 onPageStarted / onPageFinished / shouldOverrideUrlLoading 喂 ——
+        // SPA 的站内搜索三者都不触发 ⇒ 它可能还停在很久以前那个首页上。
+        // 两个都试，谁带关键词用谁。
+        val now = binding.webView.url.orEmpty().trim().ifBlank { pageUrl }
+        val tpl = SiteCalib.searchTplFromUrl(now, kw)
+            ?: SiteCalib.searchTplFromUrl(pageUrl, kw)
         if (tpl == null) {
-            // 不收尾：提示后停在第 4 步，用户搜完再按「确定」即可；「取消」按钮可随时跳过
+            // ⚠️ 这里**绝不能只改一行状态文本就 return** —— 那正是用户报的「流程不会结束」：
+            //    模板学不到时没有任何一条路能走完校准，只能反复按「确定」。
+            //    改成一个**必达终点**的选择框：要么现在就完成（前三步规则照常落盘），
+            //    要么回网页再搜一次 —— 两条路都不会把人留在这儿。
             state(getString(R.string.calib_search_failed))
+            AlertDialog.Builder(this)
+                .setTitle(R.string.calib_search_fail_title)
+                .setMessage(getString(R.string.calib_search_fail_msg, short(now), kw))
+                .setCancelable(false)
+                .setPositiveButton(R.string.calib_search_fail_finish) { _, _ ->
+                    resolveAndPlay(playPickAbs)
+                }
+                .setNegativeButton(R.string.calib_search_fail_retry) { _, _ ->
+                    state(getString(R.string.calib_search_retrying))
+                }
+                .show()
             return
         }
         searchTpl = tpl
@@ -621,16 +711,32 @@ class CalibrateActivity : AppCompatActivity() {
     // ------------------------------------------------------------------ 分类容器反推
 
     /**
-     * 从抓到的首页 DOM 里反推「分类所在的导航容器」选择器。
+     * 从抓到的原文 DOM 里反推「分类所在的导航容器」选择器。
      *
-     * 逻辑本身在 [SiteCalib]（纯函数、有离线断言）；这里只负责把首页抓下来。
+     * 逻辑本身在 [SiteCalib]（纯函数、有离线断言）；这里只负责把页面抓下来。
      * 用解析出来的原文 DOM 而不是 WebView 渲染后的 DOM —— 适配器实际用的是前者，
      * 在这里推出来的选择器必须在前者上有效，否则固化了也用不上。
+     *
+     * v1.0.36：**先试用户点的那一页，再试首页**。旧实现只抓首页 ——
+     * 用户一旦在二级页面上点分类（很常见：先点进一个分类、再点另一个），
+     * 首页里根本没有那条链接，于是推不出来、界面打出一句「容器未识别」。
+     * 那句话描述的是"我们没找到"，不是"它不存在"；能不能找到取决于**找没找对页面**。
+     *
+     * 首页那一趟不能省：运行时 `HtmlAdapter.categoriesFrom` 拿到的是首页/分类页的 DOM，
+     * 容器选择器必须在那上面也有效。所以顺序是「点的那一页 → 首页」，取到即用，
+     * 并记下来源（非首页时界面要说明，见 [navTail]）。
      */
-    private suspend fun deriveNavSel(clickedAbs: String): String? {
-        val html = runCatching { Http.getOrNull(site.baseUrl, referer = site.baseUrl) }.getOrNull()
-            ?: return null
-        return SiteCalib.navSel(html, site.baseUrl, clickedAbs)
+    private suspend fun deriveNavSel(clickedAbs: String, page: String): NavPick? {
+        val home = site.baseUrl.trimEnd('/')
+        val targets = LinkedHashSet<String>()
+        page.trim().takeIf { it.startsWith("http") }?.let { targets += it }
+        targets += home
+        for (u in targets) {
+            val html = runCatching { Http.getOrNull(u, referer = home) }.getOrNull() ?: continue
+            val sel = SiteCalib.navSel(html, u, clickedAbs) ?: continue
+            return NavPick(sel, fromPage = u.trimEnd('/') != home)
+        }
+        return null
     }
 
     // ------------------------------------------------------------------ 解析 + 固化 + 试播

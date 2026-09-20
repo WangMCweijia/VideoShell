@@ -401,7 +401,10 @@ object SsrPayload {
         val fromTitle = ArrayList<Int>(n)
         var titleOk = true
         for (t in titles) {
-            val no = TITLE_NO.find(t)?.groupValues?.get(1)?.toIntOrNull()
+            // ⚠️ v1.0.36：判据已合并到 EpisodeOrder.noInTitle —— 这里原先自持一份 TITLE_NO，
+            //    只认阿拉伯数字；野果那类**中文数字**集名（`少妇白洁 第二十一集`）因此整列取不到号。
+            //    三份副本（本文件 / NAME_PATTERNS / YeguoMap）合并成一份，是全项目的一致纪律。
+            val no = com.videoshell.util.EpisodeOrder.noInTitle(t)
             if (no == null || no <= 0) { titleOk = false; break }
             fromTitle.add(no)
         }
@@ -425,7 +428,11 @@ object SsrPayload {
         return eps
     }
 
-    private val TITLE_NO = Regex("第\\s*(\\d{1,4})\\s*[集话]")
+    // ⚠️ v1.0.36：原来这里有一份 TITLE_NO = `第\s*(\d{1,4})\s*[集话]`（只认阿拉伯数字），
+    //    已删除 —— 集号判据统一走 EpisodeOrder.noInTitle（阿拉伯 + 中文数字 + 全角空格）。
+    //    删它的原因不是"更整齐"，而是它**真的漏**：中文数字集名整列取不到号时，
+    //    下面的 useTitle 会静默为 false、退到 sort/index —— 而 SSR payload 的
+    //    `sort` 恒为 1（这正是本文件当年实测记下来的），名字于是全变成「第1集」。
 
     private val URL_KEYS = listOf("video_url", "videoUrl", "play_url", "playUrl", "m3u8", "url")
     private val TITLE_KEYS = listOf("episode_title", "episodeTitle", "title", "name", "episode_name")

@@ -159,14 +159,29 @@ object SiteCalib {
     /**
      * 这一条链接像不像「分类」。
      *
-     * 三类都要能分开：
-     * - 分类：`/bspvt/dianying.html`（目录式别名）、`/riju`、`/vodshow/id/6.html`
+     * 四类都要能分开：
+     * - 分类：`/bspvt/dianying.html`（目录式别名）、`/riju`、`/vodshow/id/6.html`、
+     *   **`/tag/熟女/`（尾斜杠目录式，自研 SSR 站）**
      * - 详情：`/bspvd/548165.html`、`/detail/548165.html`、`/movie/23804.html`
      * - 分集：`/bspvp/548165-4-1.html`
      *
      * 顺序很重要：**先按形状认分类，再排除**。
      * 反过来（先看 [HtmlTemplates.videoIdOf] 有没有 id）会把 `/vodshow/id/6.html` 判成详情页
      * —— 那个通用详情正则 `/{目录}/{数字}.html` 也会命中它，可它明明是 maccms 的标准分类页。
+     *
+     * ## ⚠️ v1.0.36：补上尾斜杠家族（这条漏了整整两个版本）
+     *
+     * [HtmlTemplates.catTplFrom] 从 v1.0.32 起就把尾斜杠路由（`/tag/{slug}/`）分流成分类形状，
+     * `HtmlAdapter.collectSlashDirCategories` 也一直按它收 —— 只有**这个判据**没跟上，
+     * 于是出现了「同一件事两套判据」：
+     *
+     * - 用户点野果的真分类 `/tag/熟女/` ⇒ 这里返回 false ⇒ 界面当场说
+     *   **「⚠ 这不像标准分类链接，形状没学到」**；
+     * - 按「确定」之后，`catTplFrom` 又**学得好好的**，报出形状 `/tag/{slug}/`。
+     *
+     * 点了正确的分类、却被先说一遍"没识别到" —— 这就是用户报的
+     * 「每一步点了对应的位置后，校准流程中有可能提示没识别到」里最常见的一种。
+     * 判据只能有一份；形状家族新增一个，这个判据就必须同步新增一个。
      */
     fun isCategoryShape(href: String): Boolean {
         val h = href.trim()
@@ -175,6 +190,7 @@ object SiteCalib {
         if (HtmlTemplates.isStrongDetail(h)) return false   // 明确的详情页
         return HtmlTemplates.isSlugCategory(h) ||
                 HtmlTemplates.isSlugDirCategory(h) ||
+                HtmlTemplates.isSlashDirCategory(h) ||
                 HtmlTemplates.isCategoryHref(h, false)
     }
 

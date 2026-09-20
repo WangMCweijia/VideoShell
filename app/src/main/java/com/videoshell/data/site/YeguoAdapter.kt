@@ -10,6 +10,7 @@ import com.videoshell.data.model.PlayGroup
 import com.videoshell.data.model.SiteConfig
 import com.videoshell.data.model.VideoDetail
 import com.videoshell.data.model.VideoItem
+import com.videoshell.util.EpisodeOrder
 import java.io.IOException
 
 /**
@@ -361,9 +362,61 @@ object YeguoMap {
         return m
     }
 
+    // ------------------------------------------------------------------ 分集显示名（v1.0.36）
+
+    /** 分集显示名。集号从哪来由 [episodesNoes] 整列决定，这里只负责把数字说成人话 */
+    fun episodeLabel(no: Int): String = "第${no.coerceAtLeast(1)}集"
+
     /**
-     * 组装分集：**以 `episodeAll[]` 为主体**（顺序 + id 最全），集名优先用 `episodes[]` 的。
+     * **整列**定集号（纯函数，离线可断言）：标题 → 站点序号 → 数组位置，三选一，**整列同源**。
+     *
+     * ## 为什么不能逐条回退
+     *
+     * 「标题取不到就退到站点序号」这种**逐条**回退放在一列里是错的：标题和站点序号
+     * 是两个来源，混起来会造出重复号与错位号 —— 实测 `窥破爱人谎言` 三集标题里一个
+     * 「第N集」都没有（`AI短剧 窥破爱人谎言` / `…2` / `…3`），逐条回退会让三集全落到
+     * 同一个站点序号上。这跟 [EpisodeOrder.order] 的「一列集号必须来自同一个来源」
+     * 是同一条纪律，只是那边管排序、这边管编号。
+     *
+     * ## 三档判定（实测 2026-09-20，20 部剧）
+     *
+     * 1. **标题**：整列都能读出「第N集」且互不相同 ⇒ 用标题。
+     *    站点自己标的号最权威（`少妇白洁 第二十一集` → 21）。实测可用 17/20；
+     * 2. **站点序号** `index` / `sort`：实测可用 **20/20**（都是 1..n，SsrPayload 注释里
+     *    那句"sort 恒为 1"说的是 SSR payload，不是这个接口）；
+     * 3. **数组位置**：`index` 本身就是数组下标，这一步只是兜底，但保证一定有号 ——
+     *    绝不出现空白格，也绝不出现两个「第1集」。
+     */
+    fun episodesNoes(titles: List<String>, ords: List<Int>): List<Int> {
+        if (titles.isEmpty()) return emptyList()
+        val fromTitle = titles.map { EpisodeOrder.noInTitle(it) }
+        if (fromTitle.all { it != null } && fromTitle.toSet().size == titles.size) {
+            return fromTitle.map { it!! }
+        }
+        if (ords.all { it > 0 } && ords.toSet().size == ords.size) return ords
+        return titles.indices.map { it + 1 }
+    }
+
+    /**
+     * 组装分集：**以 `episodeAll[]` 为主体**（顺序 + id 最全），显示名一律收敛成「第N集」。
      * 两者 id 相同（实测 `episodes[0].id == episodeAll[0].id == 186514`），所以能直接对上。
+     *
+     * ## 为什么不能直接显示站点给的标题
+     *
+     * 站点下发的 `episodes[].title` / `episodeAll[].episode_title` 是**自带剧名**的长串
+     * （实测 20 部剧全部如此）：
+     *
+     * | 剧名 | 站点给的分集名 |
+     * |---|---|
+     * | 少妇白洁 | `少妇白洁 第一集` … `少妇白洁 第二十二集` |
+     * | 庆余年 第三季 | `《庆余年》 第三季第一集` |
+     * | 速通西游 | `AI魔改 速通西游第一集` |
+     * | 舔狗2应有尽有 | `舔狗2应有尽有` / `舔狗2应有尽有 第二集` / `舔狗2应有尽有第三集` |
+     *
+     * 照原样铺进选集网格，结果就是用户报的那句：**「分集名称全是剧名」** ——
+     * 每一格都在复读剧名，区分度只剩末尾那个数字；第一集还常常连数字都没有
+     * （`时间停止` 那一集的名字就等于剧名）。个别集甚至把整段剧情简介贴进标题
+     * （实测 `妹妹帮我操妈妈 第1集觉醒了最离谱的异能，竟是…`），一格里六十多个字。
      *
      * 分集地址一律是 [PseudoPlayUrl] 伪地址，真链播放时现取（`auth_key` 有时效）。
      */
@@ -377,30 +430,42 @@ object YeguoMap {
 
         val all = playData?.arr("episodeAll").orEmpty()
         if (all.isNotEmpty()) {
-            var n = 0
+            val ids = ArrayList<String>(all.size)
+            val titles = ArrayList<String>(all.size)
+            val ords = ArrayList<Int>(all.size)
             for (e in all) {
                 val o = e.takeIf { it.isJsonObject }?.asJsonObject ?: continue
-                n++
                 val eid = o.get("id").str()
                 if (eid.isBlank()) continue
-                val name = titleById[eid]?.takeIf { it.isNotBlank() }
+                ids += eid
+                // 集名优先用详情接口的 episodes[]（字段最全），再退播放接口自己的
+                titles += titleById[eid]?.takeIf { it.isNotBlank() }
                     ?: o.get("episode_title").str().takeIf { it.isNotBlank() }
-                    ?: o.get("title").str().takeIf { it.isNotBlank() }
-                    ?: "第${n}集"
-                out += Episode(name, PseudoPlayUrl.build(videoId, eid))
+                    ?: o.get("title").str()
+                ords += o.get("index").asIntOrNull() ?: o.get("sort").asIntOrNull() ?: 0
+            }
+            val nos = episodesNoes(titles, ords)
+            for (i in ids.indices) {
+                out += Episode(episodeLabel(nos[i]), PseudoPlayUrl.build(videoId, ids[i]))
             }
         }
 
         // 兜底：播放接口没给 episodeAll（站点改版 / 只有一集），用详情的 episodes[]
         if (out.isEmpty()) {
+            val ids = ArrayList<String>()
+            val titles = ArrayList<String>()
+            val ords = ArrayList<Int>()
             for (e in detailEps) {
                 val o = e.takeIf { it.isJsonObject }?.asJsonObject ?: continue
                 val eid = o.get("id").str()
                 if (eid.isBlank()) continue
-                out += Episode(
-                    o.get("title").str().ifBlank { "第${o.get("sort").str()}集" },
-                    PseudoPlayUrl.build(videoId, eid)
-                )
+                ids += eid
+                titles += o.get("title").str()
+                ords += o.get("sort").asIntOrNull() ?: 0
+            }
+            val nos = episodesNoes(titles, ords)
+            for (i in ids.indices) {
+                out += Episode(episodeLabel(nos[i]), PseudoPlayUrl.build(videoId, ids[i]))
             }
         }
         return out
