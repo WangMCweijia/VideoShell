@@ -40,6 +40,19 @@ object HlsPlaylistFixer {
     )
 
     /**
+     * 「静态整集」判据（v1.0.38）：站点**两样都不标**（既没有 `PLAYLIST-TYPE:VOD`
+     * 也没有 `ENDLIST`）时，靠清单本身的长相判断它是不是一整集。
+     *
+     * 不补 ENDLIST 的话 ExoPlayer 会按**直播**处理：把起播点放在"直播边缘"（= 清单末尾），
+     * 结果就是**时长读得到、画面一直转圈**（在等永远不来的"下一段"）。
+     *
+     * 阈值刻意保守 —— 直播 HLS 给的是**窗口**（几十秒、几个分片），
+     * 30 个分片 + 15 分钟以上不可能是窗口。放宽到 12/5 分钟会开始碰到长窗口直播。
+     */
+    private const val STATIC_MIN_SEGMENTS = 30
+    private const val STATIC_MIN_SECONDS = 900.0
+
+    /**
      * @param text        原始 playlist 全文
      * @param playlistUrl 该 playlist 自身的 URL（用于相对路径绝对化）
      * @return 规范化后的 playlist
@@ -51,17 +64,18 @@ object HlsPlaylistFixer {
         if (text.contains("#EXT-X-STREAM-INF")) return text
 
         val src = text.replace("\r\n", "\n").replace('\r', '\n').split('\n')
-        val dir = playlistUrl.substringBeforeLast('/', "")
-        val host = runCatching {
-            val u = java.net.URI(playlistUrl)
-            "${u.scheme}://${u.authority}"
-        }.getOrNull().orEmpty()
+        val uri = runCatching { java.net.URI(playlistUrl) }.getOrNull()
+        val scheme = uri?.scheme.orEmpty().ifEmpty { "https" }
+        val authority = uri?.rawAuthority.orEmpty()
+        val host = if (authority.isEmpty()) "" else "$scheme://$authority"
+        val dir = dirOf(playlistUrl, uri?.rawPath.orEmpty(), host)
 
         val head = StringBuilder()
         val body = StringBuilder()
         val pending = StringBuilder()          // 尚未确定要保留的 segment 标签
         var inMedia = false
         var maxDur = 0.0
+        var totalDur = 0.0
         var isVod = false
         var hadEndList = false
         var skipNextDiscontinuity = false
@@ -121,10 +135,11 @@ object HlsPlaylistFixer {
 
             EXTINF.find(pending.toString())?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.let {
                 maxDur = max(maxDur, it)
+                totalDur += it
             }
             flushPending()
             skipNextDiscontinuity = false
-            body.append(absolutize(line, dir, host)).append('\n')
+            body.append(absolutize(line, dir, host, scheme)).append('\n')
             kept++
         }
 
@@ -139,15 +154,48 @@ object HlsPlaylistFixer {
         out.append("#EXT-X-TARGETDURATION:").append(td).append('\n')
         out.append(head)
         out.append(body)
-        // 补 ENDLIST：声明过 VOD，或**原文本来就带 ENDLIST**（剥掉必须还回去）。
-        // 真直播流两者皆无，照旧不补 —— 补了会被当成"已结束"直接截断。
-        if ((isVod || hadEndList) && !body.contains("#EXT-X-ENDLIST")) out.append("#EXT-X-ENDLIST\n")
+        // 补 ENDLIST 的三种情况：
+        //  ① 声明过 VOD；② **原文本来就带 ENDLIST**（剥掉必须还回去）；
+        //  ③ v1.0.38：两样都没标、但清单明显是一整集（静态长清单）——
+        //     不补的话 ExoPlayer 按直播处理，表现为"时长读得到、一直转圈"。
+        // 真直播流三者皆无，照旧不补 —— 补了会被当成"已结束"直接截断。
+        val staticFull = !isVod && !hadEndList &&
+            kept >= STATIC_MIN_SEGMENTS && totalDur >= STATIC_MIN_SECONDS
+        if ((isVod || hadEndList || staticFull) && !body.contains("#EXT-X-ENDLIST")) {
+            out.append("#EXT-X-ENDLIST\n")
+        }
         return out.toString()
     }
 
-    private fun absolutize(seg: String, dir: String, host: String): String {
+    /**
+     * playlist 所在目录（含 scheme://authority，供相对分片拼接）。
+     *
+     * ⚠️ **必须先剥掉 query / fragment 再找斜杠**（v1.0.38 修的）。
+     * 旧实现直接 `playlistUrl.substringBeforeLast('/')`：带鉴权参数的地址
+     * （`…/hls/index.m3u8?auth=a/b`）里那个斜杠会让"最后一个斜杠"落在**参数里**，
+     * 于是拼出来的分片地址整段错位 ⇒ 分片全 404 ⇒ 播放器一直转圈重试。
+     * 症状与"流有问题"一模一样，而看代码怎么都不像有问题。
+     *
+     * 用 `rawPath`（未解码）而不是 `path`：解码会把 `%E7%AC%AC01%E9%9B%86` 变回中文，
+     * 拼进分片地址后等于把"已编码"的东西重新变成非 ASCII。
+     */
+    private fun dirOf(playlistUrl: String, rawPath: String, host: String): String {
+        if (rawPath.isNotEmpty() && host.isNotEmpty()) {
+            val i = rawPath.lastIndexOf('/')
+            return if (i <= 0) "$host/" else host + rawPath.substring(0, i)
+        }
+        return playlistUrl.substringBefore('?').substringBefore('#').substringBeforeLast('/', "")
+    }
+
+    /**
+     * 相对路径 → 绝对地址。
+     *
+     * 协议相对地址（`//host/x.ts`）用 **playlist 自己的协议**，不能写死 https：
+     * 纯 http 的站会因为被升级成 https 而整批分片失败。
+     */
+    private fun absolutize(seg: String, dir: String, host: String, scheme: String): String {
         if (seg.startsWith("http://") || seg.startsWith("https://")) return seg
-        if (seg.startsWith("//")) return "https:$seg"
+        if (seg.startsWith("//")) return "$scheme:$seg"
         if (seg.startsWith("/")) return if (host.isNotEmpty()) host + seg else seg
         return if (dir.isNotEmpty()) "$dir/$seg" else seg
     }
@@ -190,7 +238,14 @@ class HlsFixDataSource(private val upstream: DataSource) : DataSource {
     }
 
     private fun isPlaylist(dataSpec: DataSpec): Boolean {
-        if (dataSpec.uri.toString().contains(".m3u8", true)) return true
+        val u = dataSpec.uri.toString()
+        // 后缀判据要连 `.m3u` 一起认：少数站用 `.m3u`（无反斜杠），
+        // 漏掉它就等于那份 playlist 完全没被规范化过
+        if (u.contains(".m3u8", true) || u.contains(".m3u?", true) ||
+            u.endsWith(".m3u", true)
+        ) {
+            return true
+        }
         val ct = upstream.responseHeaders.entries
             .firstOrNull { it.key.equals("Content-Type", true) }
             ?.value?.firstOrNull().orEmpty()

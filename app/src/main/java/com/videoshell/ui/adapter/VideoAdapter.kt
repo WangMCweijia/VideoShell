@@ -45,6 +45,26 @@ class VideoAdapter(
         if (append) notifyItemRangeInserted(start, list.size) else notifyDataSetChanged()
     }
 
+    /**
+     * 「搜全站源」流式铺网格专用：把**一个站的一整块**插到 [at] 位置（v1.0.38）。
+     *
+     * 为什么不复用 [submit]：流式的每一站都要插到"排在它前面的那些站之后"，
+     * 那个位置**不在尾部**。这条路径用 `notifyItemRangeInserted` 而不是
+     * `notifyDataSetChanged` —— 前者让 RecyclerView 按"插入"处理，
+     * 已经显示出来的卡片不会被整表重绑（重绑会让用户在盯着看时闪一下）。
+     *
+     * 插入位置由 `AggSearch.insertAt` 算，**与最终全量结果同源**，这里不做任何判断。
+     */
+    fun insertBlock(at: Int, block: List<VideoItem>) {
+        if (block.isEmpty()) return
+        val pos = at.coerceIn(0, items.size)
+        items.addAll(pos, block)
+        notifyItemRangeInserted(pos, block.size)
+    }
+
+    /** 当前列表的只读快照（断言与自检用） */
+    fun snapshot(): List<VideoItem> = ArrayList(items)
+
     fun size(): Int = items.size
 
     fun clear() {

@@ -89,6 +89,25 @@ class PlayerActivity : AppCompatActivity() {
         private const val KEY_AUTO_NEXT = "setting_auto_next"
         private const val KEY_AUTO_ORIENT = "setting_auto_orient"
 
+        /**
+         * 「卡住」判定：缓冲进度**连续这么久没推进**就认为这一路播不动了（v1.0.38）。
+         *
+         * 为什么需要它：ExoPlayer 的默认加载策略遇到取不到的分片会**静默重试**
+         * （十次、退避到 5 秒一轮，加起来四十多秒一句话都不说）。
+         * 用户那边看到的就是"时长读得到、画面一直转圈、也不报错"。
+         * 25 秒足够区分"链路慢但在动"（缓冲会推进）与"这一路根本拿不到数据"。
+         */
+        private const val STALL_MS = 25_000L
+
+        /**
+         * 分片级别的加载重试次数（v1.0.38，原为 10/12）。
+         *
+         * 调小不是为了更早放弃，而是为了让"这一路真的不行"**快点说出来** ——
+         * 重试十次意味着四十多秒的静默，而旁边就摆着「换下一个源」这个更好的选择。
+         * 配合 [STALL_MS] 看门狗：慢而能动的流不会被误判，真的取不到数据的会很快暴露。
+         */
+        private const val MEDIA_RETRIES = 4
+
         fun intent(
             context: Context,
             url: String,
@@ -127,7 +146,6 @@ class PlayerActivity : AppCompatActivity() {
 
     /** 本次 playUrl 实际应用的续播点 —— 第一个 READY 时核对它是否落在流末尾（见 STATE_READY 守卫） */
     private var appliedResume: Long = 0L
-
     /** 已经自动降级到嗅探过一次（防止反复跳转） */
     private var autoSniffTried = false
 
@@ -139,6 +157,15 @@ class PlayerActivity : AppCompatActivity() {
 
     /** 本次播放是否已经记过"就绪"（换源/重试后要允许再记一次） */
     private var readyLogged = false
+
+    /** 「卡住」看门狗：上一次观测到的缓冲进度（-1 = 还没开始观测） */
+    private var lastBuffered = -1L
+
+    /** 缓冲进度**最后一次推进**的时刻；长时间不动就说明卡住了 */
+    private var stallSince = 0L
+
+    /** 本次播放是否已经因为"卡住"换过源（同一个源别反复切） */
+    private var stalledSwitched = false
 
     /** 标题栏分辨率标签（如 "1080P"），取到画面尺寸前为空 */
     private var resLabel = ""
@@ -602,7 +629,13 @@ class PlayerActivity : AppCompatActivity() {
         val url = Media.encodeUrl(rawUrl)
         currentUrl = url
         if (url != rawUrl) android.util.Log.w("VideoShell", "playUrl 非 ASCII 已编码：$rawUrl -> $url")
-        if (!fromRetry) autoSniffTried = false
+        if (!fromRetry) {
+            autoSniffTried = false
+            stalledSwitched = false
+        }
+        // 看门狗重新开始计：换源/重试之后上一次的"卡住"结论不再适用
+        lastBuffered = -1L
+        stallSince = 0L
 
         readyLogged = false
         PlayLog.newSession()
@@ -612,9 +645,9 @@ class PlayerActivity : AppCompatActivity() {
         // 后者底层是 HttpURLConnection，与 App 其它部分（自检/解析/嗅探都用 OkHttp）
         // 是两套网络栈：DNS 顺序、连接池、超时重试、Cookie 全不一样 —— 这正是
         // 「自检全绿、播放打不开」唯一说得通的解释。换成一套之后两边不复存在差异。
-        val factory = OkHttpDataSourceFactory(Http.mediaClient, Http.UA, headers)
+        val factory = OkHttpDataSourceFactory(Http.mediaClient, Http.UA, browserHeaders())
         val ds = HlsFixDataSourceFactory(factory)
-        val policy = DefaultLoadErrorHandlingPolicy(if (fromRetry) 12 else 10)
+        val policy = DefaultLoadErrorHandlingPolicy(if (fromRetry) MEDIA_RETRIES + 2 else MEDIA_RETRIES)
 
         val source = if (Media.isHls(url)) {
             HlsMediaSource.Factory(ds)
@@ -642,8 +675,36 @@ class PlayerActivity : AppCompatActivity() {
         binding.seekBar.progress = 0
     }
 
+    /**
+     * 播放器实际发出的请求头（v1.0.38）：在调用方给的头之外补上 `Origin`。
+     *
+     * 为什么补这个：同一个地址"网页端能播、App 里不能播"时，**两边的请求到底差在哪**
+     * 是唯一真正要回答的问题。hls.js 走 XHR/fetch ⇒ 浏览器必然带 `Origin: <页面源>`，
+     * 而部分 CDN / WAF 拿它做防盗链校验 —— 只带 Referer、不带 Origin 的请求会被挂住，
+     * 表现就是"网页端同一个链接能播，App 里一直转圈"。
+     *
+     * 只补**缺失**的，绝不覆盖调用方已经设好的值（那些值是按站点试出来的）。
+     */
+    private fun browserHeaders(): Map<String, String> {
+        val h = HashMap(headers)
+        if (h.keys.none { it.equals("Origin", true) }) {
+            originOf(fallbackPage)?.let { h["Origin"] = it }
+        }
+        if (h.keys.none { it.equals("Referer", true) } && fallbackPage.isNotBlank()) {
+            h["Referer"] = fallbackPage
+        }
+        return h
+    }
+
+    /** `https://a.b/c?d` → `https://a.b`。拿不到就返回 null —— 宁可少发一个头，也不发假值 */
+    private fun originOf(url: String): String? = runCatching {
+        val u = java.net.URI(url)
+        if (u.scheme == null || u.authority == null) null else "${u.scheme}://${u.authority}"
+    }.getOrNull()
+
     private fun refreshProgress() {
         val p = player ?: return
+        watchStall()
         if (!dragging) {
             val pos = p.currentPosition.coerceAtLeast(0L)
             val dur = p.duration.let { if (it > 0) it else 0L }
@@ -843,6 +904,89 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     // ------------------------------------------------------------------ 错误诊断
+
+    // ------------------------------------------------------------------ 「卡住」看门狗（v1.0.38）
+
+    /**
+     * 用户报的现象：**播放器能读出本集时长，但画面一直转圈**。
+     *
+     * 这类情况 ExoPlayer 既不报错也不前进 —— 它的默认加载策略遇到取不到的分片会**静默重试**
+     * （十次、退避到 5 秒一轮，加起来四十多秒一句话都不说）。用户那边看到的就是
+     * 一个没有任何信息的转圈，而"转圈"这两个字里没有任何可查的东西。
+     *
+     * 判据只用一条**观测得到的事实**：`STATE_BUFFERING` 持续 [STALL_MS] 而
+     * `bufferedPosition` 一直没变。不猜原因，只负责把这件事说出来 ——
+     * 能确定的东西（是否被判成直播、缓冲到哪、当前地址）一起摆出来。
+     */
+    private fun watchStall() {
+        val p = player ?: return
+        if (p.playbackState != Player.STATE_BUFFERING) {
+            lastBuffered = -1L
+            stallSince = 0L
+            return
+        }
+        val buffered = p.bufferedPosition
+        if (stallSince == 0L || buffered != lastBuffered) {
+            lastBuffered = buffered
+            stallSince = System.currentTimeMillis()
+            return
+        }
+        if (System.currentTimeMillis() - stallSince < STALL_MS) return
+        if (binding.diagPanel.visibility == View.VISIBLE) return   // 面板已在提示，别叠加
+        stallSince = System.currentTimeMillis()                     // 重置，免得反复弹
+        onStalled(buffered)
+    }
+
+    private fun onStalled(buffered: Long) {
+        val live = runCatching { player?.isCurrentMediaItemLive == true }.getOrDefault(false)
+        val dur = player?.duration?.let { if (it > 0) it else 0L } ?: 0L
+        PlayLog.record(
+            "⚠ 播放卡住：缓冲 ${buffered}ms / 共 ${dur}ms，isLive=$live 地址=" + shorten(currentUrl)
+        )
+        // 同时打进 logcat（`adb logcat -s VideoShell`）：界面只给结论，日志留证据
+        android.util.Log.w(
+            "VideoShell", "播放卡住 buffered=$buffered dur=$dur live=$live url=$currentUrl"
+        )
+        // 还有下一路候选就直接换 —— 用户要的是"能播"，不是看我们解释
+        if (fromSniff && SniffQueue.hasNext() && !stalledSwitched && currentUrl != lastSwitchedFrom) {
+            stalledSwitched = true
+            lastSwitchedFrom = currentUrl
+            showHud(getString(R.string.stall_switched))
+            handler.postDelayed({ if (!isFinishing) nextSniffSource() }, 300)
+            return
+        }
+        showStallPanel(buffered, dur, live)
+    }
+
+    /**
+     * 卡住时的面板。**复用出错时的诊断面板**（同一块 UI、同一套按钮）：
+     * 用户学一次就够，我们也不必维护两套几乎一样的界面。
+     */
+    private fun showStallPanel(buffered: Long, dur: Long, live: Boolean) {
+        val sb = StringBuilder()
+        sb.append(getString(R.string.stall_state_buffering)).append('\n')
+        if (live) sb.append(getString(R.string.stall_state_live)).append('\n')
+        sb.append("已缓冲 ").append(formatTime(buffered)).append(" / ")
+            .append(if (dur > 0L) formatTime(dur) else "时长未知").append('\n')
+        sb.append("地址：").append(shorten(currentUrl)).append('\n')
+        sb.append("数据源：OkHttp（与自检同栈）")
+        binding.tvDiag.text = sb.toString()
+        binding.tvDiagTitle.text = if (fromSniff && SniffQueue.candidates.isNotEmpty()) {
+            getString(R.string.stall_title) +
+                "（源 ${SniffQueue.index + 1}/${SniffQueue.candidates.size}）"
+        } else {
+            getString(R.string.stall_title)
+        }
+        binding.btnDiagNext.visibility =
+            if (fromSniff && SniffQueue.hasNext()) View.VISIBLE else View.GONE
+        binding.btnDiagSniff.text = getString(
+            if (fromSniff && SniffQueue.candidates.isNotEmpty()) R.string.player_error_back_candidates
+            else R.string.player_error_sniff
+        )
+        binding.pbBuffering.visibility = View.GONE
+        binding.diagPanel.visibility = View.VISIBLE
+        if (!controllerVisible) setBarsVisible(true)
+    }
 
     private fun showDiag(error: PlaybackException) {
         val chain = generateSequence(error.cause) { it.cause }

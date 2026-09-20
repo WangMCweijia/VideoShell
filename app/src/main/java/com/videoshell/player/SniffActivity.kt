@@ -9,6 +9,7 @@ import android.graphics.Bitmap
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.MotionEvent
 import android.view.View
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -82,6 +83,15 @@ class SniffActivity : AppCompatActivity() {
 
         private const val MAX_TICKS = 240
 
+        /**
+         * 判定"这是拖动而不是点一下"的位移阈值（**dp**，用时乘屏幕密度）。
+         *
+         * 手指按下去一定会抖一两个像素，没有阈值的话每次"想点一下收起"都会被当成
+         * 一次微小拖动 ⇒ 收起功能永远触发不了，而用户只会觉得"这按钮没反应"。
+         * 写成 dp 而不是 px：3x 屏上 8px 只有 2.7dp，抖一下就过线了。
+         */
+        private const val SLOP_DP = 6f
+
         fun intent(
             context: Context,
             pageUrl: String,
@@ -138,6 +148,18 @@ class SniffActivity : AppCompatActivity() {
     private var probeRounds = 0
     private var probing = false
     private var textProbed = false
+
+    /**
+     * 浮窗是否收起（v1.0.38）。
+     *
+     * 不持久化，而且浏览模式**默认收起**：这个页面是拿来看网页的，浮窗压在底部会挡住
+     * 站点的「选集 / 换线路 / 播放」按钮。默认收起 = 一进来就不挡事；
+     * 要用「识别并添加」再展开，那正是需要点浮窗的时候。
+     *
+     * 位置（[panelTx]/[panelTy]）同理不落盘 —— 挪开它是为了避开**当前这一页**的按钮，
+     * 记到下一站反而是拿上一站的布局去挡这一站的。
+     */
+    private var panelCollapsed = false
 
     /** ③ jx 解析接口只试一次 */
     private var jxTried = false
@@ -221,6 +243,13 @@ class SniffActivity : AppCompatActivity() {
         binding.btnCopy.setOnClickListener { copyReport() }
         binding.tvStatus.setOnClickListener { copyReport() }
 
+        // ---- 浮窗：可收起 + 可拖动（v1.0.38）----
+        // 浏览模式默认收起：这个页面是拿来看网页的，浮窗不管内容只挡按钮
+        panelCollapsed = browse
+        binding.btnPanelToggle.setOnClickListener { togglePanel() }
+        setupPanelDrag()
+        renderPanel()
+
         setupWebView()
         loadPage()
         startPolling()
@@ -231,6 +260,94 @@ class SniffActivity : AppCompatActivity() {
         binding.webView.alpha = if (show) 1f else 0f
         binding.btnToggleWeb.text =
             getString(if (show) R.string.sniffer_hide_web else R.string.sniffer_show_web)
+    }
+
+    // ------------------------------------------------------------------ 浮窗：收起 / 拖动
+
+    private fun togglePanel() {
+        panelCollapsed = !panelCollapsed
+        renderPanel()
+    }
+
+    /**
+     * 收起 = 只留手柄那一行。
+     *
+     * 收起后**必须补一次夹取**：面板矮了，它的 bottom 变小、可下移的范围变大，
+     * 之前拖到贴底的位置会变成"浮在半空" —— 用户会以为拖动坏了。
+     */
+    private fun renderPanel() {
+        binding.panelBody.visibility = if (panelCollapsed) View.GONE else View.VISIBLE
+        binding.tvPanelBrief.visibility = if (panelCollapsed) View.VISIBLE else View.GONE
+        binding.panelGrip.visibility = if (panelCollapsed) View.VISIBLE else View.GONE
+        binding.btnPanelToggle.setText(
+            if (panelCollapsed) R.string.sniff_panel_expand else R.string.sniff_panel_collapse
+        )
+        refreshPanelBrief()
+        binding.bottomPanel.post { clampPanel() }
+    }
+
+    private fun refreshPanelBrief() {
+        if (!panelCollapsed) return
+        binding.tvPanelBrief.text = getString(R.string.sniff_panel_collapsed, candidates.size)
+    }
+
+    /**
+     * 拖动手柄：整行都能拖，**没拖动时按一下 = 收起/展开**。
+     *
+     * 用 `rawX/rawY` 而不是 `x/y`：后者相对当前被按的 View，手指移出手柄后数值就乱了。
+     * 判定"这是拖动还是点击"用 8dp 的位移阈值 —— 手指按下去总会抖一两像素，
+     * 没有阈值的话每一次"想点一下"都会被当成微小拖动，收起功能就永远触发不了。
+     */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupPanelDrag() {
+        val panel = binding.bottomPanel
+        val slop = SLOP_DP * resources.displayMetrics.density
+        var downX = 0f
+        var downY = 0f
+        var baseTx = 0f
+        var baseTy = 0f
+        var moved = false
+        binding.panelHandle.setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = e.rawX
+                    downY = e.rawY
+                    baseTx = panel.translationX
+                    baseTy = panel.translationY
+                    moved = false
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = e.rawX - downX
+                    val dy = e.rawY - downY
+                    if (!moved && (kotlin.math.abs(dx) > slop || kotlin.math.abs(dy) > slop)) {
+                        moved = true
+                    }
+                    if (moved) {
+                        panel.translationX = baseTx + dx
+                        panel.translationY = baseTy + dy
+                        clampPanel()
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (!moved) togglePanel()
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    /** 把浮窗夹在父容器里：能挪开，但不能挪出屏幕外找不回来 */
+    private fun clampPanel() {
+        val panel = binding.bottomPanel
+        val parent = panel.parent as? View ?: return
+        if (parent.width == 0 || parent.height == 0) return
+        panel.translationX = panel.translationX
+            .coerceIn(-panel.left.toFloat(), (parent.width - panel.right).toFloat())
+        panel.translationY = panel.translationY
+            .coerceIn(-panel.top.toFloat(), (parent.height - panel.bottom).toFloat())
     }
 
     /**
@@ -476,6 +593,9 @@ class SniffActivity : AppCompatActivity() {
 
     private fun updateStatus() {
         val n = candidates.size
+        // 收起时那一行也要跟着更新：它是收起来之后**唯一**还能看见的信息，
+        // 停在旧数字上就等于这块浮窗不收也不对、收起来也不对
+        refreshPanelBrief()
         if (browse) {
             // 浏览模式的状态行只说两件事：正在浏览、抓到了几个地址。
             // 刻意**不报**"超时 / 要求登录"—— 用户不是在这儿等嗅探，他是在看网页；

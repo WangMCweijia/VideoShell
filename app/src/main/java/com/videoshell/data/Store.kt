@@ -133,4 +133,28 @@ object Store {
     fun setSearchScope(ctx: Context, scope: String) {
         sp(ctx).edit().putString(KEY_SEARCH_SCOPE, scope).apply()
     }
+
+    // ------------------------------------------------------------------ 搜索引擎（v1.0.38）
+
+    private const val KEY_SEARCH_ENGINE = "search_engine"
+    private const val KEY_SEARCH_ENHANCE = "search_enhance"
+
+    /**
+     * 全网搜索用哪个引擎（`SearchEngine.name`；空 = 从没设置过 ⇒ 用默认的那个）。
+     *
+     * 与 [searchScope] 同一个理由存名字：枚举迟早要加（Yandex / 头条搜索 …），
+     * 存下标的版本一旦加成员就会把用户的选项整体挪位。
+     */
+    fun searchEngine(ctx: Context): String = sp(ctx).getString(KEY_SEARCH_ENGINE, "").orEmpty()
+
+    fun setSearchEngine(ctx: Context, engine: String) {
+        sp(ctx).edit().putString(KEY_SEARCH_ENGINE, engine).apply()
+    }
+
+    /** 全网搜索是否追加「在线观看」后缀（影视化关键词增强） */
+    fun searchEnhance(ctx: Context): Boolean = sp(ctx).getBoolean(KEY_SEARCH_ENHANCE, false)
+
+    fun setSearchEnhance(ctx: Context, on: Boolean) {
+        sp(ctx).edit().putBoolean(KEY_SEARCH_ENHANCE, on).apply()
+    }
 }

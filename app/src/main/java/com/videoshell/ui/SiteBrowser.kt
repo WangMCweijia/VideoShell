@@ -27,6 +27,7 @@ import com.videoshell.data.site.AdapterFactory
 import com.videoshell.data.site.AggSearch
 import com.videoshell.data.site.CryptFamily
 import com.videoshell.data.site.RecipeStore
+import com.videoshell.data.site.SearchEngine
 import com.videoshell.data.site.SearchScope
 import com.videoshell.data.site.SiteAdapter
 import com.videoshell.data.site.SiteDoctor
@@ -94,11 +95,25 @@ class SiteBrowser(
     /** 搜索范围：本站 / 全站 / 全网（持久化 —— 选过一次，下次进来还得是它） */
     private var scope = SearchScope.SITE
 
+    /**
+     * 全网搜索用哪个引擎（v1.0.38，持久化）。
+     *
+     * 默认百度：这个入口的用途是"找一个能播的站"，而中文在线影视站在百度的收录
+     * 远好于 Bing（Bing 会因合规策略把这类站压掉）。引擎可选而不是换死，
+     * 因为"哪家收录好"是会变的东西 —— 可变的东西只能当选项，不能写进判据。
+     */
+    private var engine = SearchEngine.DEFAULT
+
+    /** 关键词是否追加「在线观看」（v1.0.38，持久化） */
+    private var enhance = false
+
     /** 首页那次「预渲染兜底」只试一次，别把每次翻页都拖成 WebView 加载 */
     private var webRendered = false
 
     init {
         scope = SearchScope.of(Store.searchScope(act))
+        engine = SearchEngine.of(Store.searchEngine(act))
+        enhance = Store.searchEnhance(act)
         b.btnSearchToggle.setOnClickListener {
             val show = b.searchRow.visibility != View.VISIBLE
             b.searchRow.visibility = if (show) View.VISIBLE else View.GONE
@@ -122,13 +137,19 @@ class SiteBrowser(
         b.scopeSite.setOnClickListener { setScope(SearchScope.SITE) }
         b.scopeAll.setOnClickListener { setScope(SearchScope.ALL) }
         b.scopeWeb.setOnClickListener { setScope(SearchScope.WEB) }
+        b.engBaidu.setOnClickListener { setEngine(SearchEngine.BAIDU) }
+        b.engSogou.setOnClickListener { setEngine(SearchEngine.SOGOU) }
+        b.eng360.setOnClickListener { setEngine(SearchEngine.SO360) }
+        b.engBing.setOnClickListener { setEngine(SearchEngine.BING) }
+        b.engDdg.setOnClickListener { setEngine(SearchEngine.DDG) }
+        b.engSuffix.setOnClickListener { setEnhance(!enhance) }
         b.btnCatRetry.setOnClickListener { loadCategories() }
         b.tvCatHint.setOnClickListener { showCategoryPicker() }
         b.btnDoctor.setOnClickListener { runDoctor() }
         b.btnCalib.setOnClickListener { site?.let { launchCalib(it.key) } }
     }
 
-    // ------------------------------------------------------------------ 搜索范围
+    // ------------------------------------------------------------------ 搜索范围 / 搜索引擎
 
     private fun setScope(s: SearchScope) {
         if (scope == s) {
@@ -148,10 +169,50 @@ class SiteBrowser(
         }
     }
 
+    /**
+     * 换引擎 = 换一个搜索地址，**正在搜就立刻用新引擎重开一次**。
+     *
+     * 不重开的话用户会经历"我明明改成百度了，怎么屏幕上还是 Bing"——
+     * 上一次的网页还停在返回栈上，他看到的确实还是旧的。
+     */
+    private fun setEngine(e: SearchEngine) {
+        engine = e
+        Store.setSearchEngine(act, e.name)
+        renderScope()
+        if (scope == SearchScope.WEB && mode == MODE_SEARCH && keyword.isNotBlank()) {
+            openWebSearch(keyword)
+        }
+    }
+
+    private fun setEnhance(on: Boolean) {
+        enhance = on
+        Store.setSearchEnhance(act, on)
+        renderScope()
+    }
+
+    /**
+     * 范围 chip + 引擎行 + 右侧提示，**一份渲染**。
+     *
+     * 引擎 chip 的选中态也在这里刷（不在单独的函数里各刷一遍）：两处各自维护一份的话，
+     * 迟早出现"chip 显示百度、实际发出去的地址是 Bing"这种只看得见一半的不一致。
+     */
     private fun renderScope() {
         b.scopeSite.isSelected = scope == SearchScope.SITE
         b.scopeAll.isSelected = scope == SearchScope.ALL
         b.scopeWeb.isSelected = scope == SearchScope.WEB
+
+        b.engBaidu.isSelected = engine == SearchEngine.BAIDU
+        b.engSogou.isSelected = engine == SearchEngine.SOGOU
+        b.eng360.isSelected = engine == SearchEngine.SO360
+        b.engBing.isSelected = engine == SearchEngine.BING
+        b.engDdg.isSelected = engine == SearchEngine.DDG
+        b.engSuffix.isSelected = enhance
+
+        // 引擎行只在「全网」下出现，而且搜索区收起时跟着收起 ——
+        // 它不是 scopeRow 的子视图，不显式跟着走就会在收起后**悬在界面上**
+        val shown = b.searchRow.visibility == View.VISIBLE
+        b.engineRow.visibility = if (shown && scope == SearchScope.WEB) View.VISIBLE else View.GONE
+
         b.tvScopeHint.text = when (scope) {
             SearchScope.SITE -> act.getString(R.string.scope_hint_site)
             SearchScope.ALL -> {
@@ -159,22 +220,26 @@ class SiteBrowser(
                 if (n == 0) act.getString(R.string.scope_hint_all_empty)
                 else act.getString(R.string.scope_hint_all, n)
             }
-            SearchScope.WEB -> act.getString(R.string.scope_hint_web)
+            SearchScope.WEB -> act.getString(
+                R.string.scope_hint_web, act.getString(engine.labelRes)
+            )
         }
     }
 
     /**
-     * 全网搜索：**不做抓取解析**，直接把 Bing 结果页当网页打开。
+     * 全网搜索：**不做抓取解析**，直接把搜索引擎的结果页当网页打开。
      *
      * 理由见 [SearchScope] 的注释 —— 抓搜索引擎结果再解析，等于把"站点的适配难题"
      * 换成"搜索引擎的适配难题"，而且对方改版我们必挂。打开网页则一次也不用修。
      */
     private fun openWebSearch(kw: String) {
-        b.tvScopeHint.text = act.getString(R.string.scope_web_searching, kw)
+        b.tvScopeHint.text = act.getString(
+            R.string.scope_web_searching, act.getString(engine.labelRes), kw
+        )
         act.startActivity(
             SniffActivity.intent(
                 act,
-                SearchScope.webSearchUrl(kw),
+                SearchScope.webSearchUrl(kw, engine, enhance),
                 kw,
                 mapOf("User-Agent" to Http.UA),
                 browse = true
@@ -379,7 +444,50 @@ class SiteBrowser(
             var failures: List<AggSearch.SiteHits> = emptyList()
 
             if (agg) {
-                val hits = AggSearch.run(Store.sites(act), keyword, p)
+                val sites = Store.sites(act)
+                // ---- 首屏：先铺已到达的（v1.0.38）----
+                // 旧实现等**所有**站返回才铺。十个站里有一个 12s 超时的，用户就得对着
+                // 空网格干等十几秒 —— 而那时前面几个站的结果早就到手了。
+                if (!append && sites.isNotEmpty()) {
+                    b.tvScopeHint.setOnClickListener(null)   // 清掉上一轮搜索挂的失败入口
+                    val slots = arrayOfNulls<AggSearch.SiteHits>(sites.size)
+                    var arrived = 0
+                    videoAdapter.highlight = keyword
+                    AggSearch.runStreaming(sites, keyword, p) { i, h ->
+                        slots[i] = h
+                        arrived++
+                        // 插入位置由 AggSearch 算（= 排在它前面、且已到达的那些站的条数），
+                        // 与最终 merge 同源 ⇒ 不会出现"铺出来的"和"收尾算出来的"对不上
+                        videoAdapter.insertBlock(
+                            AggSearch.insertAt(slots.toList(), i),
+                            AggSearch.block(h)
+                        )
+                        val shown = AggSearch.mergeArrived(slots.toList()).size
+                        if (shown > 0) showState(null)
+                        b.tvScopeHint.text = if (arrived < sites.size) {
+                            act.getString(R.string.scope_agg_streaming, arrived, sites.size, shown)
+                        } else {
+                            AggSearch.summary(slots.filterNotNull())
+                        }
+                    }
+                    items = AggSearch.mergeArrived(slots.toList())
+                    summary = AggSearch.summary(slots.filterNotNull())
+                    failures = AggSearch.failures(slots.filterNotNull())
+                    loading = false
+                    b.pb.visibility = View.GONE
+                    b.tvScopeHint.text = summary
+                    if (items.isEmpty()) {
+                        showAggEmpty(summary, failures)
+                    } else {
+                        // ⚠️ 这里**不能再 submit(items)**：网格在回调里已经逐块插好了，
+                        // 再整表 submit 一次会把所有卡片重绑，用户盯着看时会闪一下
+                        page = p
+                        attachFailures(failures)
+                    }
+                    return@launch
+                }
+                // ---- 翻页：等齐即可（用户那时已经在看内容了，不必再流式）----
+                val hits = AggSearch.run(sites, keyword, p)
                 items = AggSearch.merge(hits)
                 summary = AggSearch.summary(hits)
                 failures = AggSearch.failures(hits)
@@ -418,22 +526,7 @@ class SiteBrowser(
                     return@launch
                 }
                 if (agg) {
-                    // 汇总行常驻：**"几个站有结果/几个站失败"必须说出来**，
-                    // 否则用户只看到"没有结果"，会把我们的问题（某站挂了）当成"这片全网都没有"。
-                    b.tvScopeHint.text = summary.orEmpty()
-                    val txt = buildString {
-                        append(act.getString(R.string.scope_agg_empty, keyword))
-                        if (failures.isNotEmpty()) {
-                            append("（")
-                            append(act.getString(R.string.scope_fail_detail, failures.size))
-                            append("）")
-                        }
-                    }
-                    showState(txt)
-                    // 失败详情要能点开看，"几个站失败"这种没有主语的句子等于没说
-                    if (failures.isNotEmpty()) {
-                        b.tvState.setOnClickListener { showFailures(failures) }
-                    }
+                    showAggEmpty(summary, failures)
                 } else {
                     val net = NetLog.lastFailure()
                     showState(
@@ -455,6 +548,48 @@ class SiteBrowser(
             videoAdapter.submit(items, append)
             page = p
             showState(null)
+            attachFailures(failures)
+        }
+    }
+
+    /**
+     * 聚合搜索"一条都没铺出来"时的状态位。
+     *
+     * 汇总行常驻：**"几个站有结果 / 几个站失败"必须说出来**，
+     * 否则用户只看到"没有结果"，会把我们的问题（某站挂了）当成"这片全网都没有"。
+     */
+    private fun showAggEmpty(summary: String?, failures: List<AggSearch.SiteHits>) {
+        b.tvScopeHint.text = summary.orEmpty()
+        val txt = buildString {
+            append(act.getString(R.string.scope_agg_empty, keyword))
+            if (failures.isNotEmpty()) {
+                append("（")
+                append(act.getString(R.string.scope_fail_detail, failures.size))
+                append("）")
+            }
+        }
+        showState(txt)
+        attachFailures(failures)
+    }
+
+    /**
+     * 把"查看失败的 N 个站"挂到汇总行上（v1.0.38）。
+     *
+     * 旧实现只在"一条结果都没有"时才给这个入口 —— 于是"9 个站有结果、1 个站挂了"
+     * 这种情况永远看不到那一个站为什么挂了，而这种"少了一部分"的结果恰恰最容易被
+     * 读成"这部片只有这几个站有"。
+     *
+     * ⚠️ [failures] 为空时**必须显式摘掉监听**：留着的话指向的是上一次的失败清单，
+     * 于是"这次明明没失败，点开却写着上个站报的错" —— 本项目最忌讳的"看不见但能点"。
+     */
+    private fun attachFailures(failures: List<AggSearch.SiteHits>) {
+        if (failures.isEmpty()) {
+            b.tvScopeHint.setOnClickListener(null)
+            return
+        }
+        b.tvScopeHint.setOnClickListener { showFailures(failures) }
+        if (b.tvState.visibility == View.VISIBLE) {
+            b.tvState.setOnClickListener { showFailures(failures) }
         }
     }
 
@@ -485,7 +620,12 @@ class SiteBrowser(
         b.tvState.visibility = if (msg == null) View.GONE else View.VISIBLE
         // 聚合搜索会在状态行上挂"查看失败的 N 个站"；状态位一旦清空，
         // 那个入口必须一起退场 —— 留着一个"看不见但能点"的区域，是最难复现的那种 bug。
-        if (msg == null) b.tvState.setOnClickListener(null)
+        if (msg == null) {
+            b.tvState.setOnClickListener(null)
+            // 汇总行上也挂着同一个入口（它更显眼），一起摘掉：两处入口只留一处活着，
+            // 就会出现"状态位没了、但汇总行还能点开上一次的失败清单"
+            if (scope != SearchScope.ALL) b.tvScopeHint.setOnClickListener(null)
+        }
     }
 
     // ------------------------------------------------------------------ 站点自检 / 重学

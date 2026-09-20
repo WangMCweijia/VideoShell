@@ -17,6 +17,7 @@ import com.videoshell.data.model.SiteConfig
 import com.videoshell.data.model.VideoItem
 import com.videoshell.data.net.Http
 import com.videoshell.data.site.Media
+import com.videoshell.data.site.SearchEngine
 import com.videoshell.data.site.SearchScope
 import com.videoshell.data.site.SiteDetector
 import com.videoshell.databinding.ActivityMainBinding
@@ -293,7 +294,11 @@ class MainActivity : AppCompatActivity() {
     private fun browseWeb() {
         val raw = binding.inputUrl.text.toString().trim()
         val target = when {
-            raw.isEmpty() -> SearchScope.webHomeUrl()
+            // 没填网址 ⇒ 搜索引擎首页。用**用户在上次选定的那个引擎**，
+            // 否则会出现"我从首页进全网还是 Bing、从站源页进却是百度"
+            raw.isEmpty() -> SearchScope.webHomeUrl(
+                SearchEngine.of(Store.searchEngine(this))
+            )
             raw.startsWith("http") -> raw
             else -> "http://$raw"
         }

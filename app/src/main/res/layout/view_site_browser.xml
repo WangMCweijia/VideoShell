@@ -154,6 +154,64 @@
             android:textSize="11sp" />
     </LinearLayout>
 
+    <!-- 搜索引擎（v1.0.38）：只在「全网」范围下出现。
+         横滑而不是换行：引擎会越加越多，换行会把搜索区越撑越高、把网格挤下去；
+         而"选哪个引擎"是个一次性的决定，藏在一行里滑一下完全够用。 -->
+    <HorizontalScrollView
+        android:id="@+id/engineRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="14dp"
+        android:layout_marginEnd="14dp"
+        android:layout_marginBottom="8dp"
+        android:scrollbars="none"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/engBaidu"
+                style="@style/ChipSmall"
+                android:layout_marginEnd="6dp"
+                android:text="@string/engine_baidu" />
+
+            <TextView
+                android:id="@+id/engSogou"
+                style="@style/ChipSmall"
+                android:layout_marginEnd="6dp"
+                android:text="@string/engine_sogou" />
+
+            <TextView
+                android:id="@+id/eng360"
+                style="@style/ChipSmall"
+                android:layout_marginEnd="6dp"
+                android:text="@string/engine_360" />
+
+            <TextView
+                android:id="@+id/engBing"
+                style="@style/ChipSmall"
+                android:layout_marginEnd="6dp"
+                android:text="@string/engine_bing" />
+
+            <TextView
+                android:id="@+id/engDdg"
+                style="@style/ChipSmall"
+                android:layout_marginEnd="10dp"
+                android:text="@string/engine_ddg" />
+
+            <!-- 关键词增强。与引擎并列而不是藏在设置里：它和"选哪个引擎"是同一个决定
+                 （都是为了把结果压向能播的站），分开放用户就只会用到一半。 -->
+            <TextView
+                android:id="@+id/engSuffix"
+                style="@style/ChipSmall"
+                android:text="@string/engine_suffix_online" />
+        </LinearLayout>
+    </HorizontalScrollView>
+
     <!-- 高度写死 46dp 而不是 wrap_content：分类是**异步**到达的，wrap_content 的 RecyclerView
          首次测量时 itemCount=0 → 高度为 0，在个别机型上之后即使 notifyDataSetChanged
          也不再重新撑开，表现就是"分类栏整条看不见、只剩最新"。固定高度从根上消除这种可能。 -->

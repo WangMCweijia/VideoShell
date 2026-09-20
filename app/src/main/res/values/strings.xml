@@ -66,13 +66,24 @@
     <string name="scope_hint_site">只搜当前站源</string>
     <string name="scope_hint_all">同时搜 %1$d 个已保存站源</string>
     <string name="scope_hint_all_empty">还没有站点可搜</string>
-    <string name="scope_hint_web">用 Bing 搜全网，在网页里浏览</string>
-    <string name="scope_web_searching">已用 Bing 打开「%1$s」—— 在网页里点开结果，看到影片页可「识别并添加」</string>
+    <string name="scope_hint_web">用 %1$s 搜全网，在网页里浏览</string>
+    <string name="scope_web_searching">已用 %1$s 打开「%2$s」—— 在网页里点开结果，看到影片页可「识别并添加」</string>
     <string name="scope_agg_empty">全站都没有「%1$s」—— 可换「全网」用搜索引擎找</string>
     <string name="scope_fail_detail">查看失败的 %1$d 个站</string>
     <string name="scope_fail_title">这几个站没返回结果</string>
     <string name="btn_browse_web">浏览网页（可搜全网 / 打开任意网址）</string>
     <string name="web_browse_title">网页浏览</string>
+
+    <!-- 搜索引擎（v1.0.38）。名字就是品牌名，不翻译；用户认的是这几个字 -->
+    <string name="engine_baidu">百度</string>
+    <string name="engine_sogou">搜狗</string>
+    <string name="engine_360">360</string>
+    <string name="engine_bing">Bing</string>
+    <string name="engine_ddg">DuckDuckGo</string>
+    <!-- 勾选后关键词追加「 在线观看」：影视站标题几乎都带这四个字，能把结果压向能播的站 -->
+    <string name="engine_suffix_online">+在线观看</string>
+    <!-- 流式铺网格时的进度行：分母（总共几个站）必须写出来，否则用户以为搜索已经结束 -->
+    <string name="scope_agg_streaming">全站源：%1$d/%2$d 个站已返回，先显示 %3$d 条…</string>
 
     <string name="detail_summary">剧情简介</string>
     <string name="detail_info">影片信息</string>
@@ -251,6 +262,25 @@
     <string name="sniffer_browse_found">浏览模式：已抓到 %1$d 个媒体地址，可点下方按钮把本站收进来</string>
     <string name="sniffer_close_web">关闭网页</string>
     <string name="web_reload">刷新</string>
+
+    <!-- 浮窗收起 / 展开（v1.0.38）。这个名字很要紧：不给它一个动作词，
+         用户会以为那只是块装饰，于是永远不知道浮窗能变矮 -->
+    <string name="sniff_panel_collapse">收起</string>
+    <string name="sniff_panel_expand">展开</string>
+    <string name="sniff_panel_drag">按住这里可拖动浮窗</string>
+    <string name="sniff_panel_collapsed">嗅探 %1$d 个源 · 点这里展开</string>
+
+    <!-- 播放卡住（v1.0.38）：转圈时把"卡在哪一步"说出来，并给两条出路 -->
+    <string name="stall_title">这一路播不动</string>
+    <string name="stall_msg">已缓冲 %1$s / 共 %2$s，长时间没有新数据进来。\n\n%3$s</string>
+    <string name="stall_state_buffering">播放器仍在等数据（未报错）—— 多半是这一路的分片取不到或太慢。</string>
+    <string name="stall_state_live">这一路被当成了直播清单（末尾没写播放结束标记），播放器在等"下一段"。</string>
+    <string name="stall_switch">换下一个源</string>
+    <string name="stall_wait">继续等</string>
+    <string name="stall_copy">复制诊断</string>
+    <string name="stall_copied">诊断已复制</string>
+    <string name="stall_switched">这一路卡住了，已换到下一路</string>
+    <string name="stall_no_next">已经是最后一个源了</string>
 
     <string name="err_network">网络请求失败：%1$s</string>
     <string name="err_no_video_site">未能识别为视频站。可尝试「用网页嗅探打开」或手动添加。</string>

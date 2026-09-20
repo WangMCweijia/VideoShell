@@ -1,7 +1,5 @@
 package com.videoshell.data.site
 
-import java.net.URLEncoder
-
 /**
  * 搜索范围（v1.0.37）。
  *
@@ -11,8 +9,8 @@ import java.net.URLEncoder
  * - [SITE]  只搜当前站源 —— 快、结果一定能在本站打开，是默认行为；
  * - [ALL]   同时搜**全部已保存站源** —— 剧在别的站有而本站没有时用；结果是聚合的，
  *           每条都带来源站（见 `VideoItem.siteKey`）；
- * - [WEB]   搜**全网** —— 直接交给搜索引擎（Bing），结果在「网页嗅探模式」里浏览，
- *           看到合适的视频页可以一键识别并添加成站源。
+ * - [WEB]   搜**全网** —— 直接交给搜索引擎（见 [SearchEngine]，可选），结果在
+ *           「网页嗅探模式」里浏览，看到合适的视频页可以一键识别并添加成站源。
  *
  * ⚠️ 为什么不把 [WEB] 也做成"抓搜索结果再解析成卡片"：
  * 搜索引擎的结果页是 JS 渲染 + 反爬的，抓回来再解析等于把"站点的适配问题"换成
@@ -35,22 +33,27 @@ enum class SearchScope {
             return SITE
         }
 
-        /** 全网搜索地址。中文/空格/`&`/`#` 一律百分号编码，否则关键词会把 URL 拆坏 */
-        fun webSearchUrl(keyword: String): String =
-            "https://www.bing.com/search?q=" + encode(keyword)
+        /**
+         * 全网搜索地址。默认用 [SearchEngine.DEFAULT]（v1.0.38 起为百度）。
+         *
+         * 引擎与"是否加影视化后缀"都由调用方传进来 —— 这个函数只负责拼地址，
+         * **不自己读配置**：读配置散在工具类里，就会出现"同一个设置在不同入口表现不同"。
+         */
+        fun webSearchUrl(
+            keyword: String,
+            engine: SearchEngine = SearchEngine.DEFAULT,
+            enhance: Boolean = false
+        ): String = engine.searchUrl(keyword, enhance)
 
         /** 全网搜索的入口页（没输关键词时用） */
-        fun webHomeUrl(): String = "https://www.bing.com/"
+        fun webHomeUrl(engine: SearchEngine = SearchEngine.DEFAULT): String = engine.home()
 
-        /** 搜索引擎域名（判断"当前还在搜索引擎上"要用它，不能靠 URL 前缀猜） */
-        const val WEB_HOST_SUFFIX = "bing.com"
-
-        fun isWebHost(url: String): Boolean {
-            val h = com.videoshell.data.Store.hostOf(url)
-            return h == WEB_HOST_SUFFIX || h.endsWith(".$WEB_HOST_SUFFIX")
-        }
-
-        private fun encode(s: String): String =
-            runCatching { URLEncoder.encode(s.trim(), "UTF-8") }.getOrDefault("")
+        /**
+         * 「当前还在搜索引擎上」——用 [SearchEngine.isSearchHost]，覆盖全部已支持的引擎。
+         *
+         * 旧版这里写死 `bing.com`：一旦允许换引擎，百度/搜狗的结果页就会被当成
+         * "一个还没识别出站型的普通网页"，用户可以把它添加成站源（拦不住的那种错）。
+         */
+        fun isWebHost(url: String): Boolean = SearchEngine.isSearchHost(url)
     }
 }
