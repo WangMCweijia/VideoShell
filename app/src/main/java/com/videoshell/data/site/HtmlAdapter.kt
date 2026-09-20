@@ -43,6 +43,22 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
      */
     private var learnedDetailTpl: String? = null
 
+    /**
+     * ## 从**形状普查**学到的分类形状（v1.0.34）
+     *
+     * 与 [learnedDetailTpl] 同一个思路：能从页面当场测出来的东西，就别指望用户去校准。
+     *
+     * 只活在实例内存里，**刻意不落盘**：普查是一个"提议"而不是"结论"，
+     * 先让它在真实运行里证明自己（这一步的判据与运行时完全同源，见
+     * [HtmlTemplates.shapeCensus]），确认稳定之后再考虑固化。这是本项目一贯的顺序 ——
+     * 先测量，再固化（v1.0.32 的教训：没验证的规则一旦写盘，就变成下一轮排查的谜题）。
+     */
+    private var learnedCatTpl: String? = null
+
+    /** 最近一次分类栏是靠哪个规则得到的（普查 / 校准 / 默认），自检报告里展示 */
+    @Volatile
+    private var censusDiag: String = ""
+
     /** 已回到首页现学过一次（避免每次详情失败都重抓首页） */
     private var homeLearned = false
 
@@ -188,7 +204,10 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
                     "｜分类容器=" + (manualNavSel ?: "（无）")
             val tail = calibOutcome.ifBlank { "（还没解析过分类页）" }
             val swap = searchTplSwap?.let { "\n      ⚠️ $it" } ?: ""
-            return "配方来源：$head｜$shape\n      $tail$swap"
+            // 分类栏最终是**靠哪个规则**得到的（人工校准 / 形状普查 / 默认判据）——
+            // 没有这一行时，用户只能看到"分类有 40 个"，看不出它到底是谁收的（v1.0.34）。
+            val census = censusDiag.takeIf { it.isNotBlank() }?.let { "\n      $it" } ?: ""
+            return "配方来源：$head｜$shape\n      $tail$swap$census"
         }
 
     /** 校准规则**真的用上了**：形状/容器命中了本次页面（而不是静默退回默认判据） */
@@ -292,6 +311,9 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
             val home = fetch(base)
             if (home == null) continue
             sawHome = home.length
+            // 顺手把首页签名喂给软 404 守卫（v1.0.34）——
+            // 这样搜索时判"这份结果页是不是首页副本"**不必额外再抓一次首页**，守卫就是纯零成本。
+            com.videoshell.data.net.SoftMiss.rememberHome(site.baseUrl, home)
             val list = try {
                 categoriesFrom(Jsoup.parse(home, base))
             } catch (e: Exception) {
@@ -446,6 +468,47 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
         collectSlashDirCategories(doc, out)
         if (out.size >= 2) return out.values.take(40).toList()
         out.clear()
+
+        // 2.6) 形状普查（v1.0.34）：**免校准**的通用分类形状发现。
+        //
+        //      前面 1~2.5 步都是在「已知的形状家族」里找：导航容器、无后缀别名、
+        //      尾斜杠目录。新站的分类形状只要不落在这几类里，分类栏就是空的 ——
+        //      用户唯一的选择是去手工校准。
+        //
+        //      而 30 多个版本反复证明：**形状列举不完，数量分得开**。所以这里不猜形状，
+        //      而是当场把页面上每条文字链接归纳成形状、按形状聚类，然后只看两个量：
+        //        · 不同别名数 ≥2（真分类目录有很多别名，`/explore/drama/` 这类功能页只有 1 个）
+        //        · 不同文字数 ≥2（挡掉栏目页那一串「查看更多」）
+        //      归纳形状与接收形状复用的是**同一套运行时判据**（`HtmlTemplates.stemOf` → `slashDirOf`/`catTplFrom`，
+        //      接收用 `collectByCatTpl` / `collectSlashDirCategories`），所以普查提议的形状
+        //      运行时一定认；而"够不够 2 个"这个终判仍然交给真收集器 —— 判据只有一份。
+        //
+        //      代价：一次全文档扫描，且只在前面所有形状家族都失败时才走到这里（极少）。
+        val censusTries = LinkedHashSet<String>()
+        learnedCatTpl?.let { censusTries += it }
+        runCatching {
+            HtmlTemplates.shapeCensus(doc) { n ->
+                n.isNotBlank() && n.length <= 10 &&
+                        n !in catBlacklist && catBadWords.none { w -> n.contains(w) }
+            }
+        }.getOrDefault(emptyList())
+            .filter { it.aliases >= 2 && it.names >= 2 }
+            .forEach { censusTries += it.tpl }
+        for (tpl in censusTries) {
+            val tmp = LinkedHashMap<String, Category>()
+            runCatching {
+                if (HtmlTemplates.isSlashCatTpl(tpl)) {
+                    collectSlashDirCategories(doc, tmp, expectDir = HtmlTemplates.dirOfSlashCatTpl(tpl))
+                } else {
+                    collectByCatTpl(doc, tmp, tpl)
+                }
+            }
+            if (tmp.size >= 2) {
+                learnedCatTpl = tpl
+                censusDiag = "分类形状来自**形状普查**（免校准）：$tpl 命中 ${tmp.size} 个"
+                return tmp.values.take(40).toList()
+            }
+        }
 
         // 3) 兜底：全文档扫（仍要求是无图纯文字链接）
         out.clear()
@@ -897,6 +960,23 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
     private suspend fun searchPass(keyword: String, page: Int, strict: Boolean): List<VideoItem>? {
         for (tpl in ordered(searchTpl, HtmlTemplates.searchCandidates(root))) {
             val html = Http.getOrNull(build(tpl, kw = keyword, page = page), referer = site.baseUrl) ?: continue
+
+            // ★ v1.0.34 软 404 守卫：候选地址把**首页**原样吐回来时，这份「结果」与关键词无关。
+            //
+            //   野果实测（2026-09-19）：`/?s=庆余年` 与 `/?s=zzzq不存在的词` 返回的页面
+            //   **与首页 sha256 完全相同**（都是 246747 B），而首页自带 58 条详情链接、
+            //   其中 3 条恰好含「庆余年」—— 严格遍于是判定"命中"，把这份**首页推荐位**
+            //   当成了搜索结果，还把 `/?s={kw}` 固化进配方。
+            //   用户看到的是「搜什么都一样」，而状态码 / 条数 / 详情链接数**全是绿的**。
+            //
+            //   刻意放在 `rememberShape` **之前**：首页副本不该被当成"当前上下文"去学站点结构。
+            //   拿不到首页签名时守卫返回 false（放行）—— 宁可漏收，不可错收。
+            if (com.videoshell.data.net.SoftMiss.isHomeCopy(site.baseUrl, html)) {
+                searchTplSwap = "已跳过候选 $tpl：它返回的是**首页副本**（软 404 回首页），" +
+                        "与关键词无关 —— 本站的 URL 搜索不可用"
+                continue
+            }
+
             val doc = Jsoup.parse(html, site.baseUrl)
             rememberShape(doc)
             val fresh = accept(HtmlExtractor.parseList(doc, site.baseUrl, vodIsCategory, html), page)

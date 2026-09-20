@@ -51,10 +51,76 @@ import okhttp3.ResponseBody.Companion.toResponseBody
  */
 object ImageCipher {
 
+    /**
+     * ## 未收录站的「疑似加密图床」登记（v1.0.34）
+     *
+     * 加密图床是踩过的最阴的一类坑（见文件头）：**状态码 200、字节数正常、界面全空**。
+     * 我们自己的解法是往 [CryptRecipes] 加一条配方 —— 但那**只覆盖亲手逆向过的站**。
+     * 新站撞上同一类图床时，用户看到的还是"没有封面"，而且**没有任何地方会说出来**，
+     * 于是又变成一轮"抓包—猜—再抓包"。
+     *
+     * 这一层让**任何站**的加密图床都能被认出来并落到自检报告里：`图床 host -> 字节数`。
+     *
+     * 这是"通配性"最实在的一条：**新站不需要我们先逆向，也能自己说出问题在哪**。
+     */
+    private val suspected = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
+    /** 自检报告用：这个图床被认出是疑似加密图床了吗；没有返回 null */
+    fun suspectedBed(host: String): String? {
+        val n = suspected[host.trim().lowercase()] ?: return null
+        return "图床 $host 返回的**不是图片**（$n B，认不出任何图片魔数）⇒ **疑似加密图床**，" +
+                "本站未收录密钥 —— 把这条连同 [3a] 的字节一起反馈即可收录"
+    }
+
+    /**
+     * 未收录站的探针：**只用响应头做门控**，三道都过了才读体。
+     *
+     * | 门 | 判据 | 不过时 |
+     * |---|---|---|
+     * | 1 | 路径得像图片（[CryptRecipes.looksLikeImagePath]） | 直接放行，零成本 |
+     * | 2 | 2xx 且不是 206 分片（密文截断判不出魔数） | 直接放行 |
+     * | 3 | `Content-Type` 是 `*octet-stream` 或空（图床"声称这是二进制"） | 直接放行 |
+     *
+     * 正常站、正常图片、接口请求**一个字节都不多读** —— 真正会走到读体这一步的，
+     * 只有"图片路径上返回了一坨声称二进制的数据"这种本身就异常的组合。
+     *
+     * 读体后：
+     * - 认得出图片魔数 ⇒ 就是普通图片，放行（不改行为）；
+     * - 认不出 ⇒ 登记进 [suspected] + 走 [NetLog] 的 `tag` 留痕 + **原样放行原始字节**。
+     *
+     * ⚠️ 留痕只能走 [NetLog]，**绝不能写自定义响应头** —— HTTP 头值只能是 ASCII，
+     * 中文会抛 `Unexpected char`，而这条路上每一次封面请求都会炸（见 [rebuild] 的注释）。
+     *
+     * @return 需要替换响应时返回重建后的 Response；无需替换返回 null（调用方原样返回）
+     */
+    private fun probeUnknownBed(url: String, resp: Response): Response? {
+        if (!CryptRecipes.looksLikeImagePath(url)) return null
+        if (!resp.isSuccessful || resp.code == 206) return null
+        val ct = resp.header("Content-Type").orEmpty().lowercase()
+        if (ct.startsWith("image/")) return null
+        if (ct.isNotBlank() && !ct.contains("octet-stream")) return null
+
+        // ⚠️ 读体之前必须先用 `peekBody` 备份，读完要把字节原样还回去 —— 否则 Coil 拿到空体。
+        val raw = runCatching { resp.body?.bytes() }.getOrNull() ?: return null
+        if (raw.isEmpty() || AesCipher.isImage(raw)) return null
+
+        val host = runCatching { java.net.URI(url).host }.getOrNull().orEmpty().lowercase()
+        if (host.isNotBlank()) suspected.putIfAbsent(host, raw.size)
+        NetLog.record(
+            url, resp.code, 0,
+            tag = "疑似加密图床（本站未收录密钥，已原样放行 ${raw.size}B）"
+        )
+        return rebuild(resp, raw, ct.takeIf { it.isNotBlank() } ?: "application/octet-stream")
+    }
+
     val interceptor: Interceptor = Interceptor { chain ->
         val req = chain.request()
         val url = req.url.toString()
-        val recipe = CryptRecipes.mediaRecipeFor(url) ?: return@Interceptor chain.proceed(req)
+        val recipe = CryptRecipes.mediaRecipeFor(url)
+        if (recipe == null) {
+            val resp = chain.proceed(req)
+            return@Interceptor probeUnknownBed(url, resp) ?: resp
+        }
 
         val resp = chain.proceed(req)
         if (!resp.isSuccessful) return@Interceptor resp

@@ -474,6 +474,89 @@ object HtmlTemplates {
         return null
     }
 
+    // ------------------------------------------------------------------ 形状普查（v1.0.34）
+
+    /**
+     * 一条「形状」的普查结果：这个 URL 形状在页面上一共被多少条链接命中。
+     */
+    data class ShapeHit(
+        val tpl: String,
+        /** 命中该形状的链接数 */
+        val links: Int,
+        /** **不同别名数**（`/tag/{slug}/` 下的不同 slug）—— 分「分类目录」与「功能页」的关键量 */
+        val aliases: Int,
+        /** **不同链接文字数** —— 挡掉那一串一模一样的「查看更多」 */
+        val names: Int,
+        /** 一条样例别名（人话解释用） */
+        val sample: String
+    )
+
+    /**
+     * ## 形状普查（v1.0.34）
+     *
+     * 「分类形状」以前只有两个来源：**人工校准**（用户点一下）与代码里**写死的家族**
+     * （尾斜杠目录 / `.html` 目录 / 导航容器白名单）。新站只要落在这三类之外，
+     * 分类栏就是空的 —— 用户唯一的选择是去校准。
+     *
+     * 而 30 多个版本反复证明的同一件事是：**形状永远列举不完，数量永远分得开**。
+     * （金牌影视改目录名、野果的 `/explore/drama/` 与 `/tag/xxx/` 同形 —— 都是这条。）
+     *
+     * 所以这里把「认形状」升级成**当场测量**：把页面上每条文字链接的路径归纳成形状，
+     * 按形状聚类，数两样东西：
+     *
+     * - [ShapeHit.aliases]：同一形状下有多少个**不同别名**。真分类目录有很多个
+     *   （野果 `/tag/` 下 30+ 个），功能页只有一个（`/rank/drama/`、`/explore/drama/` 的别名都是 `drama`）；
+     * - [ShapeHit.names]：有多少个**不同链接文字**。栏目页那串「查看更多」会被这条挡掉。
+     *
+     * **归纳形状直接复用运行时判据**（[slashDirOf] / [catTplFrom]），所以普查出来的 `tpl`
+     * 与 [matchesCatTpl]、以及 `HtmlAdapter.collectByCatTpl` 认的是**同一套形状** ——
+     * 「当场数出来的数」与「运行时收出来的数」必然相等。判据只能有一份，这是本项目的硬纪律。
+     *
+     * ⚠️ 调用方通过 [keepName] 决定"哪些文字算分类名"（黑名单 / 功能页词 / 长度限制）。
+     * 普查只负责数，不负责判名字的语义。
+     */
+    fun shapeCensus(
+        doc: org.jsoup.nodes.Document,
+        keepName: (String) -> Boolean
+    ): List<ShapeHit> {
+        val byTpl = LinkedHashMap<String, ArrayList<Pair<String, String>>>()
+        for (a in doc.select("a[href]")) {
+            if (a.selectFirst("img") != null) continue          // 带图的一定不是分类标签
+            val href = a.attr("href").trim()
+            if (href.isEmpty()) continue
+            val stem = stemOf(href) ?: continue
+            val name = a.text().replace(Regex("\\s+"), " ").trim()
+            if (!keepName(name)) continue
+            byTpl.getOrPut(stem.first) { ArrayList() } += (stem.second to name)
+        }
+        return byTpl.map { (tpl, l) ->
+            ShapeHit(
+                tpl = tpl,
+                links = l.size,
+                aliases = l.map { it.first }.distinct().size,
+                names = l.map { it.second }.distinct().size,
+                sample = l.firstOrNull()?.first.orEmpty()
+            )
+        }.sortedWith(compareByDescending<ShapeHit> { it.names }.thenByDescending { it.aliases })
+    }
+
+    /**
+     * 一条链接的「形状 + 别名」。
+     *
+     * 两条分支**都不是新写的判据**，而是直接复用运行时那两份：
+     * 尾斜杠家族走 [slashDirOf]，`.html` 家族走 [catTplFrom]。
+     * 这样普查永远不可能提出一个运行时认不出的形状。
+     */
+    private fun stemOf(href: String): Pair<String, String>? {
+        slashDirOf(href)?.let { (dir, slug) -> return "/$dir/{slug}/" to slug }
+        val t = catTplFrom(href) ?: return null
+        if (!t.contains("{slug}")) return null
+        val alias = pathOf(href)?.trimEnd('/')?.substringAfterLast('/')
+            ?.removeSuffix("html")?.removeSuffix(".")
+            ?.takeIf { it.isNotBlank() } ?: return null
+        return t to alias
+    }
+
     private fun firstGroup(patterns: List<Regex>, href: String): String? {
         for (p in patterns) {
             val m = p.find(href) ?: continue

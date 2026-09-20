@@ -90,6 +90,53 @@ object SiteDoctor {
             L("    （本适配器不参与网页校准 —— 接口型 / 加密型适配器没有「分类形状」这回事）")
         }
 
+        // [2b] 搜索路由自证（v1.0.34）—— **对照组**
+        //
+        // 「能出结果」不是证据：「错误的输入也应该出零结果」才是。
+        // 野果实测 `/?s=庆余年` 与 `/?s=zzzq不存在的词` 返回**与首页 sha256 完全相同**的页面
+        // （246747 B），首页自带的 58 条详情链接里恰好有 3 条含「庆余年」——
+        // 于是"严格遍"判定命中，把首页推荐位当成了搜索结果。所有常规判据全绿。
+        //
+        // 所以这里不数结果，而是**拿同一个模板发两次请求**（一个像样的关键词 + 一个不可能存在的词），
+        // 比这两份响应是否同一个页面 —— 两个方向都不会错：
+        //   · 两次一致 ⇒ 路由忽略关键词（软 404 回首页）⇒ 搜索不可用；
+        //   · 对照词零条目、真词有条目 ⇒ 路由确实按关键词取结果 ⇒ 搜索正常。
+        // 这对客户端渲染页同样成立（两次都是同一个空壳 ⇒ 也判"不可用"，而那是事实）。
+        L("")
+        L("[2b] 搜索路由自证（对照组）")
+        val searchTplNow = RecipeStore.load(site.baseUrl)?.searchTpl
+        if (searchTplNow.isNullOrBlank()) {
+            L("    本地还没有搜索模板 —— 先搜索一次（模板在那次学习中固化），再回来跑自检")
+        } else {
+            L("    被测模板：$searchTplNow")
+            val realKw = site.name.trim().take(2).takeIf { it.length >= 2 } ?: "电影"
+            val fakeKw = "zzq9xk3"
+            val u1 = searchTplNow.replace("{kw}", java.net.URLEncoder.encode(realKw, "UTF-8"))
+            val u2 = searchTplNow.replace("{kw}", java.net.URLEncoder.encode(fakeKw, "UTF-8"))
+            val h1 = runCatching { Http.getOrNull(u1, referer = site.baseUrl) }.getOrNull()
+            val h2 = runCatching { Http.getOrNull(u2, referer = site.baseUrl) }.getOrNull()
+            if (h1 == null || h2 == null) {
+                L("    取不到页面（${if (h1 == null) "真关键词" else "对照词"}那一侧请求失败）—— 本次无法判定")
+            } else {
+                val s1 = com.videoshell.data.net.SoftMiss.sigOf(h1)
+                val s2 = com.videoshell.data.net.SoftMiss.sigOf(h2)
+                L("    真关键词「$realKw」：HTTP，${h1.length} B，唯一链接 ${s1.links} 条，链接集 ${s1.linkHash}")
+                L("    对照词「$fakeKw」：HTTP，${h2.length} B，唯一链接 ${s2.links} 条，链接集 ${s2.linkHash}")
+                L(
+                    "    → " + when {
+                        s1.len == s2.len && s1.linkHash == s2.linkHash ->
+                            "两次响应**完全一致** ⇒ 该路由**忽略关键词**（软 404 回首页）" +
+                                    "⇒ **本站的 URL 搜索不可用**，搜索会退回「学站点搜索表单」或需要 JS 渲染"
+                        s2.links == 0 && s1.links > 0 ->
+                            "真关键词有条目、对照词**零条目** ⇒ 路由**确实按关键词取结果**，搜索链路正常"
+                        else ->
+                            "两次响应不同，但对照词也出了 ${s2.links} 条 ⇒ 结果页可能混着推荐位，" +
+                                    "搜索结果不保证精确（留意是否强相关）"
+                    }
+                )
+            }
+        }
+
         // 3) 列表
         val firstType = cats.firstOrNull()?.id ?: ""
         L("")
@@ -157,18 +204,34 @@ object SiteDoctor {
                                 "配方 media_key=${mediaRecipe.mediaKeySpec}"
                 })
             } else {
-                val (cst, cinfo) = Http.probe(cover, site.baseUrl, "bytes=0-1023")
-                L("    带 Referer 请求：HTTP $cst" + if (cinfo.isNotBlank()) "   $cinfo" else "")
+                // 未收录的站：用**整段取图**走一遍 App 真实的图片链路。
+                //
+                // 这一步不只是"看一眼字节" —— 它让 [com.videoshell.data.net.ImageCipher]
+                // 的拦截器有机会认出「图片路径上返回了一坨不是图片的东西」这种形态
+                //（疑似加密图床），于是**任何新站**的加密图床都能在报告里被点名，
+                // 不必等我们先把密钥逆向出来才知道问题在哪。
+                //
+                // ⚠️ 必须整段取、不能 Range：206 分片在密文上永远看不出魔数（见 ImageCipher 的门 2）。
+                val (bcode, bbytes, bwhy) = Http.fetchBytes(cover, site.baseUrl)
+                val bIsImg = AesCipher.isImage(bbytes)
+                val bodyLine = when {
+                    bbytes == null || bbytes.isEmpty() -> "取不到（${bwhy.take(50)}）"
+                    else -> "${bbytes.size} B，" + (if (bIsImg) "**是图片**" else "**不是图片**")
+                }
+                L("    整段取图（App 真实链路）：HTTP $bcode，$bodyLine")
                 if (!CryptRecipes.looksLikeImagePath(cover)) {
                     L("    路径判定：不像图片地址（无图片后缀）—— 可疑，请反馈这个地址")
                 }
             }
             val host = runCatching { java.net.URI(cover).host }.getOrNull().orEmpty()
+            com.videoshell.data.net.ImageCipher.suspectedBed(host)?.let { L("    ⚠️ $it") }
             if (host.isNotBlank()) {
                 L("    ${Http.dnsReport(host)}")
                 L("    解读：")
                 L("      · 系统 DNS 为空/异常 ⇒ 污染；「有答案但连不上」同样算污染 —— 两种都已自动改走 DoH；")
                 L("      · ① 不是图片、而 ② 是**真图片** ⇒ 加密图床，App 已在图片层解开（属正常，别去删 media_key）；")
+                L("      · 带 ⚠️ 疑似加密图床 ⇒ 本站**未收录密钥**，封面一定出不来；把这几行反馈即可收录；")
+                L("      · 整段取图**不是图片**且没有 ⚠️ ⇒ 图床本身异常（错误页 / WAF 截断），把这一行反馈；")
                 L("      · 两边都正常但 HTTP 非 2xx ⇒ 图床按 UA/Referer/IP 拒绝，把状态码发回定位；")
                 L("      · ② 已是真图片、界面仍无图 ⇒ 问题在图片加载层（Coil），请连同机型一起反馈。")
             }
