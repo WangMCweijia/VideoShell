@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="#E60E1013" />
-    <corners android:radius="10dp" />
+<!-- 播放页中央提示条（"已锁定"/"屏幕：横屏"/快进预览）。
+     压在任意亮度的画面上 ⇒ 固定深色玻璃 + 足够不透明，圆角提到 radius_lg。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="270"
+        android:endColor="#D90E1117"
+        android:startColor="#E612161C"
+        android:type="linear" />
+    <corners android:radius="@dimen/radius_lg" />
+    <stroke
+        android:width="@dimen/glass_stroke_w"
+        android:color="#26FFFFFF" />
 </shape>

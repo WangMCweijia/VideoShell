@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+  磨砂"砂质"层（v1.0.49）。
+
+  这是"磨砂玻璃"与"一块半透明灰玻璃"的**唯一**区别：颗粒。
+  没有它，再低的 alpha 也只能透出背后是深是浅，看不出"材质"。
+
+  图源：`drawable-nodpi/glass_noise.png`（128×128 无缝噪点，峰值 alpha 约 4%）。
+  ⚠️ 必须 tileMode=repeat —— 默认会把 128px 的图**拉伸**成整屏，噪点被插值抹平，
+     看上去就是一块脏色，反而不如不加。
+  ⚠️ nodpi 是关键：放到别的密度目录会被系统按缩放系数重新采样，噪点被平滑掉。
+
+  用法：在玻璃 layer-list 的 glow 之后、stroke 之前插一行
+  `<item android:drawable="@drawable/glass_grain" />`。
+  ⚠️ 这一层是矩形的，不会跟着圆角裁剪 —— 但峰值 alpha 只有 4%，圆角外那几像素
+     噪点在实机上不可见，所以不值得为此引入 BitmapShader/自定义 View。
+-->
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:src="@drawable/glass_noise"
+    android:tileModeX="repeat"
+    android:tileModeY="repeat" />

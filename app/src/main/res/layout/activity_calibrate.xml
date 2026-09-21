@@ -8,13 +8,18 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg"
+    android:background="@drawable/bg_ambient"
     android:orientation="vertical">
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="52dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/island_gap"
+        android:layout_marginTop="@dimen/space_md"
+        android:layout_marginEnd="@dimen/island_gap"
+        android:background="@drawable/bg_glass"
         android:gravity="center_vertical"
+        android:minHeight="@dimen/island_min_h"
         android:orientation="horizontal"
         android:paddingStart="4dp"
         android:paddingEnd="8dp">
@@ -64,11 +69,17 @@
         android:paddingEnd="14dp"
         android:paddingBottom="10dp">
 
+        <!--
+          ⚠️ 这三段的文字色**必须写死浅色**，不能用 @color/text_primary / text_hint：
+          它们坐在 bg_panel（固定深色玻璃）上，而亮色模式下 text_primary 是深色 ——
+          深字压深玻璃，等于什么都看不见（v1.0.48 顺手修掉的既有缺陷）。
+          判断规则：容器背景不跟随主题 ⇒ 里面的文字色也不能跟随主题。
+        -->
         <TextView
             android:id="@+id/tvStep"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textColor="@color/brand"
+            android:textColor="#FF7AA8FF"
             android:textSize="14sp"
             android:textStyle="bold" />
 
@@ -77,7 +88,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:textColor="@color/text_primary"
+            android:textColor="#FFE6EAF2"
             android:textSize="12sp" />
 
         <TextView
@@ -85,7 +96,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:textColor="@color/text_hint"
+            android:textColor="#FFB0B8C6"
             android:textSize="12sp" />
 
         <!--

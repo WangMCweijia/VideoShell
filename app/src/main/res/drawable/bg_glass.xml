@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+  磨砂玻璃浮岛 · 大面板（v1.0.48 起 · 方案 A 的默认材质）。
+
+  四层叠出来的，顺序不能反（后画的在上面）：
+    ① 主体      glass_fill → glass_fill_2（自上而下略微变淡 = 漫反射）
+    ② 顶部高光  glass_glow → 透明，centerY=0.18 ⇒ 只在顶部 ~1/5 高度内衰减完，
+                看起来就是玻璃上沿那道棱。这一层是人眼判断"这是一块凸起的玻璃
+                而不是一个浅色矩形"的**关键**，别省。
+    ③ 砂质颗粒  glass_grain（v1.0.49 新增）—— "磨砂"与"半透明灰玻璃"的唯一区别。
+                以前只有 bg_ambient 有颗粒，可玻璃有 65% 不透明度，背景那层颗粒
+                透过来只剩三成，等于没有。
+    ④ 1px 描边  glass_stroke（亮色取深、暗色取浅，见各自 colors.xml）
+
+  ⚠️ centerY 是 API 24+ 才认的属性；低版本按 0.5 处理 ⇒ 高光覆盖上半屏，
+     「顶亮 → 中透明 → 下透明」的观感依然成立，只是棱感弱一些。不会崩、不会发白。
+  ⚠️ 前四层必须写**同一个** corners，否则描边和填色会错位出双圆角。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/radius_lg" />
+            <gradient
+                android:angle="270"
+                android:endColor="@color/glass_fill_2"
+                android:startColor="@color/glass_fill"
+                android:type="linear" />
+        </shape>
+    </item>
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/radius_lg" />
+            <gradient
+                android:angle="270"
+                android:centerColor="#00000000"
+                android:centerY="0.18"
+                android:endColor="#00000000"
+                android:startColor="@color/glass_glow"
+                android:type="linear" />
+        </shape>
+    </item>
+
+    <item android:drawable="@drawable/glass_grain" />
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/radius_lg" />
+            <solid android:color="#00000000" />
+            <stroke
+                android:width="@dimen/glass_stroke_w"
+                android:color="@color/glass_stroke" />
+        </shape>
+    </item>
+</layer-list>

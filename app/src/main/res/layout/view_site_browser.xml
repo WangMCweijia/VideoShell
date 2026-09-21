@@ -9,10 +9,19 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
+    <!-- ==================== 标题行（浮岛，v1.0.48） ====================
+         从"贴边的通栏标题条"改成一块不与屏幕齐平的玻璃片：
+         · 高度 wrap_content + minHeight，别写死 —— 浮岛靠内边距呼吸，写死高度会把内容挤扁
+         · 背景 bg_glass 的 16dp 圆角与其余浮岛同源（@dimen/radius_lg），改一处全站跟着变 -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="52dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/island_gap"
+        android:layout_marginTop="@dimen/space_md"
+        android:layout_marginEnd="@dimen/island_gap"
+        android:background="@drawable/bg_glass"
         android:gravity="center_vertical"
+        android:minHeight="@dimen/island_min_h"
         android:orientation="horizontal"
         android:paddingStart="4dp"
         android:paddingEnd="8dp">
@@ -72,15 +81,20 @@
             android:tint="@color/text_primary" />
     </LinearLayout>
 
+    <!-- 搜索行也收成一块浮岛：它与标题行是"同一个操作区"的两段，都浮起来才成套。
+         padding 6dp 是为了让里面的输入框与岛边留出呼吸，不是装饰。 -->
     <LinearLayout
         android:id="@+id/searchRow"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginStart="14dp"
-        android:layout_marginEnd="14dp"
+        android:layout_marginStart="@dimen/island_gap"
+        android:layout_marginTop="@dimen/space_md"
+        android:layout_marginEnd="@dimen/island_gap"
         android:layout_marginBottom="8dp"
+        android:background="@drawable/bg_glass"
         android:gravity="center_vertical"
         android:orientation="horizontal"
+        android:padding="@dimen/space_sm"
         android:visibility="gone">
 
         <EditText
@@ -109,6 +123,18 @@
             android:text="@string/search"
             android:textSize="14sp" />
     </LinearLayout>
+
+    <!-- FN-2：搜索历史下拉。搜索框聚焦且为空时弹出，点一项即回填并搜索 -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvSearchSuggest"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="14dp"
+        android:layout_marginEnd="14dp"
+        android:layout_marginBottom="8dp"
+        android:background="@drawable/bg_surface"
+        android:maxHeight="220dp"
+        android:visibility="gone" />
 
     <!-- 搜索范围（v1.0.37）：本站 / 全站 / 全网。
          单独占一行而不是塞进搜索框那一行 —— 搜索框在窄屏上已经要跟「搜索」按钮分宽度，

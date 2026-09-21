@@ -157,4 +157,102 @@ object Store {
     fun setSearchEnhance(ctx: Context, on: Boolean) {
         sp(ctx).edit().putBoolean(KEY_SEARCH_ENHANCE, on).apply()
     }
+
+    // ------------------------------------------------------------------ 搜索历史（FN-2）
+
+    private const val KEY_SEARCH_HIST = "search_history"
+    private const val MAX_SEARCH_HIST = 20
+
+    fun searchHistory(ctx: Context): List<String> {
+        val s = sp(ctx).getString(KEY_SEARCH_HIST, null) ?: return emptyList()
+        return runCatching {
+            val t = object : TypeToken<List<String>>() {}.type
+            gson.fromJson<List<String>>(s, t) ?: emptyList()
+        }.getOrDefault(emptyList())
+    }
+
+    /** 记一条搜索词（去重置顶，最短 2 字才记） */
+    fun addSearchHistory(ctx: Context, kw: String) {
+        val k = kw.trim()
+        if (k.length < 2) return
+        val list = searchHistory(ctx).toMutableList()
+        list.removeAll { it.equals(k, ignoreCase = true) }
+        list.add(0, k)
+        while (list.size > MAX_SEARCH_HIST) list.removeAt(list.size - 1)
+        sp(ctx).edit().putString(KEY_SEARCH_HIST, gson.toJson(list)).apply()
+    }
+
+    fun clearSearchHistory(ctx: Context) {
+        sp(ctx).edit().remove(KEY_SEARCH_HIST).apply()
+    }
+
+    fun removeSearchHistory(ctx: Context, kw: String) {
+        val list = searchHistory(ctx).toMutableList()
+        list.removeAll { it.equals(kw, ignoreCase = true) }
+        sp(ctx).edit().putString(KEY_SEARCH_HIST, gson.toJson(list)).apply()
+    }
+
+    // ------------------------------------------------------------------ 站点导入 / 合并（FN-6）
+
+    /**
+     * 批量导入站点：先按 key 去重，再按 host 去重。
+     *
+     * 为什么不只看 key：见 [findByHost] 的注释 —— key 会随识别结果变，同一个站可能以
+     * 两个 key 存在。这里对新来的每条都同时查 key 与 host，防止"导入之后列表里多出一排
+     * 和我现有的一模一样的站"。
+     *
+     * @return 实际新增条数
+     */
+    fun importSites(ctx: Context, incoming: List<SiteConfig>): Int {
+        val list = sites(ctx)
+        val keys = list.map { it.key }.toHashSet()
+        val hosts = list.map { hostOf(it.baseUrl) }.filter { it.isNotBlank() }.toHashSet()
+        var added = 0
+        for (s in incoming) {
+            if (s.key.isBlank() && s.baseUrl.isBlank()) continue
+            if (s.key.isNotBlank() && s.key in keys) continue
+            val h = hostOf(s.baseUrl)
+            if (h.isNotBlank() && h in hosts) continue
+            list.add(s)
+            if (s.key.isNotBlank()) keys.add(s.key)
+            if (h.isNotBlank()) hosts.add(h)
+            added++
+        }
+        if (added > 0) save(ctx, list)
+        return added
+    }
+
+    /**
+     * 合并重复站点：按 host 归一，同一个 host 只留一条。
+     *
+     * 同 host 多条时**优先保留带 apiUrl 的那条**（采集接口站比纯网页站的配方更完整），
+     * 否则保留靠前的那条 —— 用户自己排过的顺序不该被合并动作打乱。
+     * 若默认站源正好被合并掉，顺手把默认改到剩下第一条，避免星标"失踪"。
+     *
+     * @return (合并后条数, 去掉的条数)
+     */
+    fun dedupSites(ctx: Context): Pair<Int, Int> {
+        val list = sites(ctx)
+        val out = ArrayList<SiteConfig>()
+        val indexByHost = HashMap<String, Int>()
+        for (s in list) {
+            val h = hostOf(s.baseUrl).ifBlank { s.key }
+            val idx = indexByHost[h]
+            if (idx == null) {
+                indexByHost[h] = out.size
+                out.add(s)
+            } else if (out[idx].apiUrl.isBlank() && s.apiUrl.isNotBlank()) {
+                out[idx] = s
+            }
+        }
+        val removed = list.size - out.size
+        if (removed > 0) {
+            save(ctx, out)
+            val dk = defaultKey(ctx)
+            if (dk.isNotBlank() && out.none { it.key == dk }) {
+                setDefault(ctx, out.firstOrNull()?.key.orEmpty())
+            }
+        }
+        return out.size to removed
+    }
 }

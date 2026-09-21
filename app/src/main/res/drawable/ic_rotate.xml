@@ -1,6 +1,47 @@
+<!-- 旋转 / 屏幕方向：倾斜手机 + 中心对称双弧箭头。
+     几何（改前必须重算，别目测）：A 命令的圆心由 起终点 + large-arc/sweep 两个 flag
+     共同决定，同一个圆心有两个合法解 —— 顺序或 flag 写错会让圆心跑到画布外，
+     弧的弯曲方向整个反过来，两条弧就不对称了（v1.0.44 的坑）。
+       · 手机：圆角矩形 (7.7,5.6)-(16.3,18.4) r2.6，绕 (12,12) 逆时针 35°；
+               外轮廓最远点距中心 6.76，加描边 1 后 7.76
+       · 双弧：圆心均为 (12,12)、半径 9.6，各扫 60°，large-arc=0 sweep=0，
+               内沿 8.6 与手机 7.76 留 0.84 间隙，不压线
+                 右弧 (21.45,10.33) → (15.28,2.98)  中点 (19.35,5.83)
+                 左弧 (2.55,13.67)  → (8.72,21.02)  中点 (4.65,18.17)
+               两弧中点关于中心严格对称
+       · 箭头：实心三角，尖端沿弧终点切线外延 2.4、底宽 2.2
+                 右 (13.03,2.16) 指左上      左 (10.97,21.84) 指右下
+               两点互为 (24-x,24-y) 映射 —— 精确中心对称，非目测对齐 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp" android:height="24dp"
     android:viewportWidth="24" android:viewportHeight="24">
-    <path android:fillColor="#FFFFFFFF"
-        android:pathData="M16.48,2.52c3.27,1.55 5.61,4.72 5.97,8.48h1.5C23.44,4.84 18.29,0 12,0l-0.66,0.03 4.14,4.14 1,-1.65zM10.23,1.75c-0.59,-0.12 -1.11,0.39 -0.99,0.98l0.42,2.06 4.56,4.56 2.06,0.42c0.59,0.12 1.11,-0.39 0.99,-0.98l-0.42,-2.06 -4.56,-4.56 -2.06,-0.42zM7.51,21.48C4.25,19.94 1.91,16.76 1.55,13H0.05C0.56,19.16 5.71,24 12,24l0.66,-0.03 -4.14,-4.14 -1.01,1.65zM13.77,22.25c0.59,0.12 1.11,-0.39 0.99,-0.98l-0.42,-2.06 -4.56,-4.56 -2.06,-0.42c-0.59,-0.12 -1.11,0.39 -0.99,0.98l0.42,2.06 4.56,4.56 2.06,0.42z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M2.55,13.67 A9.6,9.6 0 0 0 8.72,21.02" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M21.45,10.33 A9.6,9.6 0 0 0 15.28,2.98" />
+    <group
+        android:pivotX="12"
+        android:pivotY="12"
+        android:rotation="-35">
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#FF000000"
+            android:strokeWidth="2"
+            android:strokeLineJoin="round"
+            android:pathData="M10.3,5.6h3.4a2.6,2.6 0 0 1 2.6,2.6v7.6a2.6,2.6 0 0 1 -2.6,2.6h-3.4a2.6,2.6 0 0 1 -2.6,-2.6v-7.6a2.6,2.6 0 0 1 2.6,-2.6z" />
+    </group>
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M13.03,2.16 L15.66,1.95 L14.91,4.01 Z" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M10.97,21.84 L8.34,22.05 L9.09,19.99 Z" />
 </vector>

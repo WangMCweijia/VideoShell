@@ -26,8 +26,12 @@ data class VideoItem(
     val siteKey: String = ""
 )
 
-/** 一集 */
-data class Episode(val name: String, val url: String)
+/** 一集（pic 默认空：老适配器取不到分集封面时不影响编译/运行，FN-1） */
+data class Episode(
+    val name: String,
+    val url: String,
+    val pic: String = ""
+)
 
 /** 一条播放线路 */
 data class PlayGroup(val name: String, val episodes: List<Episode>)

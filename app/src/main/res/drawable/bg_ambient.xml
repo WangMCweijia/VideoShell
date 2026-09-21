@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  页面基底（v1.0.48 · UI 方案 A）。
+
+  为什么不用纯色：磨砂玻璃的本质是「半透明材质 + 背后有东西可透」。
+  如果底是一块死色，所有玻璃片都会退化成"稍微亮一点/暗一点的圆角矩形"，
+  擦不出质感。所以在基底里埋了三团低 alpha 的品牌色光斑 + 一层颗粒：
+
+    ① bg → bg_deep 的竖向渐变   = 天光从上方来的暗示
+    ② 右上 品牌蓝光斑            = 玻璃片挪动时"透光"会跟着变
+    ③ 左下 青色光斑
+    ④ 中下 紫色弱光斑（最淡）
+    ⑤ 128px 无缝颗粒平铺         = 磨砂的砂质（图见 drawable-nodpi/glass_noise.png）
+
+  ⚠️ 光斑用负 inset（如 top="-160dp"）把圆心推到屏幕外 —— 正 inset 只能缩小，
+     留下的会是一整个可见的椭圆，反而像贴了张贴纸。
+  ⚠️ 颗粒必须放最上层且 tileMode=repeat：默认会被拉伸成整屏一块糊。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- ① 基底渐变 -->
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="270"
+                android:endColor="@color/bg_deep"
+                android:startColor="@color/bg"
+                android:type="linear" />
+        </shape>
+    </item>
+
+    <!-- ② 右上：品牌蓝 -->
+    <item
+        android:bottom="220dp"
+        android:left="120dp"
+        android:right="-120dp"
+        android:top="-160dp">
+        <shape android:shape="oval">
+            <gradient
+                android:endColor="#00000000"
+                android:gradientRadius="260dp"
+                android:startColor="@color/ambient_1"
+                android:type="radial" />
+        </shape>
+    </item>
+
+    <!-- ③ 左下：青 -->
+    <item
+        android:bottom="-140dp"
+        android:left="-140dp"
+        android:right="130dp"
+        android:top="240dp">
+        <shape android:shape="oval">
+            <gradient
+                android:endColor="#00000000"
+                android:gradientRadius="240dp"
+                android:startColor="@color/ambient_2"
+                android:type="radial" />
+        </shape>
+    </item>
+
+    <!-- ④ 中下：紫（最弱，只负责打破"只有两团光"的规律感） -->
+    <item
+        android:bottom="120dp"
+        android:left="-60dp"
+        android:right="-60dp"
+        android:top="140dp">
+        <shape android:shape="oval">
+            <gradient
+                android:endColor="#00000000"
+                android:gradientRadius="300dp"
+                android:startColor="@color/ambient_3"
+                android:type="radial" />
+        </shape>
+    </item>
+
+    <!-- ⑤ 颗粒 -->
+    <item>
+        <bitmap
+            android:src="@drawable/glass_noise"
+            android:tileModeX="repeat"
+            android:tileModeY="repeat" />
+    </item>
+</layer-list>

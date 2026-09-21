@@ -8,9 +8,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
+import com.videoshell.App
+import androidx.core.view.doOnLayout
 import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import com.videoshell.R
 import com.videoshell.data.Store
 import com.videoshell.data.model.SiteConfig
@@ -25,7 +31,13 @@ import com.videoshell.player.PlayerActivity
 import com.videoshell.player.SniffActivity
 import com.videoshell.ui.adapter.SiteListAdapter
 import com.videoshell.util.toast
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.Request
+import java.util.concurrent.TimeUnit
 
 /**
  * 主界面：底部三 Tab。
@@ -55,6 +67,93 @@ class MainActivity : AppCompatActivity() {
     ) { res ->
         if (res.resultCode != RESULT_OK) return@registerForActivityResult
         browserHome.onCalibReturned()
+    }
+
+    // ------------------------------------------------------------------ 站点导入 / 导出（FN-6）
+
+    /** 导出：让用户选一个 .json 存哪，再把站点列表写进去 */
+    private val exportLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val list = Store.sites(this)
+        val ok = runCatching {
+            contentResolver.openOutputStream(uri)?.use { os ->
+                os.write(Gson().toJson(list).toByteArray(Charsets.UTF_8))
+            } ?: error("openOutputStream 返回 null")
+        }.isSuccess
+        if (ok) toast(getString(R.string.site_export_done, list.size, uri.lastPathSegment ?: "文件"))
+        else toast("导出失败：无法写入所选文件")
+    }
+
+    /** 导入：读一个 .json，按 key / host 去重后并入现有站点 */
+    private val importLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val text = runCatching {
+            contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+        }.getOrNull()
+        if (text.isNullOrBlank()) {
+            toast("导入失败：文件读不出内容")
+            return@registerForActivityResult
+        }
+        val incoming = runCatching {
+            val t = object : TypeToken<MutableList<SiteConfig>>() {}.type
+            Gson().fromJson<MutableList<SiteConfig>>(text, t) ?: mutableListOf()
+        }.getOrNull().orEmpty()
+        if (incoming.isEmpty()) {
+            toast("该文件里没有可识别的站点")
+            return@registerForActivityResult
+        }
+        val added = Store.importSites(this, incoming)
+        refresh()
+        bindHome(force = true)
+        toast(getString(R.string.site_import_done, added))
+    }
+
+    /** 拖拽排序（FN-6）：只有从手柄起拖，整行长按仍然是「改名」 */
+    private var dragHappened = false
+    private val touchHelper by lazy {
+        ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
+            ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0
+        ) {
+            override fun onMove(
+                rv: RecyclerView,
+                vh: RecyclerView.ViewHolder,
+                target: RecyclerView.ViewHolder
+            ): Boolean {
+                val from = vh.bindingAdapterPosition
+                val to = target.bindingAdapterPosition
+                if (from == RecyclerView.NO_POSITION || to == RecyclerView.NO_POSITION) return false
+                siteAdapter.moveItem(from, to)
+                dragHappened = true
+                return true
+            }
+
+            override fun onSwiped(vh: RecyclerView.ViewHolder, direction: Int) = Unit
+
+            override fun isLongPressDragEnabled(): Boolean = false
+
+            override fun onSelectedChanged(vh: RecyclerView.ViewHolder?, actionState: Int) {
+                super.onSelectedChanged(vh, actionState)
+                // 松手（回到 IDLE）才落盘，中途每次移动都写 SP 太吵
+                if (actionState == ItemTouchHelper.ACTION_STATE_IDLE && dragHappened) {
+                    dragHappened = false
+                    Store.save(this@MainActivity, siteAdapter.currentItems())
+                    bindHome(force = true)
+                }
+            }
+        })
+    }
+
+    /** 体检用的短超时客户端：只是探活，绝不能像播放那样久等 */
+    private val healthClient by lazy {
+        Http.client.newBuilder()
+            .connectTimeout(3, TimeUnit.SECONDS)
+            .readTimeout(3, TimeUnit.SECONDS)
+            .callTimeout(5, TimeUnit.SECONDS)
+            .build()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -90,6 +189,22 @@ class MainActivity : AppCompatActivity() {
         // ---- 站源：站点列表 ----
         binding.rvSites.layoutManager = LinearLayoutManager(this)
         binding.rvSites.adapter = siteAdapter
+        touchHelper.attachToRecyclerView(binding.rvSites)
+        siteAdapter.onStartDrag = { vh -> touchHelper.startDrag(vh) }
+
+        // ---- 站源：管理动作（FN-6）----
+        binding.btnImport.setOnClickListener {
+            importLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+        }
+        binding.btnExport.setOnClickListener {
+            if (Store.sites(this).isEmpty()) {
+                toast(getString(R.string.site_empty_action))
+                return@setOnClickListener
+            }
+            exportLauncher.launch("videoshell-sites.json")
+        }
+        binding.btnDedup.setOnClickListener { dedupSites() }
+        binding.btnHealth.setOnClickListener { healthCheck() }
 
         // ---- 我的 ----
         binding.rowHistory.setOnClickListener { startActivity(Intent(this, HistoryActivity::class.java)) }
@@ -108,11 +223,24 @@ class MainActivity : AppCompatActivity() {
         binding.swResume.setOnCheckedChangeListener { _, checked ->
             sp.edit().putBoolean("setting_resume", checked).apply()
         }
-        // 自动暗色：开 = 跟随系统；关 = 固定亮色
-        binding.swDark.isChecked = sp.getBoolean(KEY_AUTO_DARK, true)
-        binding.swDark.setOnCheckedChangeListener { _, checked ->
-            sp.edit().putBoolean(KEY_AUTO_DARK, checked).apply()
-            applyNightMode(checked)
+        // 深色三态（UI-4）：跟随系统 / 浅色 / 深色
+        selectDarkMode(sp.getString(App.KEY_DARK_MODE, "system").orEmpty())
+        binding.tgDark.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (!isChecked) return@addOnButtonCheckedListener
+            val mode = when (checkedId) {
+                R.id.tgDarkLight -> "light"
+                R.id.tgDarkDark -> "dark"
+                else -> "system"
+            }
+            sp.edit().putString(App.KEY_DARK_MODE, mode).apply()
+            App.applyDarkMode(mode)
+        }
+
+        // 后台播放（FN-4）：默认关
+        binding.swBgPlay.isChecked = sp.getBoolean(App.KEY_BG_PLAY, false)
+        binding.swBgPlay.setOnCheckedChangeListener { _, checked ->
+            sp.edit().putBoolean(App.KEY_BG_PLAY, checked).apply()
+            toast(if (checked) getString(R.string.bg_play_on) else getString(R.string.bg_play_off))
         }
 
         // ---- 底部导航 ----
@@ -124,6 +252,9 @@ class MainActivity : AppCompatActivity() {
             }
             true
         }
+        // 底部导航现在是**浮**在内容之上的一层，各列表得自己让出它的高度
+        // （实测高度而不是写死，理由见 applyNavClearance 的注释）
+        applyNavClearance()
         showPage(PAGE_HOME)
     }
 
@@ -133,23 +264,104 @@ class MainActivity : AppCompatActivity() {
         bindHome()
     }
 
-    // ------------------------------------------------------------------ 暗色
+    // ------------------------------------------------------------------ 暗色（UI-4）
 
-    private fun applyNightMode(auto: Boolean) {
-        AppCompatDelegate.setDefaultNightMode(
-            if (auto) AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
-            else AppCompatDelegate.MODE_NIGHT_NO
-        )
+    private fun selectDarkMode(mode: String) {
+        val id = when (mode) {
+            "light" -> R.id.tgDarkLight
+            "dark" -> R.id.tgDarkDark
+            else -> R.id.tgDarkSystem
+        }
+        binding.tgDark.check(id)
     }
 
     // ------------------------------------------------------------------ 页面切换
 
+    /** 已经显示过的页；-1 = 还没初始化（onCreate 里那次不算"切换"） */
+    private var currentPage = -1
+
+    /**
+     * 切页（v1.0.49 起带动效）。
+     *
+     * 三页是**同层叠放 + 切 visibility**（没有 Fragment/ViewPager 的转场），所以动效
+     * 得自己做。做法是「目标页淡入 + 从下方 10dp 浮上来」：
+     *
+     * - 方向朝上而不是朝左右：底部导航在下面，内容从下方浮起与手指的方向一致；
+     *   左右滑会被误读成"可以横向划"，而这里根本划不动。
+     * - 220ms + 减速插值：再长显得拖，再短看不出是动画（人眼门槛约 150ms）。
+     * - ⚠️ 每次都要先 `cancel()`：连着点 tab 时上一段动画还在跑，新动画会从"当前
+     *   进度"接管，不 cancel 就是两段叠加 —— 表现为闪一下或卡在半透明状态。
+     * - ⚠️ 首次进入不播动画：onCreate 里那次调用只是确立初始页，
+     *   播了等于开屏抖一下。
+     */
     private fun showPage(page: Int) {
-        binding.pageHome.visibility = if (page == PAGE_HOME) View.VISIBLE else View.GONE
-        binding.pageSites.visibility = if (page == PAGE_SITES) View.VISIBLE else View.GONE
-        binding.pageMine.visibility = if (page == PAGE_MINE) View.VISIBLE else View.GONE
+        val target = when (page) {
+            PAGE_SITES -> binding.pageSites
+            PAGE_MINE -> binding.pageMine
+            else -> binding.pageHome
+        }
+        val first = currentPage == -1
+        if (!first && page == currentPage) return
+        currentPage = page
+
+        for (v in listOf(binding.pageHome, binding.pageSites, binding.pageMine)) {
+            if (v !== target) v.visibility = View.GONE
+        }
+
+        target.animate().cancel()
+        target.visibility = View.VISIBLE
+        if (first) {
+            target.alpha = 1f
+            target.translationY = 0f
+        } else {
+            target.alpha = 0f
+            target.translationY = 10f * resources.displayMetrics.density
+            target.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(220L)
+                .setInterpolator(android.view.animation.DecelerateInterpolator())
+                .start()
+        }
+
         if (page == PAGE_SITES) refresh()
         if (page == PAGE_HOME) bindHome()
+    }
+
+    // ------------------------------------------------------------------ 底部导航让位
+
+    /**
+     * 给浮在内容之上的底部导航腾出高度（v1.0.49）。
+     *
+     * 导航栏改成浮层之后，各列表必须自己留出它的高度，否则最后一行永远被压在导航栏
+     * 底下、点不到也看不清。
+     *
+     * ⚠️ 让位加在**列表自己的 paddingBottom** 上（rvVideos / rvSites 都是
+     * `clipToPadding="false"`）：加在外层容器上只会把内容整体上推，滚动时内容依旧
+     * 不会从玻璃底下穿过 —— 那样半透明材质等于白做。
+     *
+     * 高度**实测**而不是写死：BottomNavigationView 在 Material2 主题下是 56dp、
+     * 在 M3 样式下是 80dp，写死任何一个都会在另一套样式下算错
+     * （56 会盖住内容、80 会多出一大截空白）。
+     */
+    private fun applyNavClearance() {
+        binding.bottomNav.doOnLayout { nav ->
+            val gap = resources.getDimensionPixelSize(R.dimen.island_gap)
+            val pad = nav.height + gap * 2
+            browserHome.setBottomInset(pad)
+            binding.rvSites.setPadding(
+                binding.rvSites.paddingStart,
+                binding.rvSites.paddingTop,
+                binding.rvSites.paddingEnd,
+                pad
+            )
+            binding.mineContent.setPadding(
+                binding.mineContent.paddingStart,
+                binding.mineContent.paddingTop,
+                binding.mineContent.paddingEnd,
+                pad
+            )
+        }
     }
 
     // ------------------------------------------------------------------ 首页：默认站源
@@ -222,6 +434,57 @@ class MainActivity : AppCompatActivity() {
                 bindHome(force = true)
             }
             .show()
+    }
+
+    /** 合并重复站点（FN-6）：按 host 归一去重，结果如实报数 */
+    private fun dedupSites() {
+        val before = Store.sites(this).size
+        if (before < 2) {
+            toast("站点不足两条，无需合并")
+            return
+        }
+        val (kept, removed) = Store.dedupSites(this)
+        siteAdapter.clearHealth()
+        refresh()
+        bindHome(force = true)
+        if (removed == 0) toast("没有发现重复站点")
+        else toast(getString(R.string.site_dedup_done, kept, removed))
+    }
+
+    /**
+     * 站点体检（FN-6）：并发探活每个站点，把结果标在列表行上。
+     *
+     * 判据只有「连不连得上」——403/404 说明站是活的（只是不认我们的请求），
+     * 只有网络层失败（DNS / 连接超时 / TLS）才算挂。把 4xx 判成"不可访问"
+     * 会让一堆正常站被误标，那是比不体检更糟的结果。
+     */
+    private fun healthCheck() {
+        val list = Store.sites(this)
+        if (list.isEmpty()) {
+            toast(getString(R.string.site_empty_action))
+            return
+        }
+        siteAdapter.markChecking(list.map { it.key })
+        lifecycleScope.launch {
+            val results = withContext(Dispatchers.IO) {
+                list.map { s -> async { s.key to pingSite(s.baseUrl) } }.awaitAll()
+            }
+            siteAdapter.applyHealth(results.toMap())
+            val ok = results.count { it.second }
+            toast(getString(R.string.site_health_done, ok, results.size))
+        }
+    }
+
+    /** 单站探活：有响应就算活（HEAD 不行退 GET） */
+    private fun pingSite(baseUrl: String): Boolean {
+        if (baseUrl.isBlank()) return false
+        return runCatching {
+            healthClient.newCall(Request.Builder().url(baseUrl).head().build()).execute().close()
+            true
+        }.recoverCatching {
+            healthClient.newCall(Request.Builder().url(baseUrl).get().build()).execute().close()
+            true
+        }.getOrDefault(false)
     }
 
     // ------------------------------------------------------------------ 添加站点 / 播放

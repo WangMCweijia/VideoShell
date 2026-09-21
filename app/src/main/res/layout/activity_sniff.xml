@@ -2,7 +2,7 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg">
+    android:background="@drawable/bg_ambient">
 
     <WebView
         android:id="@+id/webView"
@@ -12,9 +12,13 @@
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
-        android:layout_height="52dp"
-        android:background="#99000000"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/island_gap"
+        android:layout_marginTop="@dimen/island_gap"
+        android:layout_marginEnd="@dimen/island_gap"
+        android:background="@drawable/bg_glass_dark_bar"
         android:gravity="center_vertical"
+        android:minHeight="@dimen/island_min_h"
         android:orientation="horizontal"
         android:paddingStart="4dp"
         android:paddingEnd="12dp">

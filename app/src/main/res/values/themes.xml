@@ -18,7 +18,7 @@
         <item name="colorError">@color/brand</item>
         <item name="android:windowBackground">@color/bg</item>
         <item name="android:statusBarColor">@color/bg</item>
-        <item name="android:navigationBarColor">@color/surface</item>
+        <item name="android:navigationBarColor">@color/bg_deep</item>
         <item name="android:textColorPrimary">@color/text_primary</item>
         <item name="android:textColorSecondary">@color/text_secondary</item>
         <item name="android:textColorHint">@color/text_hint</item>

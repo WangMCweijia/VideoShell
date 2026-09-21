@@ -30,13 +30,24 @@ import androidx.media3.common.VideoSize
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.recyclerview.widget.GridLayoutManager
+import android.app.AlertDialog
+import android.app.PictureInPictureParams
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.net.Uri
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.media3.common.C
+import androidx.media3.common.MimeTypes
+import androidx.media3.datasource.DefaultDataSource
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.videoshell.App
 import com.videoshell.R
 import com.videoshell.data.HistEntry
 import com.videoshell.data.Library
@@ -107,6 +118,18 @@ class PlayerActivity : AppCompatActivity() {
          * 配合 [STALL_MS] 看门狗：慢而能动的流不会被误判，真的取不到数据的会很快暴露。
          */
         private const val MEDIA_RETRIES = 4
+
+        /**
+         * 画中画窗口的纵横比硬边界（FN-3）。
+         *
+         * 系统对 PiP 窗口有硬性区间（约 9:21.5 ~ 21.5:9），超出会直接抛
+         * `enterPictureInPictureMode: Aspect ratio is too extreme (must be between
+         * 0.418410 and 2.390000)` —— 整块功能就废了。这里取比系统边界再内收一点的
+         * 值做夹取：竖屏短剧、超宽电影、带旋转角度的视频都可能落到区间外，
+         * 宁可口径略有出入，也不要让功能直接失败。
+         */
+        private const val PIP_MIN_RATIO = 0.42f
+        private const val PIP_MAX_RATIO = 2.38f
 
         fun intent(
             context: Context,
@@ -191,6 +214,17 @@ class PlayerActivity : AppCompatActivity() {
     private val hideHud = Runnable { binding.tvHud.visibility = View.GONE }
     private val autoHide = Runnable { if (!locked) setBarsVisible(false) }
 
+    /**
+     * 解锁键在锁屏后的停留时长。
+     *
+     * 锁屏是为了"防误触"，而解锁键贴在右中 —— 它常驻就等于在这个位置又开了一个
+     * 44dp 的误触区，还压住画面。所以给个短停留，之后自己退场；想看就点一下屏幕。
+     */
+    private val unlockStayMs = 3_000L
+
+    /** 解锁键的自动退场任务（保持单实例，便于 removeCallbacks 取消） */
+    private val hideUnlock = Runnable { if (locked) binding.ivUnlock.visibility = View.GONE }
+
     /** 画面比例档位 */
     private val ratioModes = listOf(
         AspectRatioFrameLayout.RESIZE_MODE_FIT to "自适应",
@@ -203,6 +237,58 @@ class PlayerActivity : AppCompatActivity() {
 
     private val audio by lazy { getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     private val episodeAdapter = EpisodeAdapter { index, _ -> playEpisode(index) }
+
+    /** 当前已加载的外挂字幕（content://，FN-5）；null = 无 */
+    private var subtitleUri: Uri? = null
+
+    /** 是否需要保留媒体通知：播放自然结束且没下一集时置否，及时撤掉通知（FN-4） */
+    private var keepNotification = true
+
+    /** 最近一次画面尺寸，用于画中画窗口比例（FN-3） */
+    private var lastVideoSize: VideoSize? = null
+
+    /** 字幕文件选择器（FN-5）：选 .srt / .vtt 后加载为外挂字幕轨 */
+    private val subtitlePicker =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) {
+                runCatching {
+                    contentResolver.takePersistableUriPermission(
+                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+                applySubtitle(uri)
+            }
+        }
+
+    /** 投屏设备选择（新增功能）：投成功后本机必须停下，否则手机和电视会同时出声 */
+    private val castLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+            if (res.resultCode == RESULT_OK) {
+                player?.pause()
+                showHud("已投屏到电视，本机已暂停")
+            }
+        }
+
+    /** 监听媒体通知上的「播放 / 暂停 / 停止」（FN-4），由 [MediaNotificationService] 发出来 */
+    private val notifReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context?, intent: Intent?) {
+            when (intent?.action) {
+                MediaNotificationService.ACTION_PLAY -> {
+                    player?.play()
+                    scheduleHide()
+                }
+                MediaNotificationService.ACTION_PAUSE -> player?.pause()
+                MediaNotificationService.ACTION_STOP -> {
+                    player?.pause()
+                    keepNotification = false
+                    MediaNotificationService.stop(this@PlayerActivity)
+                    savePosition()
+                    recordHistory()
+                    finish()
+                }
+            }
+        }
+    }
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -239,6 +325,7 @@ class PlayerActivity : AppCompatActivity() {
         setupPlayer()
         setupGestures()
         setupEpisodes()
+        registerNotifReceiver()
 
         val url = intent.getStringExtra(EXTRA_URL).orEmpty()
         if (url.isNotBlank()) {
@@ -295,7 +382,8 @@ class PlayerActivity : AppCompatActivity() {
     )
 
     /** 用 margin（而不是 padding）让位的控件：它们高度固定，吃 padding 会把内容挤扁 */
-    private fun marginViews() = listOf(binding.episodePanel, binding.diagPanel, binding.ivUnlock)
+    private fun marginViews() =
+        listOf(binding.episodePanel, binding.diagPanel, binding.ivLock, binding.ivUnlock)
 
     /**
      * 把「挖孔 + 系统栏」的安全距离补给覆盖层，而不是缩画面。
@@ -435,6 +523,8 @@ class PlayerActivity : AppCompatActivity() {
         binding.ivRotate.setOnClickListener { toggleOrientation() }
         binding.ivLock.setOnClickListener { setLocked(true) }
         binding.ivUnlock.setOnClickListener { setLocked(false) }
+        // 锁定时唯一还活着的手势：点屏幕唤出/收起解锁键（解锁键会自己退场，见 showUnlockBriefly）
+        binding.gesture.onLockedTap = { toggleUnlockBriefly() }
         binding.ivMute.setOnClickListener { toggleMute() }
         binding.ivResize.setOnClickListener { cycleRatio() }
         binding.ivPrev.setOnClickListener { stepEpisode(-1) }
@@ -444,6 +534,22 @@ class PlayerActivity : AppCompatActivity() {
         binding.ivPlay.setOnClickListener { togglePlay() }
         binding.tvSpeed.text = "1.0x"
         binding.tvSpeed.setOnClickListener { switchSpeed() }
+
+        // ---- 新增入口：画中画 / 字幕 / 投屏 / 分享（FN-3 / FN-5 / 投屏 / FN-9）----
+        binding.ivPip.setOnClickListener { enterPip() }
+        binding.ivSubtitle.setOnClickListener { pickSubtitle() }
+        binding.ivCast.setOnClickListener {
+            if (currentUrl.isBlank()) {
+                toast("还没有可投屏的播放地址")
+                return@setOnClickListener
+            }
+            castLauncher.launch(CastActivity.intent(this, currentUrl, currentTitle, headers))
+        }
+        binding.ivShare.setOnClickListener { showShare() }
+
+        // 底栏按钮行：横屏合并成一行 / 竖屏拆成两行。
+        // 这里排一次决定首屏；旋转后由 onConfigurationChanged 再排（Activity 不重建）。
+        applyBarRows()
 
         binding.seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar, progress: Int, fromUser: Boolean) {
@@ -502,10 +608,64 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * 竖屏时位于底栏「工具行」的成员；横屏会被并进主行。
+     *
+     * ⚠️ 改 `activity_player.xml` 里 `btnRowTool` 的成员时**必须同步这里** ——
+     * 否则旋转回竖屏时，它不会被搬回第二行（表现为横屏布局残留）。
+     */
+    private val TOOL_ROW_IDS = intArrayOf(
+        R.id.tvSpeed, R.id.btnEpisodes, R.id.ivMute, R.id.ivResize, R.id.ivRotate
+    )
+
+    /**
+     * 按屏幕方向重排底栏按钮行：**横屏一行 / 竖屏两行**。
+     *
+     * 为什么不一律一行：竖屏 360dp 去掉左右 padding 只剩 340dp，而 10 枚按钮
+     * （44dp 起）并排要 440dp+ —— 物理上塞不下。硬挤会把点击区压到 34dp 以下，
+     * 比"多一行"严重得多。横屏 640dp+ 才放得开，所以只在横屏合并。
+     *
+     * ⚠️ PlayerActivity 在 manifest 里声明了 `configChanges=orientation|screenSize`
+     * ⇒ 旋转**不会重建 Activity**，只在 onCreate 里排一次的话转一次屏就错位，
+     * 必须靠 [onConfigurationChanged] 再排。
+     */
+    private fun applyBarRows() {
+        val land = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val main = binding.btnRowMain
+        val tool = binding.btnRowTool
+        if (land) {
+            if (tool.childCount > 0) {
+                val kids = (0 until tool.childCount).map { tool.getChildAt(it) }
+                tool.removeAllViews()
+                kids.forEach { main.addView(it) }
+            }
+            tool.visibility = View.GONE
+        } else {
+            // 复原：按原顺序把它们搬回第二行（本来就在第二行时是空操作）
+            val back = (0 until main.childCount)
+                .map { main.getChildAt(it) }
+                .filter { it.id in TOOL_ROW_IDS }
+            back.forEach {
+                main.removeView(it)
+                tool.addView(it)
+            }
+            tool.visibility = View.VISIBLE
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        applyBarRows()
+    }
+
     private fun setBarsVisible(visible: Boolean) {
         controllerVisible = visible
         binding.topBar.visibility = if (visible) View.VISIBLE else View.GONE
         binding.bottomBar.visibility = if (visible) View.VISIBLE else View.GONE
+        // 悬浮锁定键跟着控制条一起显隐。它是独立图层、贴在右中，而那块区域正好是
+        // 「右半屏上下滑调音量」的手势区 —— 常显会把它从手势层上面挡掉，用户只会
+        // 觉得"这一段划不动"，联想不到是按钮在挡。锁定后本键隐去、ivUnlock 顶上（同位同形）。
+        binding.ivLock.visibility = if (visible && !locked) View.VISIBLE else View.GONE
         binding.gesture.bottomBlockHeight =
             if (visible && binding.bottomBar.height > 0) binding.bottomBar.height else 0
         if (!visible) {
@@ -519,15 +679,40 @@ class PlayerActivity : AppCompatActivity() {
         if (player?.isPlaying == true && !locked) handler.postDelayed(autoHide, AUTO_HIDE_MS)
     }
 
+    /**
+     * 解锁键显隐（锁定状态下才用）。
+     *
+     * 旧实现（v1.0.46 及以前）锁屏后把 ivUnlock 设为 VISIBLE 就再没人管它了 ——
+     * 结果是解锁键**永久压在画面右侧正中**，既碍眼又在那块位置留了个误触区。
+     * 现在的规则：出现 → 停 [unlockStayMs] → 自己退场；点屏幕可再唤出。
+     */
+    private fun showUnlockBriefly() {
+        binding.ivUnlock.visibility = View.VISIBLE
+        handler.removeCallbacks(hideUnlock)
+        handler.postDelayed(hideUnlock, unlockStayMs)
+    }
+
+    /** 锁定时的单击：解锁键在场就收起，不在场就唤出 */
+    private fun toggleUnlockBriefly() {
+        if (binding.ivUnlock.visibility == View.VISIBLE) {
+            handler.removeCallbacks(hideUnlock)
+            binding.ivUnlock.visibility = View.GONE
+        } else {
+            showUnlockBriefly()
+        }
+    }
+
     private fun setLocked(v: Boolean) {
         locked = v
         binding.gesture.locked = v
-        binding.ivUnlock.visibility = if (v) View.VISIBLE else View.GONE
+        handler.removeCallbacks(hideUnlock)
         if (v) {
             setBarsVisible(false)
-            binding.ivUnlock.visibility = View.VISIBLE
+            // 顺序要紧：setBarsVisible(false) 会把 ivLock 收掉，之后才轮到 ivUnlock 登场
+            showUnlockBriefly()
             showHud(getString(R.string.hud_locked))
         } else {
+            binding.ivUnlock.visibility = View.GONE
             setBarsVisible(true)
             scheduleHide()
         }
@@ -600,14 +785,19 @@ class PlayerActivity : AppCompatActivity() {
                         appliedResume = 0L
                     }
                 }
-                if (playbackState == Player.STATE_ENDED && PlayQueue.hasNext() &&
-                    sp.getBoolean(KEY_AUTO_NEXT, true)
-                ) {
-                    playEpisode(PlayQueue.episodeIndex + 1)
+                if (playbackState == Player.STATE_ENDED) {
+                    if (PlayQueue.hasNext() && sp.getBoolean(KEY_AUTO_NEXT, true)) {
+                        playEpisode(PlayQueue.episodeIndex + 1)
+                    } else {
+                        // 自然结束且无下一集：通知没用了，及时撤掉
+                        keepNotification = false
+                        syncMediaNotification()
+                    }
                 }
             }
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
+                lastVideoSize = videoSize
                 applyResLabel(videoSize)
                 applyVideoOrientation(videoSize)
             }
@@ -617,6 +807,7 @@ class PlayerActivity : AppCompatActivity() {
                     if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play
                 )
                 scheduleHide()
+                syncMediaNotification()
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -648,26 +839,17 @@ class PlayerActivity : AppCompatActivity() {
         stallSince = 0L
 
         readyLogged = false
+        keepNotification = true
+        // 上一集的画面尺寸不能留给下一集：PiP 会拿它当纵横比，脏值会把窗口比例带偏。
+        lastVideoSize = null
         PlayLog.newSession()
         PlayLog.record("▶ 开始播放 ${shorten(url)}" + if (headers.isEmpty()) "" else "  头=${headers.keys.joinToString(",")}")
 
-        // ⚠️ 数据源用 OkHttp，**不用** ExoPlayer 自带的 DefaultHttpDataSource。
-        // 后者底层是 HttpURLConnection，与 App 其它部分（自检/解析/嗅探都用 OkHttp）
-        // 是两套网络栈：DNS 顺序、连接池、超时重试、Cookie 全不一样 —— 这正是
-        // 「自检全绿、播放打不开」唯一说得通的解释。换成一套之后两边不复存在差异。
-        val factory = OkHttpDataSourceFactory(Http.mediaClient, Http.UA, browserHeaders())
-        val ds = HlsFixDataSourceFactory(factory)
+        // 数据源在 [buildSource] 里统一构造：http(s)→OkHttp+HlsFix（与解析/嗅探同栈，且保留 HLS 规范化），
+        // content/file→系统数据源（外挂字幕是 content://，必须由它能读）。
         val policy = DefaultLoadErrorHandlingPolicy(if (fromRetry) MEDIA_RETRIES + 2 else MEDIA_RETRIES)
 
-        val source = if (Media.isHls(url)) {
-            HlsMediaSource.Factory(ds)
-                .setLoadErrorHandlingPolicy(policy)
-                .createMediaSource(MediaItem.fromUri(url))
-        } else {
-            DefaultMediaSourceFactory(ds)
-                .setLoadErrorHandlingPolicy(policy)
-                .createMediaSource(MediaItem.fromUri(url))
-        }
+        val source = buildSource(url, subtitleUri, policy)
 
         val resume = if (fromRetry) 0L else resumePosition(activeKey())
         p.setMediaSource(source)
@@ -810,7 +992,8 @@ class PlayerActivity : AppCompatActivity() {
         }
         binding.btnEpisodes.visibility = View.VISIBLE
         binding.tvPanelTitle.text = (PlayQueue.title.ifBlank { "选集" }) + " · 共 ${eps.size} 集"
-        binding.rvEpisodes.layoutManager = GridLayoutManager(this, if (isLandscape()) 8 else 5)
+        // 列数不在这里定：submitEpisodes() 会按整列名字算出合适的列数并重设
+        // layoutManager（综艺长名 5→3 列）。这里只挂 adapter，避免两处各写一份列数。
         binding.rvEpisodes.adapter = episodeAdapter
         // 显示顺序（正序/倒序）与详情页共用同一个偏好；选中态永远是**组内原始序号**
         binding.tvOrder.text = getString(if (Store.episodeDesc(this)) R.string.order_desc else R.string.order_asc)
@@ -828,9 +1011,18 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
-    /** 按当前偏好提交分集列表，并把正在播的那一集标出来 */
+    /**
+     * 按当前偏好提交分集列表，并把正在播的那一集标出来。
+     *
+     * v1.0.49：列数与「是否两行」走与详情页**同一个**决策函数
+     * （EpisodeCell.plan，按整列名字算）—— 同一个剧在详情页和播放页必须长得一样，
+     * 各写一套（以前这里是写死的 `if (isLandscape()) 8 else 5`）迟早会不一致。
+     */
     private fun submitEpisodes() {
-        episodeAdapter.submit(PlayQueue.episodes(), Store.episodeDesc(this))
+        val eps = PlayQueue.episodes()
+        val plan = com.videoshell.util.EpisodeCell.plan(eps, isLandscape())
+        binding.rvEpisodes.layoutManager = GridLayoutManager(this, plan.cols)
+        episodeAdapter.submit(eps, Store.episodeDesc(this), plan.twoLine)
         episodeAdapter.select(PlayQueue.episodeIndex)
     }
 
@@ -1255,6 +1447,206 @@ class PlayerActivity : AppCompatActivity() {
         )
     }
 
+    // ------------------------------------------------------------------ 新增功能：画中画 / 字幕 / 投屏 / 分享 / 后台通知
+
+    /** 后台播放开关（FN-4），与「我的」页设置同源 */
+    private fun bgPlayEnabled(): Boolean = sp.getBoolean(App.KEY_BG_PLAY, false)
+
+    /**
+     * 媒体通知同步（FN-4）。
+     * 后台播放关、或播放已结束（keepNotification=false）→ 撤掉通知；
+     * 否则按当前播放态启动/刷新前台通知（图标随播放/暂停翻转）。
+     */
+    private fun syncMediaNotification() {
+        if (!bgPlayEnabled() || !keepNotification) {
+            MediaNotificationService.stop(this)
+            return
+        }
+        MediaNotificationService.start(this, currentTitle, player?.isPlaying == true)
+    }
+
+    private fun registerNotifReceiver() {
+        val filter = IntentFilter().apply {
+            addAction(MediaNotificationService.ACTION_PLAY)
+            addAction(MediaNotificationService.ACTION_PAUSE)
+            addAction(MediaNotificationService.ACTION_STOP)
+        }
+        ContextCompat.registerReceiver(
+            this, notifReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+    }
+
+    // ------------------------------------------------------------------ 画中画（FN-3）
+
+    /** 进入画中画：显式按钮 与 离开页面自动进入 共用 */
+    private fun enterPip() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            toast("系统版本过低，不支持画中画")
+            return
+        }
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
+            toast("当前设备不支持画中画")
+            return
+        }
+        try {
+            val params = PictureInPictureParams.Builder().apply {
+                pipAspectRatio()?.let { setAspectRatio(it) }
+            }.build()
+            val ok = enterPictureInPictureMode(params)
+            // 返回 false = 系统没让进（分屏、来电等场景），别装作成功
+            if (!ok) toast("进入画中画失败：当前状态不允许")
+        } catch (e: Exception) {
+            toast("进入画中画失败：${e.message}")
+        }
+    }
+
+    /**
+     * 画中画窗口的纵横比。
+     *
+     * ⚠️ 不能直接把视频尺寸丢给系统：系统对 PiP 窗口有硬性区间（0.418410 ~ 2.390000），
+     * 越界会抛「Aspect ratio is too extreme」并让整个功能失败（竖屏短剧、超宽画幅、
+     * 带旋转角度的流都可能越界）。这里统一夹到安全区间内。
+     *
+     * 拿不到有效尺寸时返回 null —— 不设纵横比，交给系统用默认值，而不是瞎猜一个。
+     */
+    private fun pipAspectRatio(): android.util.Rational? {
+        val vs = lastVideoSize ?: return null
+        if (vs.width <= 0 || vs.height <= 0) return null
+        val raw = vs.width.toFloat() / vs.height.toFloat()
+        if (!raw.isFinite() || raw <= 0f) return null
+        val safe = raw.coerceIn(PIP_MIN_RATIO, PIP_MAX_RATIO)
+        // Rational 只收整数：乘 1000 保留三位精度足够
+        return android.util.Rational((safe * 1000f).roundToInt(), 1000)
+    }
+
+    /** 用户主动离开（按 Home / 切到多任务）且正在播放、未开后台播放 ⇒ 自动进入画中画 */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (bgPlayEnabled()) return   // 后台播放场景交给媒体通知 + 音频续播
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            player?.isPlaying == true &&
+            packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+        ) {
+            enterPip()
+        }
+    }
+
+    /** 进出画中画：小窗里不该显示这套自定义控制条 */
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean, newConfig: Configuration
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        setBarsVisible(!isInPictureInPictureMode)
+    }
+
+    // ------------------------------------------------------------------ 外挂字幕（FN-5）
+
+    private fun pickSubtitle() {
+        subtitlePicker.launch(
+            arrayOf(
+                "application/x-subrip",
+                "text/vtt",
+                "text/plain",
+                "application/octet-stream"
+            )
+        )
+    }
+
+    /** 重新以「当前进度」为起点重建媒体源并加载字幕（不会从头播） */
+    private fun applySubtitle(uri: Uri) {
+        val p = player ?: return
+        if (currentUrl.isBlank()) {
+            toast(getString(R.string.subtitle_none))
+            return
+        }
+        val pos = p.currentPosition
+        subtitleUri = uri
+        val policy = DefaultLoadErrorHandlingPolicy(MEDIA_RETRIES)
+        val source = buildSource(currentUrl, uri, policy)
+        p.setMediaSource(source)
+        p.seekTo(pos)
+        p.prepare()
+        p.playWhenReady = true
+        binding.ivPlay.setImageResource(R.drawable.ic_pause)
+        toast(getString(R.string.subtitle_loaded))
+    }
+
+    private fun subtitleMime(uri: Uri): String {
+        val name = uri.lastPathSegment ?: ""
+        return if (name.endsWith(".vtt", true)) MimeTypes.TEXT_VTT
+        else MimeTypes.APPLICATION_SUBRIP
+    }
+
+    // ------------------------------------------------------------------ 媒体源构造（含字幕）
+
+    private fun buildMediaItem(url: String, sub: Uri?): MediaItem {
+        val b = MediaItem.fromUri(url).buildUpon()
+        if (sub != null) {
+            b.setSubtitleConfigurations(
+                listOf(
+                    MediaItem.SubtitleConfiguration.Builder(sub)
+                        .setMimeType(subtitleMime(sub))
+                        .setLanguage("zh")
+                        .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                        .build()
+                )
+            )
+        }
+        return b.build()
+    }
+
+    private fun buildSource(
+        url: String, sub: Uri?, policy: DefaultLoadErrorHandlingPolicy
+    ): androidx.media3.exoplayer.source.MediaSource {
+        val item = buildMediaItem(url, sub)
+        val factory = OkHttpDataSourceFactory(Http.mediaClient, Http.UA, browserHeaders())
+        // DefaultDataSource 按协议分派：http(s)→OkHttp+HlsFix（视频），content/file→系统源（字幕）。
+        // 用 DefaultMediaSourceFactory（而非直接 HlsMediaSource.Factory）：它对 HLS 仍走 HlsMediaSource，
+        // 但会**额外把 MediaItem 上的外挂字幕轨合并进来**——直连 HlsMediaSource.Factory 不会做这一步。
+        val ds = DefaultDataSource.Factory(this, HlsFixDataSourceFactory(factory))
+        return DefaultMediaSourceFactory(ds)
+            .setLoadErrorHandlingPolicy(policy)
+            .createMediaSource(item)
+    }
+
+    // ------------------------------------------------------------------ 分享（FN-9）
+
+    private fun showShare() {
+        if (currentUrl.isBlank()) {
+            toast("还没有可分享的播放地址")
+            return
+        }
+        val items = arrayOf(
+            getString(R.string.share_copy_url),
+            getString(R.string.share_video)
+        )
+        AlertDialog.Builder(this)
+            .setTitle(R.string.share)
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> copyPlayUrl()
+                    1 -> shareVideo()
+                }
+            }
+            .show()
+    }
+
+    private fun copyPlayUrl() {
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("播放地址", currentUrl))
+        toast(getString(R.string.share_copied))
+    }
+
+    private fun shareVideo() {
+        val text = if (fallbackPage.isNotBlank()) "$currentTitle\n$fallbackPage"
+        else "$currentTitle\n$currentUrl"
+        val i = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        startActivity(Intent.createChooser(i, getString(R.string.share_video)))
+    }
+
     // ------------------------------------------------------------------ 生命周期
 
     override fun onStart() {
@@ -1273,16 +1665,25 @@ class PlayerActivity : AppCompatActivity() {
         recordHistory()
         handler.removeCallbacks(ticker)
         handler.removeCallbacks(autoHide)
-        player?.let {
-            pausedByLifecycle = it.isPlaying
-            it.pause()
+        if (bgPlayEnabled()) {
+            // 后台播放：不暂停，继续放；确保媒体通知在场（通知栏可控制、系统不易杀）
+            syncMediaNotification()
+        } else {
+            player?.let {
+                pausedByLifecycle = it.isPlaying
+                it.pause()
+            }
+            MediaNotificationService.stop(this)
         }
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(hideHud)
         handler.removeCallbacks(autoHide)
+        handler.removeCallbacks(hideUnlock)
         handler.removeCallbacks(ticker)
+        runCatching { unregisterReceiver(notifReceiver) }
+        MediaNotificationService.stop(this)
         player?.release()
         player = null
         binding.playerView.player = null

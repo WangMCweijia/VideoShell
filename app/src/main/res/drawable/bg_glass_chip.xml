@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  磨砂玻璃 · 小圆片。
+
+  刻意只用一个 <shape>（gradient + stroke 同时写在一个形状里）：
+  chip 尺寸只有 28~30dp 高，再叠高光层纯属浪费 —— 那一层在 30dp 里看不出来，
+  却会让每枚 chip 都多一次 draw。小控件用单层，大面板才用三层（见 bg_glass）。
+
+  选中态 = 品牌色实心（不玻璃化）：选中是**状态**，不该再跟背景玩半透明，
+  否则在浅色光斑上选中态会淡到看不见。文字色由 @color/chip_text 同步切换。
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item android:state_selected="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/brand" />
+            <corners android:radius="@dimen/radius_chip" />
+        </shape>
+    </item>
+
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/glass_pressed" />
+            <corners android:radius="@dimen/radius_chip" />
+            <stroke
+                android:width="@dimen/glass_stroke_w"
+                android:color="@color/glass_stroke" />
+        </shape>
+    </item>
+
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="270"
+                android:endColor="@color/glass_fill_2"
+                android:startColor="@color/glass_fill"
+                android:type="linear" />
+            <corners android:radius="@dimen/radius_chip" />
+            <stroke
+                android:width="@dimen/glass_stroke_w"
+                android:color="@color/glass_stroke" />
+        </shape>
+    </item>
+</selector>

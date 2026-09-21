@@ -1,6 +1,47 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="#CC171A21" />
-    <corners android:radius="12dp" />
-    <stroke android:width="1dp" android:color="#33FFFFFF" />
-</shape>
+<!--
+  深色浮层底（播放页面板 / 嗅探浮窗 / 校准引导卡）。
+
+  ⚠️ 与 bg_surface 相反，这里**不能跟随主题**：它压在视频画面或网页上，
+     不管系统是亮是暗都得是深色，否则内容区（白字）会失去对比。
+     v1.0.48 起升级为深色磨砂玻璃（顶部高光 + 1px 描边），
+     色值固定，理由见 bg_glass_dark_bar 的注释。
+  ⚠️ 用它做容器的页面，里面的文字必须写**固定浅色**（#FFF / #E6FFFFFF），
+     不能写 @color/text_primary —— 亮色模式下 text_primary 是深色，压在深玻璃上读不出来。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/radius_lg" />
+            <gradient
+                android:angle="270"
+                android:endColor="#B30E1117"
+                android:startColor="#D912161C"
+                android:type="linear" />
+        </shape>
+    </item>
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/radius_lg" />
+            <gradient
+                android:angle="270"
+                android:centerColor="#00000000"
+                android:centerY="0.2"
+                android:endColor="#00000000"
+                android:startColor="#1FFFFFFF"
+                android:type="linear" />
+        </shape>
+    </item>
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/radius_lg" />
+            <solid android:color="#00000000" />
+            <stroke
+                android:width="@dimen/glass_stroke_w"
+                android:color="#26FFFFFF" />
+        </shape>
+    </item>
+</layer-list>

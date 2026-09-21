@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="@color/transparent_scrim" />
-    <corners android:radius="4dp" />
+<!--
+  小徽章（评分 / 备注 / 模式 / 类型）。压在**海报图**上，所以不能跟随主题：
+  固定 70% 黑 + 白字，任何封面底图上都读得出来。
+  ⚠️ 不要把它改成玻璃片：它只有 11sp 字那么大，半透明会让字陷进封面细节里。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#B3000000" />
+    <corners android:radius="@dimen/radius_xs" />
+    <stroke
+        android:width="@dimen/glass_stroke_w"
+        android:color="#33FFFFFF" />
 </shape>

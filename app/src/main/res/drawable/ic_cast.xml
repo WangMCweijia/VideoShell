@@ -1,0 +1,34 @@
+<!-- 投屏（DLNA）。
+     机身外框在左下角留口：左边从 y=10.8 断开、下边从 x=13 断开，
+     缺口处画三道同心四分之一圆弧（半径 3 / 6 / 9，圆心都在 (3,20)），
+     弧的右端 x=12 落在下边断口 x=13 之内，相接处不会重叠。
+     三道弧半径按等差取，缩到 22dp 后仍分得开。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M3,10.8V5a1,1 0 0 1 1,-1h16a1,1 0 0 1 1,1v14a1,1 0 0 1 -1,1H13" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M3,17 A3,3 0 0 1 6,20" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M3,14 A6,6 0 0 1 9,20" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M3,11 A9,9 0 0 1 12,20" />
+</vector>

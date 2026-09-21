@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 播放页选集/诊断面板、嗅探页底部浮窗（固定深色玻璃，理由见 bg_glass_dark_bar） -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/radius_xl" />
+            <gradient
+                android:angle="270"
+                android:endColor="#B30E1117"
+                android:startColor="#D912161C"
+                android:type="linear" />
+        </shape>
+    </item>
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/radius_xl" />
+            <gradient
+                android:angle="270"
+                android:centerColor="#00000000"
+                android:centerY="0.2"
+                android:endColor="#00000000"
+                android:startColor="#1FFFFFFF"
+                android:type="linear" />
+        </shape>
+    </item>
+
+    <item android:drawable="@drawable/glass_grain" />
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/radius_xl" />
+            <solid android:color="#00000000" />
+            <stroke
+                android:width="@dimen/glass_stroke_w"
+                android:color="#26FFFFFF" />
+        </shape>
+    </item>
+</layer-list>

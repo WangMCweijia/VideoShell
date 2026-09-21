@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 播放页悬浮锁定键的圆形玻璃底（固定深色，理由见 bg_glass_dark_bar） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <gradient
+        android:angle="270"
+        android:endColor="#990E1117"
+        android:startColor="#B312161C"
+        android:type="linear" />
+    <stroke
+        android:width="@dimen/glass_stroke_w"
+        android:color="#26FFFFFF" />
+</shape>

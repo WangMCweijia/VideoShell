@@ -76,11 +76,29 @@ object EpisodeOrder {
      * ⚠️ 以后要加形状家族或数字写法（罗马数字 / `第N话` 之外的说法），**只改这一处** ——
      * `EpisodeOrder` / `SsrPayload` / `YeguoMap` 三个调用方会一起跟上。
      */
-    fun noInTitle(title: String): Int? {
-        val raw = EP_MARKER.find(title)?.groupValues?.getOrNull(1)?.trim().orEmpty()
+    fun noInTitle(title: String): Int? = markerInTitle(title)?.no
+
+    /** [markerInTitle] 的命中结果 */
+    data class EpMark(val no: Int, val unit: String, val range: IntRange)
+
+    /**
+     * 「第N{集话期回部}」的**期号、单位字、命中区间**；取不到返回 null。
+     *
+     * 与 [noInTitle] 共用同一份正则，只是多给两样东西 —— 调用方如果只关心序号，
+     * 用 [noInTitle]；如果还要把「期」这个单位字画到界面上、或者要把这一段从
+     * 集名里剪掉（分集格子的主副两行），用这里。**不要再写第二份正则**：
+     * 它以前散成三份，三份的差别就是三类站点各错一格的来源。
+     */
+    fun markerInTitle(title: String): EpMark? {
+        val m = EP_MARKER.find(title) ?: return null
+        val raw = m.groupValues[1].trim()
         if (raw.isEmpty()) return null
-        raw.toIntOrNull()?.let { return it }
-        // 中文数字：处理到百位（`二十一` / `十二` / `一百零八` 这一档够用 —— 集数不会更大）
+        val no = raw.toIntOrNull() ?: cnNumber(raw) ?: return null
+        return EpMark(no, m.groupValues[2], m.range)
+    }
+
+    /** 中文数字 → Int（处理到百位：`二十一` / `十二` / `一百零八` 这一档够用 —— 集数不会更大） */
+    private fun cnNumber(raw: String): Int? {
         var total = 0
         var cur = 0
         var seen = false
@@ -94,9 +112,14 @@ object EpisodeOrder {
         return if (seen) total + cur else null
     }
 
-    /** 「第{数字}{集话期回部}」的形状；数字部分是阿拉伯或中文，两种写法共用这一条 */
+    /**
+     * 「第{数字}{集话期回部}」的形状；数字部分是阿拉伯或中文，两种写法共用这一条。
+     *
+     * ⚠️ 第二个捕获组（单位字）是 v1.0.49 加的，[noInTitle] 用不到它但不影响匹配结果 ——
+     * 加捕获组不会改变 `find` 找哪一段，所以既有断言一条都没动。
+     */
     private val EP_MARKER =
-        Regex("第\\s*([0-9]+|[零一二两三四五六七八九十百]{1,4})\\s*[集话期回部]")
+        Regex("第\\s*([0-9]+|[零一二两三四五六七八九十百]{1,4})\\s*([集话期回部])")
 
     private fun lastNumber(s: String): Int? {
         var v: Int? = null

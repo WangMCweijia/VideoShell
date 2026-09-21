@@ -1,5 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  自适应图标前景层（API 26+）。
+
+  几何依据（不要随手改坐标）：
+  - 画布 108dp；系统只保证内圈 72dp 可见，其中直径 66dp 的圆是「安全区」（任何遮罩下都可见）。
+  - 因此内容要落在以 (54,54) 为心、半径 33 的圆里，并且**尽量填满**它 —— 填不满就会显得
+    比别人小一圈（上一版三角只占 48x48，且是上尖的三角形，视觉质量很低）。
+  - 白色圆角方块 42x42（33,33 → 75,75）：四角到中心 29.7 < 33 ✔ 安全区内且接近填满。
+  - 播放三角居中于方块，不是居中于画布：向右微移，让重心落在方块中心（视觉居中）。
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp" android:height="108dp"
-    android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#FFFF3B30" android:pathData="M44,36 L74,54 L44,72 Z" />
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 白色圆角方块 = 屏幕 / 「壳」 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M45,33 H63 A12,12 0 0 1 75,45 V63 A12,12 0 0 1 63,75 H45 A12,12 0 0 1 33,63 V45 A12,12 0 0 1 45,33 Z" />
+
+    <!-- 播放三角：用描边 + 圆角连接把尖角磨圆，比纯三角更亲和 -->
+    <path
+        android:fillColor="#FF2352CC"
+        android:strokeColor="#FF2352CC"
+        android:strokeWidth="5"
+        android:strokeLineJoin="round"
+        android:strokeLineCap="round"
+        android:pathData="M44,41 L68,54 L44,67 Z" />
 </vector>

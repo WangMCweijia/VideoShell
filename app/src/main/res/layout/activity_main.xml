@@ -3,7 +3,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg"
+    android:background="@drawable/bg_ambient"
     android:orientation="vertical">
 
     <!-- 原「图标 + 视频壳 + 版本号」这一行已移除（v1.0.26）：
@@ -52,12 +52,12 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="14dp"
-                android:layout_marginTop="2dp"
-                android:layout_marginEnd="14dp"
+                android:layout_marginStart="@dimen/island_gap"
+                android:layout_marginTop="@dimen/space_md"
+                android:layout_marginEnd="@dimen/island_gap"
                 android:background="@drawable/bg_surface"
                 android:orientation="vertical"
-                android:padding="14dp">
+                android:padding="@dimen/island_pad_h">
 
                 <EditText
                     android:id="@+id/inputUrl"
@@ -163,6 +163,67 @@
                 android:textColor="@color/text_hint"
                 android:textSize="12sp" />
 
+            <!-- 站点管理（FN-6）：导入 / 导出 / 合并重复 / 体检 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnImport"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="0dp"
+                    android:layout_height="38dp"
+                    android:layout_weight="1"
+                    android:minWidth="0dp"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp"
+                    android:text="@string/site_import"
+                    android:textColor="@color/brand"
+                    android:textSize="12sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnExport"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="0dp"
+                    android:layout_height="38dp"
+                    android:layout_weight="1"
+                    android:minWidth="0dp"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp"
+                    android:text="@string/site_export"
+                    android:textColor="@color/brand"
+                    android:textSize="12sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnDedup"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="0dp"
+                    android:layout_height="38dp"
+                    android:layout_weight="1"
+                    android:minWidth="0dp"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp"
+                    android:text="@string/site_dedup"
+                    android:textColor="@color/brand"
+                    android:textSize="12sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnHealth"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="0dp"
+                    android:layout_height="38dp"
+                    android:layout_weight="1"
+                    android:minWidth="0dp"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp"
+                    android:text="@string/site_health"
+                    android:textColor="@color/brand"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
             <FrameLayout
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
@@ -200,6 +261,7 @@
             android:visibility="gone">
 
             <LinearLayout
+                android:id="@+id/mineContent"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
@@ -370,6 +432,33 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content" />
                     </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="0.5dp"
+                        android:background="@color/line" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="?android:attr/selectableItemBackground"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:padding="14dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/bg_play"
+                            android:textColor="@color/text_primary"
+                            android:textSize="14sp" />
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/swBgPlay"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
                 </LinearLayout>
 
                 <TextView
@@ -393,21 +482,50 @@
                         android:layout_height="wrap_content"
                         android:background="?android:attr/selectableItemBackground"
                         android:gravity="center_vertical"
-                        android:orientation="horizontal"
+                        android:orientation="vertical"
                         android:padding="14dp">
 
                         <TextView
-                            android:layout_width="0dp"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="@string/sw_dark"
+                            android:text="@string/dark_mode"
                             android:textColor="@color/text_primary"
                             android:textSize="14sp" />
 
-                        <com.google.android.material.switchmaterial.SwitchMaterial
-                            android:id="@+id/swDark"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
+                        <com.google.android.material.button.MaterialButtonToggleGroup
+                            android:id="@+id/tgDark"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            app:singleSelection="true">
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/tgDarkSystem"
+                                style="?attr/materialButtonOutlinedStyle"
+                                android:layout_width="0dp"
+                                android:layout_height="36dp"
+                                android:layout_weight="1"
+                                android:text="@string/dark_system"
+                                android:textSize="@dimen/text_badge" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/tgDarkLight"
+                                style="?attr/materialButtonOutlinedStyle"
+                                android:layout_width="0dp"
+                                android:layout_height="36dp"
+                                android:layout_weight="1"
+                                android:text="@string/dark_light"
+                                android:textSize="@dimen/text_badge" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/tgDarkDark"
+                                style="?attr/materialButtonOutlinedStyle"
+                                android:layout_width="0dp"
+                                android:layout_height="36dp"
+                                android:layout_weight="1"
+                                android:text="@string/dark_dark"
+                                android:textSize="@dimen/text_badge" />
+                        </com.google.android.material.button.MaterialButtonToggleGroup>
                     </LinearLayout>
                 </LinearLayout>
 
@@ -467,16 +585,34 @@
                 </LinearLayout>
             </LinearLayout>
         </ScrollView>
-    </FrameLayout>
+        <!-- ======================= 底部导航（浮岛，v1.0.49 起真正浮起） =======================
+             ⚠️ 必须放在这个 FrameLayout **里面**（= 内容层的末尾），不能当成外层
+             LinearLayout 的第二个子元素 —— 那样它是"流式占位"，内容区到它上方就
+             截止了，列表永远延伸不到导航栏底下，玻璃再透也无物可透。
+             这正是 v1.0.48 的真问题：用户看到的是"药丸旁边和下方还有一层遮罩"。
+             现在它是浮在三个页面之上的一层，滚动时卡片会从它下面穿过。
 
-    <com.google.android.material.bottomnavigation.BottomNavigationView
-        android:id="@+id/bottomNav"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="@color/surface"
-        app:labelVisibilityMode="labeled"
-        app:itemIconTint="@color/nav_item"
-        app:itemTextColor="@color/nav_item"
-        app:menu="@menu/menu_main" />
+             三件事同时做才成立：离屏幕左右各 10dp、离底 10dp、圆角玻璃底。
+             只做圆角不脱边 = 一块"圆角通栏"，仍是贴边的廉价感。
+             ⚠️ 导航栏下方的 10dp 空隙露出的是 bg_ambient 的底缘（= bg_deep），
+             与 themes 里的 navigationBarColor 同色，所以不会出现一条色带。
+             ⚠️ 浮起之后各列表必须自己让出高度（见 MainActivity.applyNavClearance）。
+             让位要加在**列表自己的 paddingBottom** 上，不能加在容器上 ——
+             加在容器上只会把内容整体上推，内容依旧不会从玻璃下面穿过。 -->
+        <com.google.android.material.bottomnavigation.BottomNavigationView
+            android:id="@+id/bottomNav"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:layout_marginStart="@dimen/island_gap"
+            android:layout_marginEnd="@dimen/island_gap"
+            android:layout_marginBottom="@dimen/island_gap"
+            android:background="@drawable/bg_glass_nav"
+            android:elevation="6dp"
+            app:itemIconTint="@color/nav_item"
+            app:itemTextColor="@color/nav_item"
+            app:labelVisibilityMode="labeled"
+            app:menu="@menu/menu_main" />
+    </FrameLayout>
 
 </LinearLayout>

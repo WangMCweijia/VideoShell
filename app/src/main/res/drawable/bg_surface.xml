@@ -1,5 +1,49 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="@color/surface" />
-    <corners android:radius="14dp" />
-</shape>
+<!--
+  通用「卡片 / 分组容器」底色。
+
+  v1.0.48 起它本身**就是**磨砂玻璃卡片（与 bg_glass_card 同材质）——
+  刻意选择"原地升级"而不是改名，因为这一个文件被十几处布局引用
+  （我的页分组、站点输入卡、站点卡、历史卡、投屏设备卡、搜索建议下拉…），
+  升级文件本身就等于一次性全站玻璃化，少改十几个 layout、也不会漏。
+  ⚠️ 下次要单独调某一类卡片的材质，请新建专用 drawable 并改那一处布局，
+     不要回来改这里 —— 会把所有引用处一起带跑。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/radius_lg" />
+            <gradient
+                android:angle="270"
+                android:endColor="@color/glass_fill_2"
+                android:startColor="@color/glass_fill"
+                android:type="linear" />
+        </shape>
+    </item>
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/radius_lg" />
+            <gradient
+                android:angle="270"
+                android:centerColor="#00000000"
+                android:centerY="0.18"
+                android:endColor="#00000000"
+                android:startColor="@color/glass_glow"
+                android:type="linear" />
+        </shape>
+    </item>
+
+    <item android:drawable="@drawable/glass_grain" />
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/radius_lg" />
+            <solid android:color="#00000000" />
+            <stroke
+                android:width="@dimen/glass_stroke_w"
+                android:color="@color/glass_stroke" />
+        </shape>
+    </item>
+</layer-list>

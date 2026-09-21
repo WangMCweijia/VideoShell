@@ -1,12 +1,18 @@
 package com.videoshell.ui.adapter
 
+import android.annotation.SuppressLint
 import android.view.LayoutInflater
+import android.view.MotionEvent
+import android.view.View
 import android.view.ViewGroup
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import com.videoshell.R
 import com.videoshell.data.model.SiteConfig
 import com.videoshell.databinding.ItemSiteBinding
+
+/** 站点体检状态（FN-6）：无 → 检测中 → 可访问 / 失败 */
+enum class SiteHealth { UNKNOWN, CHECKING, OK, BAD }
 
 class SiteListAdapter(
     private val onClick: (SiteConfig) -> Unit,
@@ -20,9 +26,49 @@ class SiteListAdapter(
     /** 当前默认站源 key —— bind 时用来给星标上色 */
     var defaultKey: String = ""
 
+    /**
+     * 从手柄起拖的回调。
+     *
+     * 不给 RecyclerView 直接依赖 ItemTouchHelper：适配器只管「我这一行的手柄被按下了」，
+     * 由持有 ItemTouchHelper 的 Activity 决定起拖。这样排序落盘也在 Activity 手里。
+     */
+    var onStartDrag: ((RecyclerView.ViewHolder) -> Unit)? = null
+
+    /** 体检结果，key = SiteConfig.key */
+    private val health = HashMap<String, SiteHealth>()
+
     fun submit(list: List<SiteConfig>) {
         items.clear()
         items.addAll(list)
+        // 站点列表变了：上一轮的"检测中"标记就该作废，免得永远转圈
+        for (s in list) if (health[s.key] == SiteHealth.CHECKING) health[s.key] = SiteHealth.UNKNOWN
+        notifyDataSetChanged()
+    }
+
+    /** 当前顺序（拖拽后由 Activity 落盘） */
+    fun currentItems(): List<SiteConfig> = items.toList()
+
+    /** 拖拽换位：同步内存顺序并发出移动动画 */
+    fun moveItem(from: Int, to: Int) {
+        if (from == to) return
+        if (from !in items.indices || to !in items.indices) return
+        val moved = items.removeAt(from)
+        items.add(to, moved)
+        notifyItemMoved(from, to)
+    }
+
+    fun markChecking(keys: Collection<String>) {
+        for (k in keys) health[k] = SiteHealth.CHECKING
+        notifyDataSetChanged()
+    }
+
+    fun applyHealth(result: Map<String, Boolean>) {
+        for ((k, ok) in result) health[k] = if (ok) SiteHealth.OK else SiteHealth.BAD
+        notifyDataSetChanged()
+    }
+
+    fun clearHealth() {
+        health.clear()
         notifyDataSetChanged()
     }
 
@@ -34,6 +80,8 @@ class SiteListAdapter(
     override fun onBindViewHolder(holder: VH, position: Int) = holder.bind(items[position])
 
     inner class VH(private val b: ItemSiteBinding) : RecyclerView.ViewHolder(b.root) {
+
+        @SuppressLint("ClickableViewAccessibility")
         fun bind(s: SiteConfig) {
             b.tvName.text = s.name.ifBlank { s.baseUrl }
             b.tvUrl.text = s.baseUrl
@@ -53,6 +101,40 @@ class SiteListAdapter(
                 )
             )
             b.btnStar.setOnClickListener { onSetDefault(s) }
+
+            // 拖拽手柄：在 ACTION_DOWN 就起拖（不等长按），所以不会和整行的长按改名抢
+            b.btnDrag.setOnTouchListener { _, e ->
+                if (e.actionMasked == MotionEvent.ACTION_DOWN) onStartDrag?.invoke(this)
+                false
+            }
+
+            bindHealth(s)
+        }
+
+        private fun bindHealth(s: SiteConfig) {
+            val h = health[s.key]
+            if (h == null || h == SiteHealth.UNKNOWN) {
+                b.tvHealth.visibility = View.GONE
+                return
+            }
+            val ctx = b.root.context
+            b.tvHealth.visibility = View.VISIBLE
+            b.tvHealth.setBackgroundResource(R.drawable.bg_badge)
+            when (h) {
+                SiteHealth.CHECKING -> {
+                    b.tvHealth.text = ctx.getString(R.string.site_health_checking)
+                    b.tvHealth.setTextColor(ContextCompat.getColor(ctx, R.color.text_hint))
+                }
+                SiteHealth.OK -> {
+                    b.tvHealth.text = "✓ " + ctx.getString(R.string.site_health_ok)
+                    b.tvHealth.setTextColor(ContextCompat.getColor(ctx, R.color.ok))
+                }
+                SiteHealth.BAD -> {
+                    b.tvHealth.text = "✕ " + ctx.getString(R.string.site_health_bad)
+                    b.tvHealth.setTextColor(ContextCompat.getColor(ctx, R.color.bad))
+                }
+                else -> Unit
+            }
         }
     }
 }

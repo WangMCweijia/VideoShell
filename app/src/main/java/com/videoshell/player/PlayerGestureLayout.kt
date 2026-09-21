@@ -21,10 +21,17 @@ class PlayerGestureLayout @JvmOverloads constructor(
     /** 底部不拦截的高度（px），控件显示时设置 */
     var bottomBlockHeight: Int = 0
 
-    /** 锁定时完全不吃手势，只留解锁按钮 */
+    /** 锁定时不吃任何手势，只保留「单击」用于唤出/收起解锁键（见 [onLockedTap]） */
     var locked: Boolean = false
 
     var onSingleTap: (() -> Unit)? = null
+
+    /**
+     * 锁定状态下的单击。锁定时播放控制全部失效，唯一还需要的事件就是
+     * 「点一下屏幕把解锁键叫出来」—— 解锁键为了不挡画面会自己退场，
+     * 没有这个回调用户就只能干等它出现。
+     */
+    var onLockedTap: (() -> Unit)? = null
     var onDoubleTap: (() -> Unit)? = null
     var onSeekPreview: ((Long) -> Unit)? = null
     var onSeekCommit: ((Long) -> Unit)? = null
@@ -42,11 +49,14 @@ class PlayerGestureLayout @JvmOverloads constructor(
         override fun onDown(e: MotionEvent): Boolean = true
 
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-            onSingleTap?.invoke()
+            // 锁定时单击只做一件事：显隐解锁键。别的动作（播放/暂停、显隐控制条）一律不发，
+            // 否则「锁住防误触」就白锁了。
+            if (locked) onLockedTap?.invoke() else onSingleTap?.invoke()
             return true
         }
 
         override fun onDoubleTap(e: MotionEvent): Boolean {
+            if (locked) return true
             onDoubleTap?.invoke()
             return true
         }
@@ -66,7 +76,13 @@ class PlayerGestureLayout @JvmOverloads constructor(
     private var seekMs = 0L
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (locked) return false
+        if (locked) {
+            // 锁定时不吃手势，但**不能直接 return false**：那样连「点一下屏幕」都没人接，
+            // 用户只能等解锁键自己出现（v1.0.46 前的实际表现）。这里只喂 tapDetector，
+            // 拖动/长按分支全部跳过，所以音量、亮度、快进依旧不会被误触。
+            tapDetector.onTouchEvent(event)
+            return true
+        }
 
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             if (bottomBlockHeight > 0 && event.y > height - bottomBlockHeight) return false

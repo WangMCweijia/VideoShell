@@ -1,14 +1,39 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?><!--
+  选集格子。
+
+  ⚠️ 高度必须**整列一致**：网格里每个 item 各自测量高度，一格有副行、一格没有
+  就会参差不齐（比字被截更难看成"设计过的界面"）。所以副行不靠"有内容才显示"
+  来控制，而是由 EpisodeCell.Plan.twoLine 整列统一切换；两行模式下「拆不出副行」
+  的格子也照样占位（minHeight），只是内容为空。
+
+  ⚠️ 左右内边距只有 4dp 是有意的：竖屏 5 列时每格内容宽 62dp，左右各让 1dp
+  就等于把文字区从 54dp 压到 52dp —— 那里每 1dp 都在决定"少截一个字还是多截一个"。
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_margin="4dp"
+    android:layout_margin="@dimen/episode_gap"
     android:background="@drawable/bg_chip"
     android:gravity="center"
-    android:minHeight="38dp"
-    android:paddingStart="6dp"
-    android:paddingEnd="6dp">
+    android:minHeight="@dimen/episode_min_h"
+    android:orientation="vertical"
+    android:paddingStart="@dimen/space_xs"
+    android:paddingTop="@dimen/space_sm"
+    android:paddingEnd="@dimen/space_xs"
+    android:paddingBottom="@dimen/space_sm">
 
+    <!-- FN-1：分集缩略图（可选）。没有封面时整块隐藏，行为和旧版一致 -->
+    <ImageView
+        android:id="@+id/ivPic"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_marginBottom="@dimen/space_xs"
+        android:contentDescription="@null"
+        android:scaleType="centerCrop"
+        android:visibility="gone" />
+
+    <!-- 主行：期号（`10` + 小一号的 `期`，单位字由 EpisodeAdapter 用 Spannable 拼）
+         或退化为日期 / 原名。单行模式下就是整条集名。 -->
     <TextView
         android:id="@+id/tvName"
         android:layout_width="match_parent"
@@ -16,7 +41,20 @@
         android:ellipsize="end"
         android:gravity="center"
         android:maxLines="1"
-        android:textColor="@color/text_primary"
-        android:textSize="12sp" />
+        android:textColor="@color/chip_text"
+        android:textSize="@dimen/text_sub" />
+
+    <!-- 副行：日期 + 剩余文字（嘉宾/主题）。只在 twoLine 模式下出现，高度照占。 -->
+    <TextView
+        android:id="@+id/tvSub"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:maxLines="1"
+        android:minHeight="15dp"
+        android:textColor="@color/chip_text"
+        android:textSize="@dimen/text_badge"
+        android:visibility="gone" />
 
 </LinearLayout>

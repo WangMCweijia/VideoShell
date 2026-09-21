@@ -1,15 +1,27 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?><!--
+  影片卡片（网格里的一格）。
+
+  ⚠️ 字号层级必须**拉开**：原来 tvName 13sp / tvSub 12sp 只差 1sp，肉眼读不出主次，
+  整片网格看着就是一团平铺的字 —— "界面不够精致"有一大半来自这里。现在 14 / 11。
+
+  ⚠️ posterFrame 必须 clipToOutline：卡片圆角是 16dp，而 ivPic 是 centerCrop 的
+  矩形图。不裁的话封面四个角会**方着溢出**卡片的圆角，近看非常廉价。
+  （bg_poster 是带 corners 的 GradientDrawable，系统能从中取到 RoundRect outline，
+   所以 clipToOutline 在 API 21+ 上直接生效，不需要换成 ShapeableImageView。）
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:background="?android:attr/selectableItemBackground"
+    android:background="@drawable/bg_glass_card"
     android:orientation="vertical"
-    android:padding="5dp">
+    android:padding="@dimen/space_md">
 
     <FrameLayout
+        android:id="@+id/posterFrame"
         android:layout_width="match_parent"
-        android:layout_height="136dp"
-        android:background="@drawable/bg_poster">
+        android:layout_height="@dimen/poster_height"
+        android:background="@drawable/bg_poster"
+        android:clipToOutline="true">
 
         <ImageView
             android:id="@+id/ivPic"
@@ -23,15 +35,15 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="end|bottom"
-            android:layout_margin="4dp"
+            android:layout_margin="@dimen/space_xs"
             android:background="@drawable/bg_badge"
             android:maxLines="1"
-            android:paddingStart="5dp"
+            android:paddingStart="@dimen/space_sm"
             android:paddingTop="1dp"
-            android:paddingEnd="5dp"
+            android:paddingEnd="@dimen/space_sm"
             android:paddingBottom="1dp"
             android:textColor="@color/white"
-            android:textSize="10sp"
+            android:textSize="@dimen/text_badge"
             android:visibility="gone" />
 
         <TextView
@@ -39,15 +51,15 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="start|top"
-            android:layout_margin="4dp"
+            android:layout_margin="@dimen/space_xs"
             android:background="@drawable/bg_badge"
             android:maxLines="1"
-            android:paddingStart="5dp"
+            android:paddingStart="@dimen/space_sm"
             android:paddingTop="1dp"
-            android:paddingEnd="5dp"
+            android:paddingEnd="@dimen/space_sm"
             android:paddingBottom="1dp"
             android:textColor="@color/brand"
-            android:textSize="10sp"
+            android:textSize="@dimen/text_badge"
             android:visibility="gone" />
     </FrameLayout>
 
@@ -55,11 +67,11 @@
         android:id="@+id/tvName"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
+        android:layout_marginTop="@dimen/space_sm"
         android:ellipsize="end"
         android:maxLines="1"
         android:textColor="@color/text_primary"
-        android:textSize="13sp" />
+        android:textSize="@dimen/text_body" />
 
     <TextView
         android:id="@+id/tvSub"
@@ -69,6 +81,6 @@
         android:ellipsize="end"
         android:maxLines="1"
         android:textColor="@color/text_hint"
-        android:textSize="11sp" />
+        android:textSize="@dimen/text_badge" />
 
 </LinearLayout>

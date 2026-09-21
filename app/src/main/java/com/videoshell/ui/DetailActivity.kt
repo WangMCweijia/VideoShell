@@ -113,12 +113,10 @@ class DetailActivity : AppCompatActivity() {
             calibLauncher.launch(CalibrateActivity.intent(this, siteKey))
         }
 
-        val span = if (resources.configuration.orientation ==
-            android.content.res.Configuration.ORIENTATION_LANDSCAPE
-        ) 8 else 5
         binding.rvGroups.layoutManager = LinearLayoutManager(this, RecyclerView.HORIZONTAL, false)
         binding.rvGroups.adapter = groupAdapter
-        binding.rvEpisodes.layoutManager = GridLayoutManager(this, span)
+        // 列数不在这里定：submitEpisodes() 会按整列名字算出合适的列数再重设
+        // layoutManager（v1.0.49，综艺长名 5→3 列）。这里只挂 adapter。
         binding.rvEpisodes.adapter = episodeAdapter
 
         loadDetail(id)
@@ -249,10 +247,21 @@ class DetailActivity : AppCompatActivity() {
         }
     }
 
-    /** 按当前偏好提交分集列表。回调里的 index 是**组内原始序号**，与显示顺序无关 */
+    /**
+     * 按当前偏好提交分集列表。回调里的 index 是**组内原始序号**，与显示顺序无关。
+     *
+     * v1.0.49：列数与「是否两行」由 EpisodeCell.plan 按**整列**名字算出来（综艺那种
+     * `20240921 第10期` 的长名会从 5 列降到 3 列，并启用主副两行）。
+     * ⚠️ layoutManager 因此必须在这里**每次重设** —— 换线路、换分类都可能改变列数，
+     * 只在 onCreate 里设一次是不够的。重设会丢滚动位置，但这里本来就该从头看起。
+     */
     private fun submitEpisodes() {
         val g = detail?.groups?.getOrNull(groupIndex) ?: return
-        episodeAdapter.submit(g.episodes, Store.episodeDesc(this))
+        val land =
+            resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        val plan = com.videoshell.util.EpisodeCell.plan(g.episodes, land)
+        binding.rvEpisodes.layoutManager = GridLayoutManager(this, plan.cols)
+        episodeAdapter.submit(g.episodes, Store.episodeDesc(this), plan.twoLine)
     }
 
     private fun playEpisode(index: Int, ep: Episode) {

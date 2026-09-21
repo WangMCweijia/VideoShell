@@ -18,7 +18,7 @@
     <string name="nav_home">首页</string>
     <string name="nav_sites">站源</string>
     <string name="nav_mine">我的</string>
-    <string name="sites_tip">点站点进入浏览 · 长按改名 · ★ 设为默认站源</string>
+    <string name="sites_tip">点站点进入浏览 · 长按改名 · ★ 设为默认 · 拖手柄排序</string>
     <string name="set_default">设为默认站源</string>
     <string name="set_default_done">已设为默认站源</string>
     <string name="home_default_fmt">默认站源 · %1$s</string>
@@ -108,7 +108,7 @@
     <string name="player_ff">快进 10 秒</string>
     <string name="player_play">播放/暂停</string>
     <string name="hud_speed">%1$sx</string>
-    <string name="hud_locked">已锁定，点左上角图标解锁</string>
+    <string name="hud_locked">已锁定，点屏幕显示解锁键</string>
     <string name="hud_resume">已从 %1$s 继续播放</string>
     <string name="hud_resume_dead">续播点已失效，从头播放</string>
     <string name="hud_ratio">画面：%1$s</string>
@@ -287,4 +287,67 @@
     <string name="err_network">网络请求失败：%1$s</string>
     <string name="err_no_video_site">未能识别为视频站。可尝试「用网页嗅探打开」或手动添加。</string>
     <string name="err_empty_url">请先输入网址</string>
+
+    <!-- ===================== 外观：深色三态（UI-4） ===================== -->
+    <string name="dark_mode">深色模式</string>
+    <string name="dark_system">跟随系统</string>
+    <string name="dark_light">浅色</string>
+    <string name="dark_dark">深色</string>
+
+    <!-- ===================== 后台播放（FN-4） ===================== -->
+    <string name="bg_play">后台播放</string>
+    <string name="bg_play_on">已开启后台播放（切到后台继续放，通知栏可控制）</string>
+    <string name="bg_play_off">已关闭后台播放</string>
+
+    <!-- ===================== 画中画（FN-3） ===================== -->
+    <string name="pip">画中画</string>
+
+    <!-- ===================== 字幕（FN-5） ===================== -->
+    <string name="subtitle">字幕</string>
+    <string name="subtitle_pick">选择字幕文件（.srt / .vtt）</string>
+    <string name="subtitle_none">没有找到字幕文件</string>
+    <string name="subtitle_loaded">字幕已加载</string>
+
+    <!-- ===================== 投屏（DLNA，新增） ===================== -->
+    <string name="cast">投屏</string>
+    <string name="cast_title">选择投屏设备</string>
+    <string name="cast_searching">正在搜索局域网设备…</string>
+    <string name="cast_none">未发现可投屏设备，确认设备与手机在同一 WiFi</string>
+    <string name="cast_send">正在发送播放地址到 %1$s…</string>
+    <string name="cast_connected">已投屏到 %1$s</string>
+    <string name="cast_failed">投屏失败：%1$s</string>
+    <string name="cast_header_hint">提示：该地址带防盗链请求头，部分投屏设备可能无法直接播放</string>
+    <string name="cast_stop">停止投屏</string>
+
+    <!-- ===================== 分享（FN-9） ===================== -->
+    <string name="share">分享</string>
+    <string name="share_video">分享影片</string>
+    <string name="share_site">分享站点</string>
+    <string name="share_copy_url">复制播放地址</string>
+    <string name="share_copied">播放地址已复制</string>
+
+    <!-- ===================== 内容缓存（FN-8） ===================== -->
+    <string name="cache_banner">离线缓存 · 网络不佳时显示上次内容，点此刷新</string>
+    <string name="cache_banner_at">离线缓存（%1$s 抓取）· 点此重试</string>
+    <string name="cache_refresh">刷新</string>
+
+    <!-- ===================== 站源管理增强（FN-6） ===================== -->
+    <string name="site_import">导入站点</string>
+    <string name="site_export">导出站点</string>
+    <string name="site_dedup">合并重复</string>
+    <string name="site_export_done">已导出 %1$d 个站点到 %2$s</string>
+    <string name="site_import_done">已导入 %1$d 个站点</string>
+    <string name="site_dedup_done">已合并 %2$d 个重复站点（现有 %1$d 个）</string>
+    <string name="site_export_hint">把站点列表导出为 JSON 文件</string>
+    <string name="site_health">站点体检</string>
+    <string name="site_health_done">体检完成：%1$d/%2$d 个站点可访问</string>
+    <string name="site_health_ok">可访问</string>
+    <string name="site_health_bad">访问失败</string>
+    <string name="site_health_checking">检测中…</string>
+    <string name="site_drag">拖动排序</string>
+    <string name="site_empty_action">先在「站源」页添加站点</string>
+
+    <!-- ===================== 搜索历史（FN-2） ===================== -->
+    <string name="search_history_title">最近搜索</string>
+    <string name="search_history_clear">清空</string>
 </resources>

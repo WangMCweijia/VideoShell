@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  实心品牌色按钮（校准页的「确定」）。
+  实心品牌色按钮（校准页「确定」/ 嗅探页「抓取」）。
+  v1.0.48：圆角收到 radius_lg、加一道顶部高光，与其余玻璃控件同一套语言；
+  品牌色本身够亮，不需要也不应该半透明 —— 主按钮就是要"实"。
+
   刻意**不做 state_enabled=false 分支**：校准页的确定按钮必须永远可点 ——
   置灰会重新制造"点了没反应"的死角，宁可让它点了给出提示。
 -->
@@ -8,13 +11,33 @@
     <item android:state_pressed="true">
         <shape android:shape="rectangle">
             <solid android:color="@color/brand_dark" />
-            <corners android:radius="16dp" />
+            <corners android:radius="@dimen/radius_lg" />
         </shape>
     </item>
     <item>
-        <shape android:shape="rectangle">
-            <solid android:color="@color/brand" />
-            <corners android:radius="16dp" />
-        </shape>
+        <layer-list>
+            <item>
+                <shape android:shape="rectangle">
+                    <gradient
+                        android:angle="270"
+                        android:endColor="@color/brand_dark"
+                        android:startColor="@color/brand"
+                        android:type="linear" />
+                    <corners android:radius="@dimen/radius_lg" />
+                </shape>
+            </item>
+            <item>
+                <shape android:shape="rectangle">
+                    <corners android:radius="@dimen/radius_lg" />
+                    <gradient
+                        android:angle="270"
+                        android:centerColor="#00000000"
+                        android:centerY="0.22"
+                        android:endColor="#00000000"
+                        android:startColor="#33FFFFFF"
+                        android:type="linear" />
+                </shape>
+            </item>
+        </layer-list>
     </item>
 </selector>

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  播放页顶栏 / 底栏浮岛（v1.0.48）。
+
+  ⚠️ 这一套**刻意不跟随主题**，色值写死：播放页永远是黑底，
+     文字永远是白色。跟随主题的话，浅色模式下会变成"白玻璃 + 白字"——
+     压在视频画面上等于什么都看不见。
+  ⚠️ 不透明度必须够（70%）：浮岛压在**任意亮度**的视频画面上，
+     偏亮画面（雪景、白底网页）会把过透的浮岛穿透，时间/按钮糊掉。
+     原来这里是 #99000000（60% 黑），现在 #B312161C（70% 蓝黑）更实，不是更透。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/radius_lg" />
+            <gradient
+                android:angle="270"
+                android:endColor="#990E1117"
+                android:startColor="#B312161C"
+                android:type="linear" />
+        </shape>
+    </item>
+
+    <!-- 顶部玻璃棱：压住画面时，这道高光是唯一能让人"看出是块玻璃"的东西 -->
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/radius_lg" />
+            <gradient
+                android:angle="270"
+                android:centerColor="#00000000"
+                android:centerY="0.16"
+                android:endColor="#00000000"
+                android:startColor="#1FFFFFFF"
+                android:type="linear" />
+        </shape>
+    </item>
+
+    <!-- 砂质颗粒（v1.0.49）：压视频也很安全 —— 峰值 alpha 只有 4%，不影响时间码与
+         按钮的可读性，但能让这块深色片显出"磨砂"而不是"半透明塑料板"。 -->
+    <item android:drawable="@drawable/glass_grain" />
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/radius_lg" />
+            <solid android:color="#00000000" />
+            <stroke
+                android:width="@dimen/glass_stroke_w"
+                android:color="#26FFFFFF" />
+        </shape>
+    </item>
+</layer-list>

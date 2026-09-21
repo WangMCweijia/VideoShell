@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- 亮色（自动暗色关闭 / 系统为浅色时用；暗色值在 values-night/colors.xml） -->
-    <color name="bg">#FFF3F5F8</color>
+    <color name="bg">#FFF0F3F8</color>
+    <!-- 页面基底的下缘（bg_ambient 的渐变终点）：比 bg 深半档，让玻璃片"浮"得起来 -->
+    <color name="bg_deep">#FFE5EAF3</color>
     <color name="surface">#FFFFFFFF</color>
-    <color name="surface_2">#FFEAEEF4</color>
-    <color name="line">#FFD8DEE7</color>
+    <color name="surface_2">#FFE9EDF5</color>
+    <color name="line">#FFD9E0EA</color>
     <color name="brand">#FF2F6FE4</color>
     <color name="brand_dark">#FF2559B8</color>
     <color name="text_primary">#FF16191F</color>
@@ -14,4 +16,35 @@
     <color name="black">#FF000000</color>
     <color name="transparent_scrim">#99000000</color>
     <color name="ic_launcher_background">#FF0E1013</color>
+    <!-- 体检 / 状态徽章（FN-6） -->
+    <color name="ok">#FF1E9E5A</color>
+    <color name="bad">#FFD64545</color>
+
+    <!-- ============================================================
+         磨砂玻璃（UI 方案 A）。四层材质，缺一层就"糊成一块灰"：
+           ① glass_fill → glass_fill_2  主体：从上到下略微变淡（漫反射）
+           ② glass_glow                 顶部高光带（玻璃棱）
+           ③ glass_stroke              1px 边（亮色下必须是**深**色，白描白看不见）
+           ④ 底下透出的 ambient_* 光斑   —— 在 bg_ambient 里，不在玻璃里
+         ⚠️ 亮色模式的白玻璃如果描边也用白，边界会完全消失；所以描边取 12% 深蓝黑。
+         ============================================================ -->
+    <!-- ⚠️ v1.0.49 把玻璃的透明度**降下来**：原来 #D9（85%）/#A6（65%）几乎就是
+         不透明的，"半透明磨砂看不出来"的病根就在这里 —— 背后有什么都透不出来。
+         现在 72% / 56%，能看清 ambient 光斑的走向，"玻璃"才成立。
+         ⚠️ 不要再往低调过 #8F（56%）：再透就会伤到列表文字的可读性，
+         而"能读"比"更透"重要。 -->
+    <color name="glass_fill">#B8FFFFFF</color>
+    <color name="glass_fill_2">#8FFFFFFF</color>
+    <color name="glass_stroke">#1F0F1A2E</color>
+    <color name="glass_glow">#B3FFFFFF</color>
+    <!-- 按下态：比常态更实、更白，给点击一个物理反馈 -->
+    <color name="glass_pressed">#F2FFFFFF</color>
+
+    <!-- 环境光斑（bg_ambient）：低 alpha 的品牌色/青色，用来"照亮"半透明玻璃。
+         ⚠️ v1.0.49 提高了一档：原来 24%/18%/12% 配 260dp 的半径，在 360dp 宽的屏上
+         被摊成了一块近乎均匀的底色 —— 玻璃片挪过去也看不出明暗变化，等于没有背景。
+         现在 30%/24%/15%，仍然远低于"像贴了张贴纸"的程度。 -->
+    <color name="ambient_1">#4D2F6FE4</color>
+    <color name="ambient_2">#3D12B5A6</color>
+    <color name="ambient_3">#267C4DFF</color>
 </resources>

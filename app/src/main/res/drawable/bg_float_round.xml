@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 播放页悬浮锁定键的圆底 = 深色玻璃（v1.0.48）。
+     它脱离顶栏独立浮在画面右侧正中，原先只用一层 60% 黑，现在补上描边与渐变，
+     亮画面下能看出是"一片玻璃"而不是一块脏斑。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <gradient
+        android:angle="270"
+        android:endColor="#990E1117"
+        android:startColor="#B312161C"
+        android:type="linear" />
+    <stroke
+        android:width="@dimen/glass_stroke_w"
+        android:color="#26FFFFFF" />
+</shape>

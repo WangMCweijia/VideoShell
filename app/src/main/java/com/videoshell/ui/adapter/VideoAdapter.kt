@@ -195,6 +195,8 @@ class VideoAdapter(
             b.tvScore.text = v.score
             b.tvScore.visibility = if (v.score.isBlank()) View.GONE else View.VISIBLE
 
+            b.ivPic.contentDescription = v.name   // UI-6：读屏时能读出影片名
+
             if (v.pic.isNotBlank()) {
                 b.ivPic.load(v.pic) {
                     crossfade(true)
@@ -205,7 +207,29 @@ class VideoAdapter(
                 b.ivPic.setImageDrawable(null)
             }
 
+            // UI-2：按卡片宽度 × 1.4 算海报高度，大屏不再被压扁/压方
+            adjustPoster(b)
+
             b.root.setOnClickListener { onClick(v) }
+        }
+
+        /**
+         * 海报高度 = 卡片宽度 × 1.4（UI-2）。
+         *
+         * 网格列宽随屏宽变，写死 136dp 在平板上会被压扁、在窄屏上又不协调。
+         * 这里在绑定后用实际测量到的宽度反算高度；宽度还没量到时（首帧）
+         * 用 `post` 等下一布局周期再算一次，算过就不再重复 requestLayout。
+         */
+        private fun adjustPoster(b: ItemVideoBinding) {
+            b.ivPic.post {
+                val w = b.posterFrame.width
+                if (w <= 0) return@post
+                val h = (w * 1.4f).toInt()
+                if (b.posterFrame.layoutParams.height != h) {
+                    b.posterFrame.layoutParams.height = h
+                    b.posterFrame.requestLayout()
+                }
+            }
         }
 
         /** 片名里标出关键词；没设置关键词、或片名不含关键词，都原样返回 */

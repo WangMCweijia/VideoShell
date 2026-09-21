@@ -17,6 +17,7 @@ import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.videoshell.R
+import com.videoshell.data.ListCache
 import com.videoshell.data.Store
 import com.videoshell.data.model.Category
 import com.videoshell.data.model.SiteConfig
@@ -35,6 +36,7 @@ import com.videoshell.data.site.SiteDoctor
 import com.videoshell.databinding.ViewSiteBrowserBinding
 import com.videoshell.player.SniffActivity
 import com.videoshell.ui.adapter.CategoryAdapter
+import com.videoshell.ui.adapter.SearchSuggestAdapter
 import com.videoshell.ui.adapter.VideoAdapter
 import com.videoshell.util.toast
 import kotlinx.coroutines.delay
@@ -84,6 +86,20 @@ class SiteBrowser(
             if (k.isNotBlank()) onOpenDetail(k, item)
         },
         siteNameOf = { key -> siteNames[key].orEmpty() }
+    )
+
+    /** 搜索历史下拉适配器（FN-2） */
+    private val suggestAdapter = SearchSuggestAdapter(
+        onClick = { kw ->
+            b.inputSearch.setText(kw)
+            b.inputSearch.setSelection(kw.length)
+            hideSuggestions()
+            doSearch()
+        },
+        onLongClick = { kw ->
+            Store.removeSearchHistory(act, kw)
+            showSuggestions()
+        }
     )
 
     private var cats: List<Category> = emptyList()
@@ -256,6 +272,23 @@ class SiteBrowser(
         }
     }
 
+    /**
+     * 底部让位（v1.0.49）。
+     *
+     * 首页的底部导航是**浮**在内容之上的一层，列表必须自己让出它的高度，否则最后
+     * 一行会被压在导航栏底下。
+     *
+     * ⚠️ 让位只能加在 `rvVideos` 自己的 paddingBottom 上（它已经是
+     * `clipToPadding="false"`）—— 加在外层容器上只会把整个列表上推，内容依旧不会
+     * 从导航栏底下穿过，那"半透明"就白做了。
+     * 二级站源页（SiteActivity）没有底部导航，不调这个方法即保持默认 20dp。
+     */
+    fun setBottomInset(px: Int) {
+        b.rvVideos.setPadding(
+            b.rvVideos.paddingStart, b.rvVideos.paddingTop, b.rvVideos.paddingEnd, px
+        )
+    }
+
     /** 首次接线：拿不到视图尺寸的东西都在这里定 */
     fun setup(showBack: Boolean, onBack: () -> Unit) {
         b.btnBack.visibility = if (showBack) View.VISIBLE else View.GONE
@@ -422,6 +455,22 @@ class SiteBrowser(
         reload()
     }
 
+    // ------------------------------------------------------------------ 搜索历史（FN-2）
+
+    private fun showSuggestions() {
+        val hist = Store.searchHistory(act)
+        if (hist.isEmpty()) {
+            hideSuggestions()
+            return
+        }
+        suggestAdapter.submit(hist)
+        b.rvSearchSuggest.visibility = View.VISIBLE
+    }
+
+    private fun hideSuggestions() {
+        b.rvSearchSuggest.visibility = View.GONE
+    }
+
     fun reload() {
         page = 1
         videoAdapter.clear()
@@ -455,6 +504,8 @@ class SiteBrowser(
 
         act.lifecycleScope.launch {
             var items: List<VideoItem>
+            // >0 表示这一屏是拿缓存顶的：提交时要挂「离线缓存」横幅而不是清掉状态位
+            var cachedAt = 0L
             // 聚合那条路提交的单位是**行**（每块前面多一行分组标题，v1.0.39）；
             // 单站那条路是纯卡片。两条路在这里汇合到同一个提交点，
             // 所以用一个可空变量区分，而不是把提交代码写两遍。
@@ -537,6 +588,23 @@ class SiteBrowser(
                     why = res.exceptionOrNull()
                         ?.let { it.javaClass.simpleName + ": " + it.message }.orEmpty()
                 }
+
+                // FN-8：只对**分类浏览的首屏**做内容缓存。
+                //   成功 ⇒ 落盘（下次断网有得用）；
+                //   失败 ⇒ 拿上次的顶上（带时效），提交时挂「离线缓存」横幅，绝不假装是刚拉的。
+                // 聚合搜索与翻页都不进这条路 —— 见 ListCache 的注释。
+                if (!append && mode == MODE_CATEGORY) {
+                    val k = site?.key.orEmpty()
+                    if (items.isNotEmpty()) {
+                        ListCache.save(act, k, currentType, items)
+                    } else {
+                        val cached = ListCache.load(act, k, currentType)
+                        if (cached != null) {
+                            items = cached.items
+                            cachedAt = cached.ts
+                        }
+                    }
+                }
             }
 
             loading = false
@@ -572,7 +640,13 @@ class SiteBrowser(
             if (rows != null) videoAdapter.submitRows(rows, append)
             else videoAdapter.submit(items, append)
             page = p
-            showState(null)
+            if (cachedAt > 0L) {
+                // 横幅明确写出"这是缓存 + 何时抓的"，并给一个点了就重拉的入口
+                showState(act.getString(R.string.cache_banner_at, stampOf(cachedAt)))
+                b.tvState.setOnClickListener { reload() }
+            } else {
+                showState(null)
+            }
             attachFailures(failures)
         }
     }
@@ -707,6 +781,11 @@ class SiteBrowser(
         act.toast(act.getString(R.string.site_recipe_reset_done))
         loadCategories()
     }
+
+    /** 缓存时间戳 →「MM-dd HH:mm」，只给「离线缓存」横幅用 */
+    private fun stampOf(ts: Long): String =
+        java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault())
+            .format(java.util.Date(ts))
 
     private fun dp(v: Int): Int = (v * act.resources.displayMetrics.density).toInt()
 }

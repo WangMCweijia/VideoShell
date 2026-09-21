@@ -1,6 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  旧式启动图标（API < 26，没有自适应图标那套遮罩与 108/72 视口规则）。
+
+  这里不能用渐变：矢量渐变要 API 24+ 才原生支持，minSdk 是 21，低版本启动器解这个
+  文件可能直接失败 —— 所以用纯色（品牌蓝的深端）铺底，与自适应版视觉对齐。
+
+  图形与 ic_launcher_foreground 同构，但整体放大 1.6 倍：旧图标是整张 108dp 都当图标用，
+  不像自适应图标只取内圈 72dp，不放大就会显得偏小。
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp" android:height="108dp"
-    android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#FF0E1013" android:pathData="M0,0h108v108h-108z" />
-    <path android:fillColor="#FFFF3B30" android:pathData="M42,30 L80,54 L42,78 Z" />
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 铺底：圆角方形（部分启动器会给图标加自己的底板，圆角比直角更稳） -->
+    <path
+        android:fillColor="#FF2E63E0"
+        android:pathData="M22,0 H86 A22,22 0 0 1 108,22 V86 A22,22 0 0 1 86,108 H22 A22,22 0 0 1 0,86 V22 A22,22 0 0 1 22,0 Z" />
+
+    <!-- 白色圆角方块 = 屏幕 / 「壳」 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M39.6,20.4 H68.4 A19.2,19.2 0 0 1 87.6,39.6 V68.4 A19.2,19.2 0 0 1 68.4,87.6 H39.6 A19.2,19.2 0 0 1 20.4,68.4 V39.6 A19.2,19.2 0 0 1 39.6,20.4 Z" />
+
+    <!-- 播放三角 -->
+    <path
+        android:fillColor="#FF2352CC"
+        android:strokeColor="#FF2352CC"
+        android:strokeWidth="8"
+        android:strokeLineJoin="round"
+        android:strokeLineCap="round"
+        android:pathData="M38,33.2 L76.4,54 L38,74.8 Z" />
 </vector>

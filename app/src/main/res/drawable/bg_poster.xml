@@ -1,5 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="@color/surface_2" />
-    <corners android:radius="8dp" />
+<!--
+  海报占位底（封面还没加载出来时露出的那一块）。
+  v1.0.48：圆角提到 radius_lg，并给一个「自上而下略深的玻璃凹槽」观感 ——
+  海报图未到时是一块有质感的空槽，而不是一块突兀的纯色板。
+  ⚠️ 不要把 corners 调大过 radius_lg：海报是等宽网格，
+     圆角一大，相邻卡片的缝隙会露成菱形，看着像"没对齐"。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="270"
+        android:endColor="@color/surface_2"
+        android:startColor="@color/line"
+        android:type="linear" />
+    <corners android:radius="@dimen/radius_lg" />
+    <stroke
+        android:width="@dimen/glass_stroke_w"
+        android:color="@color/glass_stroke" />
 </shape>

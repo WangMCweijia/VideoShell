@@ -17,20 +17,20 @@
         android:layout_weight="1"
         android:ellipsize="middle"
         android:maxLines="2"
-        android:textColor="@color/white"
-        android:textSize="13sp" />
+        android:textColor="#FFE6EAF2"
+        android:textSize="@dimen/text_sub" />
 
     <TextView
         android:id="@+id/tvType"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginStart="8dp"
+        android:layout_marginStart="@dimen/space_md"
         android:background="@drawable/bg_badge"
-        android:paddingStart="5dp"
+        android:paddingStart="@dimen/space_sm"
         android:paddingTop="1dp"
-        android:paddingEnd="5dp"
+        android:paddingEnd="@dimen/space_sm"
         android:paddingBottom="1dp"
         android:textColor="@color/brand"
-        android:textSize="10sp" />
+        android:textSize="@dimen/text_badge" />
 
 </LinearLayout>

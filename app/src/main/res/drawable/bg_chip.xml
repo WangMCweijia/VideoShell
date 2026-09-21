@@ -1,16 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 小圆片（搜索范围 / 引擎 / 分类 / 面板内小按钮）。v1.0.48 起 = 玻璃片，见 bg_glass_chip -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
+
     <item android:state_selected="true">
         <shape android:shape="rectangle">
             <solid android:color="@color/brand" />
-            <corners android:radius="16dp" />
+            <corners android:radius="@dimen/radius_chip" />
         </shape>
     </item>
+
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/glass_pressed" />
+            <corners android:radius="@dimen/radius_chip" />
+            <stroke
+                android:width="@dimen/glass_stroke_w"
+                android:color="@color/glass_stroke" />
+        </shape>
+    </item>
+
     <item>
         <shape android:shape="rectangle">
-            <solid android:color="@color/surface_2" />
-            <corners android:radius="16dp" />
-            <stroke android:width="1dp" android:color="@color/line" />
+            <gradient
+                android:angle="270"
+                android:endColor="@color/glass_fill_2"
+                android:startColor="@color/glass_fill"
+                android:type="linear" />
+            <corners android:radius="@dimen/radius_chip" />
+            <stroke
+                android:width="@dimen/glass_stroke_w"
+                android:color="@color/glass_stroke" />
         </shape>
     </item>
 </selector>

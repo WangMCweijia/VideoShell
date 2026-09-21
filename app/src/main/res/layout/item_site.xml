@@ -11,6 +11,17 @@
     android:paddingEnd="6dp"
     android:paddingBottom="12dp">
 
+    <!-- 拖拽手柄（FN-6）：只有从手柄按下才起拖，避免和「长按改名」抢手势 -->
+    <ImageButton
+        android:id="@+id/btnDrag"
+        android:layout_width="30dp"
+        android:layout_height="42dp"
+        android:layout_marginEnd="2dp"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/site_drag"
+        android:src="@drawable/ic_drag"
+        android:tint="@color/text_hint" />
+
     <ImageView
         android:layout_width="22dp"
         android:layout_height="22dp"
@@ -38,18 +49,38 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="3dp" />
 
-        <TextView
-            android:id="@+id/tvMode"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="5dp"
-            android:background="@drawable/bg_badge"
-            android:paddingStart="6dp"
-            android:paddingTop="2dp"
-            android:paddingEnd="6dp"
-            android:paddingBottom="2dp"
-            android:textColor="@color/text_primary"
-            android:textSize="11sp" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tvMode"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_badge"
+                android:paddingStart="6dp"
+                android:paddingTop="2dp"
+                android:paddingEnd="6dp"
+                android:paddingBottom="2dp"
+                android:textColor="@color/text_primary"
+                android:textSize="11sp" />
+
+            <!-- 体检结果（FN-6）：默认不显示，点「体检」后才有内容 -->
+            <TextView
+                android:id="@+id/tvHealth"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:paddingStart="6dp"
+                android:paddingTop="2dp"
+                android:paddingEnd="6dp"
+                android:paddingBottom="2dp"
+                android:textSize="11sp"
+                android:visibility="gone" />
+        </LinearLayout>
     </LinearLayout>
 
     <ImageButton
