@@ -12,6 +12,17 @@
 变成假红 —— 这就是 `runbs3` 当初混在 `SUITES` 里造成的误报。要巡检活体站点请用
 `probe_daily.py`（它同样从本文件解析 `NET_SUITES`，不另抄一份）。
 
+**怎么判一个套件该不该进 NET_SUITES（v1.0.53 实测得出的唯一可靠判据）**：看它**有没有
+对真实域名发起读请求**。两个看似合理、实测都错的判据，别再用：
+
+| 错误判据 | 反例 |
+|---|---|
+| "源码里出现了真实域名" | `HdFix2.java` / `LineFix.java` 都写着 `czzy.app` / `fengkbao` 字样的 Referer，但它们只在**本地夹具**上做文本处理 —— CI 上通过 |
+| "源码里出现了 `Http.INSTANCE` / `newCall` 调用点" | `Agg37.java` 有调用点，但走的是未触发的分支 —— CI 上通过 |
+
+⇒ **静态分析判不出来，只能靠真 CI 观测**（开发机的网络与 runner 的地理位置不同，
+只有 CI 会红）。第一次把 harness 接进 CI 时，红的多半是**分类错误**而不是代码错。
+
 **不在回归列表里的"工具"**（要参数、只编译不断言，放进 SUITES 只会得到一条假绿）：
 `runsurvey.py`（播放页媒体候选勘察，用法 `runsurvey.py <pageUrl>`）。
 
@@ -26,8 +37,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PY = os.environ.get('VS_PYTHON') or sys.executable
 
 SUITES = [
-    'runverify3', 'runlinefix', 'runretry', 'runenc',
-    'runrank', 'runadb', 'runhdfix', 'runhdfix2', 'runhdfix3', 'runextract2', 'runbs', 'runbs4', 'runyg',
+    'runverify3', 'runlinefix', 'runadb',
+    'runhdfix2', 'runhdfix3', 'runbs', 'runbs4', 'runyg',
     'runpic', 'runresume', 'runhome', 'rungroups', 'runsearch', 'runygo',
     'runzqlines', 'runux', 'runmacplayer', 'runcalib', 'runzqshell', 'runshdyshell', 'runygimage',
     'runygcalib',
@@ -51,7 +62,19 @@ SUITES = [
 # runbs3 是 v1.0.53 从 SUITES 挪过来的：它跑的是 `https://www.bolyship.com`，
 # 断言的又是"详情页一共发了几条请求"—— 站点一改首页（多引两个 JS）就会红，
 # 而那是**站点漂移**不是我们的回归（v1.0.53 已用"退回旧工厂再跑一遍"证实过）。
-NET_SUITES = ['runlive2', 'runlivepic', 'runzqfix', 'runzqseg', 'runzqredir', 'runbs3']
+#
+# 下面 5 个是 v1.0.53 接进 CI 后第一次真跑才暴露出来的 —— 它们在本机全绿
+# （本机能连上那几个站），在 runner 上 20 条断言全红：
+#   runretry     Retry.java 直接 checkSite("茶杯狐") / checkSite("厂长资源")，
+#                还打 `https://czzy.app/__videoshell_probe_missing_page__` 试 404 行为
+#   runenc       Enc.java 里有一步"CDN 可达（404）"的真实请求
+#   runhdfix     HdFix.java `get(client, master/flat)` 读的是**带签名的短效 CDN 地址**
+#                （cdn.yzzy31-play.com / fengbao12.com）—— 会过期，且与出口地区有关
+#   runrank      Rank.java 同样 `get(client, real1/real2)` 读那两个 CDN 直链
+#   runextract2  Extract2.java 的 realCase 要真抓 `https://czzy.app/v_play/...`
+# 共同点：**它们对真实域名发起了读请求**。这是唯一可靠的判据（文件头有反例说明）。
+NET_SUITES = ['runlive2', 'runlivepic', 'runzqfix', 'runzqseg', 'runzqredir', 'runbs3',
+              'runretry', 'runenc', 'runhdfix', 'runrank', 'runextract2']
 
 
 def _targets():
@@ -72,6 +95,11 @@ summary = re.compile(r'(pass\s*=\s*\d+.*?fail\s*=\s*\d+)|(失败)|(SystemExit)')
 # 有些 Java 套件打的是 `  PASS  <标题>`（不带方括号，见 LineFix.java）。
 # 只认 `[PASS]` 会把 15 条断言数成 0 ⇒ 汇总里的 PASS 列说谎。
 BARE_PASS = re.compile(r'(?m)^\s*PASS\b')
+# 活体依赖的"味道"。**只是提示，不是判据** —— 静态判不出"该不该进 NET"
+# （见文件头），但把日志里的网络痕迹指出来，能把一次令人困惑的红变成一条可执行的结论。
+NET_SMELL = re.compile(r'UnknownHost|ConnectException|SocketTimeout|SocketTimeoutException|'
+                       r'ETIMEDOUT|SSLHandshake|Connection reset|Read timed out|'
+                       r'HTTP\s*5\d\d|HTTP\s*40[34]|不可达|抓取失败', re.I)
 total_ok = total_fail = bad = weak = 0
 targets = _targets()
 if not targets:
@@ -108,6 +136,11 @@ for s in targets:
             print('      | %s' % bl[:150])
         if len(bad_lines) > 5:
             print('      | …（共 %d 条 FAIL，全文见 _fail_%s.txt）' % (len(bad_lines), s))
+        # 活体依赖提示：输出里有网络痕迹 ⇒ 这套件很可能该归 NET_SUITES。
+        hits = sorted(set(m.group(0) for m in NET_SMELL.finditer(out)))
+        if hits:
+            print('      | 提示：输出里有网络痕迹（%s）⇒ 这套件若不该连外网，'
+                  '应归 NET_SUITES（判据见文件头）' % ', '.join(hits[:4]))
 
 print()
 print('==== 合计 PASS=%d  FAIL=%d  BAD_SUITES=%d  WEAK_SUITES=%d / %d ===='
