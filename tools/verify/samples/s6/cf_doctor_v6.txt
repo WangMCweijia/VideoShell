@@ -1,0 +1,119 @@
+========== 站点自检 ==========
+版本：v?
+名称：茶杯狐
+首页：https://www.cupfoxyy.com
+模式：html（无采集接口 → HTML 适配）
+时间：2026-09-22 08:59:57
+适配器：SeedRouter
+
+[1] 首页请求
+    HTTP 200
+    text/html;charset=utf-8 | <!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta content="width=device-width,initial-scale=1.0,maximu
+
+[2] 分类解析
+    结果：4 个分类
+      · 电影   https://www.cupfoxyy.com/vod/1.html
+      · 电视剧   https://www.cupfoxyy.com/vod/2.html
+      · 综艺   https://www.cupfoxyy.com/vod/3.html
+      · 动漫   https://www.cupfoxyy.com/vod/4.html
+
+[2a] 校准规则是否生效
+    自动探测：本站**不是**签名种子配置族 ⇒ 交给后续判定与网页解析（没取到 https://www.cupfoxyy.com/config.json（网络或站点不提供该文件））
+          自动探测：本站**不是**加密接口族 ⇒ 沿用网页解析（扫了 7 个分包，没有找到成对的 key/iv）
+          配方来源：无配方（既没校准过，也没自动学到模板）｜分类形状=（无）｜分类容器=（无）
+          本次解析没走到校准规则（无配方或已退回默认判据）
+    结论：校准规则**没有生效** —— 按上面 ⚠️ 指的方向处理（改点法 / 重新校准 / 用「站点配方重置」重来）
+
+[2b] 搜索路由自证（对照组）
+    本地还没有搜索模板 —— 先搜索一次（模板在那次学习中固化），再回来跑自检
+
+[2c] 数据来源 / 搜索降级链
+    适配器：SeedRouter
+    血缘判定：已判定**不是**本族（不会重复探测）
+    自证过程：www.cupfoxyy.com/api.php → 接口无响应：/api/home/config
+    密钥挖掘：扫了 7 个分包，没有找到成对的 key/iv
+    ⇒ 已判定**不是**加密接口族。搜索按链条走：URL 模板（见 [2b]） → 站点搜索表单自动学习 → UI 层预渲染（WebRender）。
+
+[3] 列表解析（分类：电影）
+    结果：85 条
+      · 忘却之岛  id=128010
+      · 野兽之心  id=128009
+      · 琼·里弗斯：致敬搞笑全明星  id=128035
+
+[3a] 封面取图实测（列表首条）
+    封面：https://www.cupfoxyy.com/upload/vod/20260921-1/bec1af5b2666f80dc54ecb92d5174f41.jpg
+    整段取图（App 真实链路）：HTTP 200，456992 B，**是图片**
+    系统DNS: 45.145.73.87［系统答案可连通］｜DoH: （无记录）
+    解读：
+      · 系统 DNS 为空/异常 ⇒ 污染；「有答案但连不上」同样算污染 —— 两种都已自动改走 DoH；
+      · ① 不是图片、而 ② 是**真图片** ⇒ 加密图床，App 已在图片层解开（属正常，别去删 media_key）；
+      · 带 ⚠️ 疑似加密图床 ⇒ 本站**未收录密钥**，封面一定出不来；把这几行反馈即可收录；
+      · 整段取图**不是图片**且没有 ⚠️ ⇒ 图床本身异常（错误页 / WAF 截断），把这一行反馈；
+      · 两边都正常但 HTTP 非 2xx ⇒ 图床按 UA/Referer/IP 拒绝，把状态码发回定位；
+      · ② 已是真图片、界面仍无图 ⇒ 问题在图片加载层（Coil），请连同机型一起反馈。
+
+[4] 详情 + 选集（用第一条 id=128010）
+    解析过程：
+      自动探测：本站**不是**签名种子配置族 ⇒ 交给后续判定与网页解析（没取到 https://www.cupfoxyy.com/config.json（网络或站点不提供该文件））；自动探测：本站**不是**加密接口族 ⇒ 沿用网页解析（扫了 7 个分包，没有找到成对的 key/iv）
+    名称：忘却之岛
+    线路：2 条
+      · 极速播放   1 集   首集 TC超清版 → https://www.cupfoxyy.com/play/128010-1-1.html
+      · 高清云播   1 集   首集 TC中字 → https://www.cupfoxyy.com/play/128010-2-1.html
+
+[5] 播放地址解析
+    直链：https://fengbao12.com/video/wangquezhidao/697ed7ec1f15/index.m3u8
+    HLS：true    请求头：User-Agent Referer
+
+[6] 媒体请求
+    HTTP 206
+    application/vnd.apple.mpegurl | #EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:4.64,\n0000000.
+
+[7] 首个分片（真下 512KB 测速）
+    https://fengbao12.com/video/wangquezhidao/697ed7ec1f15/0000000.ts
+    HTTP 200   实际下载 512KB / 238ms ≈ 2151 KB/s
+    → 链路充裕
+
+[8] 请求栈对照（播放器 vs 自检）
+    本地址是纯 ASCII，两套栈发出的字节一致 —— 播放失败不是这个原因
+
+[9] 播放器栈实测（与播放器同一个 OkHttpDataSource）
+    playlist : RuntimeException: Stub!   （未读到数据）
+    分片     : RuntimeException: Stub!   （未读到数据）
+    说明：上面两行若是 200/206，说明**播放器那一侧的网络层是通的**；
+         若这样还播不出来，原因就在解码/格式，而不是地址或链路。
+
+---------- HTTP 记录 ----------
+[200] 1653ms  https://www.cupfoxyy.com
+[404] 239ms  https://www.cupfoxyy.com/config.json
+[404] 229ms  https://www.cupfoxyy.com/api.php/api/home/config
+[200] 236ms  https://www.cupfoxyy.com
+[200] 221ms  https://www.cupfoxyy.com/template/shoutu38/statics/js/jquery.min.js?v=3.3.1
+[200] 217ms  https://www.cupfoxyy.com/template/shoutu38/statics/js/layer/layer.js?v3.1.1
+[200] 218ms  https://www.cupfoxyy.com/template/shoutu38/statics/js/shoutu-plugins.js?v=
+[200] 223ms  https://www.cupfoxyy.com/template/shoutu38/statics/js/shoutu-site.js?v=
+[200] 219ms  https://www.cupfoxyy.com/template/shoutu38/statics/js/shoutu-cms.js?v=
+[200] 215ms  https://www.cupfoxyy.com/template/shoutu38/statics/js/shoutu-ui.js?v=
+[200] 217ms  https://www.cupfoxyy.com/static/js/home.js
+[200] 233ms  https://www.cupfoxyy.com
+[200] 449ms  https://www.cupfoxyy.com/vod/1.html
+[200] [取字节 456992B] 671ms  https://www.cupfoxyy.com/upload/vod/20260921-1/bec1af5b2666f80dc54ecb92d5174f41.jpg
+[200] 235ms  https://www.cupfoxyy.com/detail/128010.html
+[200] 239ms  https://www.cupfoxyy.com/play/128010-1-1.html
+[206] 333ms  https://fengbao12.com/video/wangquezhidao/697ed7ec1f15/index.m3u8
+[200] 212ms  https://fengbao12.com/video/wangquezhidao/697ed7ec1f15/index.m3u8
+[200] 238ms  https://fengbao12.com/video/wangquezhidao/697ed7ec1f15/0000000.ts
+
+---------- 站点配方（已固化到本地，跨页面 / 跨启动复用） ----------
+来源：      自动学习
+分类形状：  —
+分类容器：  —
+首页替代：  —
+详情页模板：https://www.cupfoxyy.com/detail/{id}.html
+播放页模板：https://www.cupfoxyy.com/play/{id}-1-1.html
+列表页模板：—
+搜索页模板：—
+站点结构：  单页/未知
+更新时间：  2026-09-22 09:00:03
+
+---------- 播放记录（播放器 / 嗅探自己写的） ----------
+（没有播放记录）

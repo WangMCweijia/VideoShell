@@ -1,0 +1,6 @@
+hosts=yeguodj.com,ygdj1.com,ygdj2.com,ygdj3.com
+apiBase=https://www.yeguodj.com/api.php
+keySpec=2acf7e91e9864673
+ivSpec=1c29882d3ddfcfd6
+mode=CBC
+padding=Pkcs7

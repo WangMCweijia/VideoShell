@@ -31,6 +31,30 @@ jobs:
       - name: Build APKs
         run: ./gradlew :app:assembleDebug :app:assembleRelease --stacktrace
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 离线回归（42 个套件 / 1791 条源码·行为守卫，约 3 分钟）。
+      # 它读的是**源码文本 + 上面刚编译出的 kotlin-classes/R.jar**，所以必须排在 Build 之后；
+      # 联网套件（NET_SUITES）默认不跑 —— 它们打活体站点，站点漂移会污染结果变成假红。
+      # 跑失败 = 有既有规则被破坏（v1.0.53 那次「Absent ⇒ 零成本」被静默删掉就只被它抓到），
+      # 所以这一步是**硬门禁**，不要改成 continue-on-error。
+      # 「零断言」也算失败（runall.py 里的 WEAK）：否则夹具缺失会伪装成全绿。
+      - name: Offline regression (source guards)
+        run: python tools/verify/runall.py
+
+      - name: Upload regression logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-logs
+          path: |
+            tools/verify/_fail_*.txt
+            tools/verify/_*.out.txt
+          if-no-files-found: ignore
+
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:

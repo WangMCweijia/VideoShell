@@ -32,6 +32,25 @@ import com.google.gson.JsonParser
  * `alg == ed25519` + 有非空 `signature` + `payload` 能 base64 解成 JSON 且带**至少一个 http 的 api 地址**。
  * 一个普通站的 `/config.json`（或 404 页面）绝无可能同时满足。
  *
+ * ## 关于 `signature`：它是**识别标记**，不是安全边界
+ *
+ * 判据里对 `signature` 只用了一件事：**非空**。本文件从头到尾**没有验签**，
+ * 也不打算验 —— 这是刻意的取舍，不是漏做：
+ *
+ * - 这一族的立意就是「**域名会换也要认得**」。真验签会在对方轮换密钥时让**全族立刻失效**，
+ *   正好牺牲掉这一族唯一的强项；而它换来的"安全"在本场景是空的 —— 我们并不"信任"这个 api，
+ *   只是拿它当适配入口，站点内容终归是对方提供的。
+ * - minSdk 21 上 `java.security` 没有 Ed25519（要 API 33+），要验就得引 BouncyCastle
+ *   或自实现曲线运算。为一个"识别标记"付这份代价不划算。
+ *
+ * 所以请按「**形状检查**」理解它：`signature` 字段存在 ⇒ 这是这一族的配置；
+ * **不代表配置内容被任何人担保**。`apiBase()` 返回的只是"对方自己在配置里写的地址"，
+ * 我们照它去请求。
+ *
+ * ⚠️ 若将来这个地址要承载**信任**语义（云端下发、用户间分享配方），必须补齐真验签
+ * （内置公钥 + 自己的 Ed25519 实现）—— 否则任何人都能伪造一份配置把请求引到任意地址。
+ * **那时候「识别」就不够用了，才需要「保证」。**详见 `docs/PITFALLS.md` E 层。
+ *
  * ## 纯逻辑（离线可断言）
  *
  * 本文件**不 import 任何 Android 类**：base64 解用的是自己写的一小段（`java.util.Base64`
@@ -40,7 +59,7 @@ import com.google.gson.JsonParser
  */
 object SeedConfig {
 
-    /** 这一族的签名算法标记 */
+    /** 这一族的算法标记。只当**识别标记**用，不参与验签（理由见文件头「关于 signature」）。 */
     const val ALG = "ed25519"
 
     private const val B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
@@ -50,6 +69,9 @@ object SeedConfig {
      *
      * 取第一个 http(s) 的地址（payload 里 `api` 是数组，第一个就是官方线，
      * 后面的是本地开发兜底 —— 与 `AdapterFactory` 里"只挑第一个"的取舍一致）。
+     *
+     * 注意：**不验签**（`signature` 只判非空，理由见文件头）。返回的地址是"对方自己写的"，
+     * 不是"被担保的"。
      */
     fun apiBase(body: String?): String? {
         if (body.isNullOrBlank()) return null

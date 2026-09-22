@@ -1,0 +1,101 @@
+========== 站点自检 ==========
+版本：v?
+名称：厂长资源
+首页：https://czzy.app
+模式：html（无采集接口 → HTML 适配）
+时间：2026-09-22 10:59:24
+适配器：SeedRouter
+
+[1] 首页请求
+    HTTP 200
+    text/html;charset=UTF-8 | <!DOCTYPE html>\n<html lang="zh-CN" xmlns:wb="http://open.weibo.com/wb">\n<head>\n<meta http-equiv="Content-Type" content="
+
+[2] 分类解析
+    结果：17 个分类
+      · 豆瓣电影Top250   https://czzy.app/dbtop250
+      · 最新电影   https://czzy.app/zuixindianying
+      · 剧场版   https://czzy.app/dongmanjuchangban
+      · 国产剧   https://czzy.app/gcj
+      · 美剧   https://czzy.app/meijutt
+      · 韩剧   https://czzy.app/hanjutv
+      · 番剧   https://czzy.app/fanju
+      · 日剧   https://czzy.app/riju
+      · 海外剧   https://czzy.app/haiwaijuqita
+      · 高分影视   https://czzy.app/gaofenyingshi
+      · 华语电影   https://czzy.app/huayudianying
+      · 欧美电影   https://czzy.app/oumeidianying
+
+[2a] 校准规则是否生效
+    自动探测：本站**不是**签名种子配置族 ⇒ 交给后续判定与网页解析（没取到 https://czzy.app/config.json（网络或站点不提供该文件））
+          自动探测：本站**不是**加密接口族 ⇒ 沿用网页解析（首页没有引用同源 JS（不是打包式前端？））
+          配方来源：无配方（既没校准过，也没自动学到模板）｜分类形状=（无）｜分类容器=（无）
+          本次解析没走到校准规则（无配方或已退回默认判据）
+    结论：校准规则**没有生效** —— 按上面 ⚠️ 指的方向处理（改点法 / 重新校准 / 用「站点配方重置」重来）
+
+[2b] 搜索路由自证（对照组）
+    本地还没有搜索模板 —— 先搜索一次（模板在那次学习中固化），再回来跑自检
+
+[2c] 数据来源 / 搜索降级链
+    适配器：SeedRouter
+    血缘判定：已判定**不是**本族（不会重复探测）
+    自证过程：czzy.app/api.php → 接口无响应：/api/home/config
+    密钥挖掘：首页没有引用同源 JS（不是打包式前端？）
+    ⇒ 已判定**不是**加密接口族。搜索按链条走：URL 模板（见 [2b]） → 站点搜索表单自动学习 → UI 层预渲染（WebRender）。
+
+[3] 列表解析（分类：豆瓣电影Top250）
+    结果：25 条
+      · 肖申克的救赎  id=849
+      · 霸王别姬  id=7371
+      · 阿甘正传  id=1924
+
+[3a] 封面取图实测（列表首条）
+    封面：https://gimg1.baidu.com/gimg/app=2001&n=0&g=0n&fmt=jpeg&src=img.czzy66.com/2021/03/38eebb73362565-270x380.jpg
+    整段取图（App 真实链路）：HTTP 200，24318 B，**是图片**
+    系统DNS: 182.138.255.36 240e:974:ec00:400:0:0:b68a:ff24［系统答案可连通］｜DoH: （无记录）
+    解读：
+      · 系统 DNS 为空/异常 ⇒ 污染；「有答案但连不上」同样算污染 —— 两种都已自动改走 DoH；
+      · ① 不是图片、而 ② 是**真图片** ⇒ 加密图床，App 已在图片层解开（属正常，别去删 media_key）；
+      · 带 ⚠️ 疑似加密图床 ⇒ 本站**未收录密钥**，封面一定出不来；把这几行反馈即可收录；
+      · 整段取图**不是图片**且没有 ⚠️ ⇒ 图床本身异常（错误页 / WAF 截断），把这一行反馈；
+      · 两边都正常但 HTTP 非 2xx ⇒ 图床按 UA/Referer/IP 拒绝，把状态码发回定位；
+      · ② 已是真图片、界面仍无图 ⇒ 问题在图片加载层（Coil），请连同机型一起反馈。
+
+[4] 详情 + 选集（用第一条 id=849）
+    解析过程：
+      自动探测：本站**不是**签名种子配置族 ⇒ 交给后续判定与网页解析（没取到 https://czzy.app/config.json（网络或站点不提供该文件））；自动探测：本站**不是**加密接口族 ⇒ 沿用网页解析（首页没有引用同源 JS（不是打包式前端？））
+    名称：肖申克的救赎
+    线路：2 条
+      · 线路1080P   1 集   首集 线路1080P → https://czzy.app/v_play/bXZfODQ5LW5tXzE=.html
+      · 线路1080P (2)   1 集   首集 线路1080P → https://czzy.app/v_play/bXZfODQ5LW5tXzI=.html
+
+[5] 播放地址解析
+    HTML 抠不到直链 → 需要网页嗅探（第 6 步跳过）
+    嗅探页：https://czzy.app/v_play/bXZfODQ5LW5tXzE=.html
+    外壳判定：哪种壳都没认出（新壳 ⇒ 抓一页补分支）
+
+---------- HTTP 记录 ----------
+[200] 1253ms  https://czzy.app
+[404] 919ms  https://czzy.app/config.json
+[404] 232ms  https://czzy.app/api.php/api/home/config
+[200] 293ms  https://czzy.app
+[200] 300ms  https://czzy.app
+[200] 284ms  https://czzy.app/dbtop250
+[200] [取字节 24318B] 76ms  https://gimg1.baidu.com/gimg/app=2001&n=0&g=0n&fmt=jpeg&src=img.czzy66.com/2021/03/38eebb73362565-270x380.jpg
+[200] 1029ms  https://czzy.app/movie/849.html
+[200] 2038ms  https://czzy.app/v_play/bXZfODQ5LW5tXzE=.html
+[200] 977ms  https://czzy.app/v_play/bXZfODQ5LW5tXzE=.html
+
+---------- 站点配方（已固化到本地，跨页面 / 跨启动复用） ----------
+来源：      自动学习
+分类形状：  —
+分类容器：  —
+首页替代：  —
+详情页模板：https://czzy.app/movie/{id}.html
+播放页模板：—
+列表页模板：—
+搜索页模板：—
+站点结构：  详情页 + 播放页分离
+更新时间：  2026-09-22 10:59:28
+
+---------- 播放记录（播放器 / 嗅探自己写的） ----------
+（没有播放记录）

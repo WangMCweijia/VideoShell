@@ -82,8 +82,10 @@ object SeedFamily {
         val api = SeedConfig.apiBase(body)
         lastNote = if (api != null) {
             // 请求本身已经由 Http 记进 NetLog 了；这一条是**判定结论**，给它一个可读的注脚
-            NetLog.record(url, 0, 0, "自证命中：$api", TAG)
-            "本站自证为**签名种子配置族**（api=$api）"
+            NetLog.record(url, 0, 0, "族命中：$api", TAG)
+            // 措辞刻意用「识别」而不是「自证」：这里的判据**不验签**（见 SeedConfig 文件头），
+            // 说「自证」会让人以为 signature 被验证过。
+            "本站识别为**签名种子配置族**（依据：解开了 /config.json 的信封 ⇒ api=$api）"
         } else {
             // 不重复记一条 HTTP 状态（那由 Http 负责，这里编一个就是撒谎）。
             // 报告里靠 lastNote 分清「发了请求但没认出来」与「压根没发（已缓存否定）」。

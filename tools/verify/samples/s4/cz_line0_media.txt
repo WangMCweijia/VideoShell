@@ -1,0 +1,97 @@
+HTTP 200 ct=text/html; charset=UTF-8
+URL https://plaa.py1080p.com:8181/player/py.php?code=cs&if=1&url=https://m3hlsm3.py1080p.com:907/hls3/hls/峡谷.m3u8
+
+<html lang="en">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <meta http-equiv="Content-language" content="zh-CN">
+    <meta name="renderer" content="webkit">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+    <meta http-equiv="pragma" content="no-cache">
+    <meta name="referrer" content="never"/>
+    <meta http-equiv="Access-Control-Allow-Origin" content="*" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>CJCJ</title>
+    <link rel="stylesheet" href="https://npm.xn--swt777gelc.xyz/art/style1.css">
+    <!--<script src="//npm.xn--swt777gelc.xyz/art/jquery.js"></script>-->
+    <!--<script src="https://npm.elemecdn.com/jquery@3.6.0/dist/jquery.min.js"></script>-->
+    <!--<script src="https://npm.elemecdn.com/jquery@3.6.0/dist/jquery.js"></script>-->
+    <script src="https://npm.xn--swt777gelc.xyz/art/jquery.min.js"></script>
+    <script src="https://npm.xn--swt777gelc.xyz/art/jquery.js"></script>
+    <script src="https://npm.xn--swt777gelc.xyz/art/hls.min.js" type="application/javascript"></script>
+    <!--<script src="https://npm.elemecdn.com/hls.js@0.14.16/dist/hls.min.js" type="application/javascript"></script>-->
+    <script src="https://npm.xn--swt777gelc.xyz/art/artplayer1.js"></script>
+        <script src="https://npm.xn--swt777gelc.xyz/art/artplayerads.js"></script>
+    </head>
+<body>
+  
+<div id="player" class="w-h"></div>
+<script>
+    var ads=artplayerPluginAds({
+                html: '<img src="https://gimg0.baidu.com/gimg/app=2001&n=0&g=0n&fmt=jpeg&src=img.meituan.net/content/568dd5c06e843b22aa7fe1083031726e458705.gif">',
+                url: "https://www.yk382.com",
+                playDuration: 3,
+                totalDuration: 3,
+                i18n: {
+                    close: '关闭广告',
+                    countdown: '%s秒',
+                    detail: '查看详情',
+                    canBeClosed: '%s秒后可关闭广告',
+                },
+            });
+        var art = new Artplayer({
+   			id:"6bcac48c7e7b5ed8072f1a4fbc6d9f54",
+		    container: '#player',
+		    poster: 'https://os.i.gtimg.cn/music/photo_new/T053XD01002YkY4y4c0WM7.jpg',
+		    theme: '#FF0000',
+		    autoplay: false,
+		    playbackRate: true,
+        	autoPlayback: true,
+        	volume: 0.9,
+        	hotkey: true,
+        	pip: true,
+        	fullscreen: true,
+        	fullscreenWeb: true,
+        	setting: true,
+        	miniProgressBar: false,
+        	whitelist: ['*'],
+        	lock: true,
+        	fastForward: true,
+       		autoOrientation: true,
+       		airplay: true,
+		    customType: {
+		        hls: playM3u8,
+		    },
+		    plugins: [ads],
+
+		});
+    
+    function playM3u8(video, url, art) {
+        if (Hls.isSupported()) {
+            if (art.hls) art.hls.destroy();
+            const hls = new Hls();
+            hls.config.maxBufferLength=160;
+            hls.loadSource(url);
+            hls.attachMedia(video);
+            art.hls = hls;
+            art.on('destroy', () => hls.destroy());
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+           
+            video.src = url;
+             console.log('ccc',video.src);
+        } else {
+            art.notice.show = 'Unsupported playback format: m3u8';
+        }
+    }
+    
+    const mysvg = 'https://m3hlsm3.py1080p.com:907/hls3/hls/峡谷.m3u8';
+               
+        art.type = 'hls';
+        art.url = mysvg;
+     
+     
+</script>
+
+</body>
+
+</html>

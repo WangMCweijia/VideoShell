@@ -1,0 +1,1 @@
+var e=/^\d+(?:_\d+)+$/,t=t=>e.test(t)?t:Array.from(t,e=>e.charCodeAt(0)).join(`_`),n={version:`v0`,mode:`CBC`,padding:`Pkcs7`,key:t(`2acf7e91e9864673`),iv:t(`1c29882d3ddfcfd6`),sign_key:t(`5589d41f92a597d016b037ac37db243d`),media_key:t(`f5d965df75336270`),media_iv:t(`97b60394abc2fbe1`),media_padding:`Pkcs7`};export{n as t};

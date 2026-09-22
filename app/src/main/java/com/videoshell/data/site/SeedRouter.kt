@@ -66,7 +66,7 @@ class SeedRouter(site: SiteConfig, private val familyAbsent: Boolean = false) : 
             hitApi = api
             val a: SiteAdapter = if (api != null) SeedApiAdapter(site, api) else fallback
             gateNote = if (api != null) {
-                "本站自证为**签名种子配置族**（api=$api）⇒ 分类/列表/搜索/详情/播放全部走接口。" +
+                "本站识别为**签名种子配置族**（依据：解开 /config.json 的信封 ⇒ api=$api）⇒ 分类/列表/搜索/详情/播放全部走接口。" +
                         "该站的 HTML 里没有分类、也没有播放地址（`<video>` 的 src 由 JS 调接口设），" +
                         "所以**校准学不到东西不是校准的问题** —— 这是设计如此。"
             } else {

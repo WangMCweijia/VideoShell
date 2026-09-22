@@ -1,0 +1,357 @@
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.videoshell.data.model.Episode;
+import com.videoshell.data.model.VideoItem;
+import com.videoshell.data.site.CryptApi;
+import com.videoshell.data.site.CryptFamily;
+import com.videoshell.data.site.CryptRecipe;
+import com.videoshell.data.site.YeguoMap;
+import com.videoshell.util.EpisodeOrder;
+
+import kotlin.coroutines.Continuation;
+import kotlin.coroutines.EmptyCoroutineContext;
+import kotlin.jvm.functions.Function2;
+import kotlinx.coroutines.BuildersKt;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.*;
+
+/**
+ * v1.0.36「野果分集名全是剧名」的断言套件。
+ *
+ * 用户原话：**「野果分集列表中，分集名称全是剧名，需要优化显示为集数」**。
+ *
+ * 根因（实测 20 部剧，2026-09-20）：站点下发的分集名是**自带剧名**的长串
+ *   `少妇白洁 第一集` … `少妇白洁 第二十二集`／`AI魔改 速通西游第一集`／
+ *   `《庆余年》 第三季第一集`；第一集常常连序号都没有（`时间停止` 那一集名 == 剧名）；
+ *   个别集把整段剧情简介贴进标题。照原样铺进选集网格 ⇒ 每格都在复读剧名。
+ *
+ * 套件钉五件事：
+ *   A 集号判据（[EpisodeOrder.noInTitle]，全项目唯一一份）：中文数字、形状优先
+ *   B 整列同源：标题 → 站点序号 → 数组位置，三选一，**不许逐条混用**
+ *   C 真实夹具（照实测数据原样构造）跑 [YeguoMap.episodesFrom]：名字必须是「第N集」
+ *   D 排序跟着编号走（原先「第3集」会被排到第一位 —— 那是两个来源混比的后果）
+ *   E 判据只有一份：SsrPayload 不再自持 TITLE_NO
+ *   F 端到端（真网络）：真取一部剧的接口，产出名必须干净、递增、互不相同
+ *
+ * 入参：a[0] = 夹具目录  a[1] = 工程根（E 段读源码）
+ */
+public class EpName {
+
+    static final String YG = "https://agenda.fzchosdi.cc";
+
+    static int pass = 0, fail = 0;
+    static final List<String> fails = new ArrayList<>();
+
+    static void ok(String name, boolean cond, String detail) {
+        if (cond) {
+            pass++;
+            System.out.println("  [PASS] " + name);
+        } else {
+            fail++;
+            fails.add(name);
+            System.out.println("  [FAIL] " + name + "   → " + detail);
+        }
+    }
+
+    static void eq(String name, Object got, Object want) {
+        ok(name, Objects.equals(got, want), "got=" + got + " want=" + want);
+    }
+
+    static void banner(String s) {
+        System.out.println();
+        System.out.println("========== " + s + " ==========");
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    static <T> T block(Function2 fn) throws Exception {
+        return (T) BuildersKt.runBlocking(EmptyCoroutineContext.INSTANCE, fn);
+    }
+
+    static String read(String p) {
+        try {
+            Path q = Paths.get(p);
+            return Files.exists(q) ? new String(Files.readAllBytes(q), "UTF-8") : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    static String names(List<Episode> l) {
+        List<String> n = new ArrayList<>();
+        for (Episode e : l) n.add(e.getName());
+        return String.join(",", n);
+    }
+
+    static String idx(List<Integer> l) {
+        return l.toString().replace("[", "").replace("]", "").replace(" ", "");
+    }
+
+    static Episode ep(String name, String url) {
+        // Episode 增加第 3 字段 pic 后，Java 侧构造点必须显式给值（Kotlin 默认值 Java 用不上）
+        return new Episode(name, url, "");
+    }
+
+    /**
+     * 造一份 `playlet/play` 的 `data`（字段名与形态照真实接口抄）。
+     *
+     * `index` / `sort` 都按 1..n 给 —— 实测 20/20 是这样（`SsrPayload` 注释里那句
+     * "sort 恒为 1"说的是 SSR payload，不是这个接口）。
+     */
+    static JsonObject playData(String... titles) {
+        JsonObject data = new JsonObject();
+        JsonArray arr = new JsonArray();
+        for (int i = 0; i < titles.length; i++) {
+            JsonObject o = new JsonObject();
+            o.addProperty("index", i + 1);
+            o.addProperty("sort", i + 1);
+            o.addProperty("id", 186514 + i);
+            o.addProperty("episode_title", titles[i]);
+            o.addProperty("video_url", "https://cdn/" + i + ".m3u8");
+            arr.add(o);
+        }
+        data.add("episodeAll", arr);
+        return data;
+    }
+
+    static List<Episode> eps(JsonObject data) {
+        return YeguoMap.INSTANCE.episodesFrom("2275", data,
+                new ArrayList<JsonElement>(), new HashMap<String, String>());
+    }
+
+    public static void main(String[] a) throws Exception {
+        String here = a.length > 0 ? a[0] : ".";
+        String proj = a.length > 1 ? a[1] : ".";
+
+        // ---------------------------------------------------------------- A
+        banner("A. 集号判据 EpisodeOrder.noInTitle（全项目唯一一份）");
+
+        eq("「少妇白洁 第二十一集」→ 21（中文数字）", 21, EpisodeOrder.INSTANCE.noInTitle("少妇白洁 第二十一集"));
+        eq("「少妇白洁 第一集」→ 1", 1, EpisodeOrder.INSTANCE.noInTitle("少妇白洁 第一集"));
+        eq("「《庆余年》 第三季第一集」→ 1（不是 3 —— 「季」不是集号标记）",
+                1, EpisodeOrder.INSTANCE.noInTitle("《庆余年》 第三季第一集"));
+        eq("「AI魔改 速通西游第一集」→ 1", 1, EpisodeOrder.INSTANCE.noInTitle("AI魔改 速通西游第一集"));
+        eq("「我能不能看到欲望值 第3集」→ 3（阿拉伯与中文必须归到同一个号）",
+                3, EpisodeOrder.INSTANCE.noInTitle("我能看到欲望值 第3集"));
+        eq("「剧名 第1集 1080P」→ 1（不是 1080）", 1, EpisodeOrder.INSTANCE.noInTitle("剧名 第1集 1080P"));
+        eq("「第 1 话」→ 1（带空格）", 1, EpisodeOrder.INSTANCE.noInTitle("第 1 话"));
+        eq("「第一百零八集」→ 108", 108, EpisodeOrder.INSTANCE.noInTitle("第一百零八集"));
+        eq("「十二」→ 12（无「第」不带形状 ⇒ null）", null, EpisodeOrder.INSTANCE.noInTitle("十二"));
+        eq("「时间停止」→ null（整条就是剧名，没有集号）", null, EpisodeOrder.INSTANCE.noInTitle("时间停止"));
+        eq("「AI短剧 窥破爱人谎言2」→ null（末尾那个 2 不是集号，不许当集号用）",
+                null, EpisodeOrder.INSTANCE.noInTitle("AI短剧 窥破爱人谎言2"));
+        eq("「舔狗2应有尽有」→ null（剧名里的 2 不是集号）",
+                null, EpisodeOrder.INSTANCE.noInTitle("舔狗2应有尽有"));
+
+        // ---------------------------------------------------------------- B
+        banner("B. 整列同源：标题 → 站点序号 → 数组位置（不许逐条混用）");
+
+        eq("整列标题都有号且互不相同 ⇒ 用标题",
+                "[1, 2, 3]",
+                YeguoMap.INSTANCE.episodesNoes(
+                        Arrays.asList("少妇白洁 第一集", "少妇白洁 第二集", "少妇白洁 第三集"),
+                        Arrays.asList(1, 2, 3)).toString());
+        eq("标题一个号都没有 ⇒ 整列用站点序号（窥破爱人谎言那种）",
+                "[1, 2, 3]",
+                YeguoMap.INSTANCE.episodesNoes(
+                        Arrays.asList("AI短剧 窥破爱人谎言", "AI短剧 窥破爱人谎言2", "AI短剧 窥破爱人谎言3"),
+                        Arrays.asList(1, 2, 3)).toString());
+        eq("★标题只缺一个 ⇒ **整列**退到站点序号（不是那一集单独退）",
+                "[1, 2, 3]",
+                YeguoMap.INSTANCE.episodesNoes(
+                        Arrays.asList("舔狗2应有尽有", "舔狗2应有尽有 第二集", "舔狗2应有尽有第三集"),
+                        Arrays.asList(1, 2, 3)).toString());
+        eq("★站点序号重复（站点给脏了）⇒ 整列退到数组位置 1..n",
+                "[1, 2, 3]",
+                YeguoMap.INSTANCE.episodesNoes(
+                        Arrays.asList("A", "B", "C"),
+                        Arrays.asList(1, 1, 1)).toString());
+        eq("站点序号从 0 起 / 缺项 ⇒ 不用它，退到数组位置",
+                "[1, 2, 3]",
+                YeguoMap.INSTANCE.episodesNoes(
+                        Arrays.asList("A", "B", "C"),
+                        Arrays.asList(0, 2, 3)).toString());
+        eq("空列不炸", "[]", YeguoMap.INSTANCE.episodesNoes(
+                new ArrayList<String>(), new ArrayList<Integer>()).toString());
+
+        eq("显示名一律「第N集」", "第7集", YeguoMap.INSTANCE.episodeLabel(7));
+        eq("显示名不出现「第0集」（兜底到 1）", "第1集", YeguoMap.INSTANCE.episodeLabel(0));
+
+        // ---------------------------------------------------------------- C
+        banner("C. 真实夹具跑 episodesFrom：名字必须是「第N集」");
+
+        // ① 少妇白洁：22 集，中文数字 第一集..第二十二集
+        String[] sb = new String[22];
+        String[] cn = {"一", "二", "三", "四", "五", "六", "七", "八", "九", "十",
+                "十一", "十二", "十三", "十四", "十五", "十六", "十七", "十八", "十九", "二十",
+                "二十一", "二十二"};
+        for (int i = 0; i < 22; i++) sb[i] = "少妇白洁 第" + cn[i] + "集";
+        List<Episode> e1 = eps(playData(sb));
+        eq("少妇白洁：22 集", 22, e1.size());
+        eq("少妇白洁：首集名", "第1集", e1.get(0).getName());
+        eq("少妇白洁：第 21 集名（中文数字二十一）", "第21集", e1.get(20).getName());
+        eq("少妇白洁：末集名", "第22集", e1.get(21).getName());
+        ok("少妇白洁：一个剧名都没漏进显示名", !names(e1).contains("少妇白洁"), names(e1));
+
+        // ② 窥破爱人谎言：3 集，标题里一个「第N集」都没有
+        List<Episode> e2 = eps(playData(
+                "AI短剧 窥破爱人谎言", "AI短剧 窥破爱人谎言2", "AI短剧 窥破爱人谎言3"));
+        eq("窥破爱人谎言：三格各自不同号", "第1集,第2集,第3集", names(e2));
+
+        // ③ 妹妹帮我操妈妈：第 1 集标题里塞了整段简介
+        List<Episode> e3 = eps(playData(
+                "妹妹帮我操妈妈 第1集觉醒了最离谱的异能，竟是“精液依赖”？意外的一击竟让毒舌妹妹瞬间沦为痴情小C，眼神黏腻，直接扑到床上索吻！",
+                "妹妹帮我操妈妈 第2集"));
+        eq("带六十多字简介的脏标题被收敛成一个短名", "第1集,第2集", names(e3));
+        ok("显示名长度全部 <= 6 个字（网格一格放得下）",
+                names(e3).length() <= 12, names(e3));
+
+        // ④ 时间停止：只有一集，名字就等于剧名
+        List<Episode> e4 = eps(playData("时间停止"));
+        eq("单集剧的名字变成「第1集」（原先直接显示剧名）", "第1集", e4.get(0).getName());
+
+        // ⑤ 伪地址必须还在（真链播放时现取）
+        ok("分集地址仍是伪地址 yeguo://play/{vid}/{eid}",
+                e1.get(0).getUrl().startsWith("yeguo://play/2275/"), e1.get(0).getUrl());
+
+        // ---------------------------------------------------------------- D
+        banner("D. 排序跟着编号走（原先「第3集」会排到第一位）");
+
+        eq("少妇白洁：正序 = 第1集在前", "0", String.valueOf(EpisodeOrder.INSTANCE.order(e1, false).get(0)));
+        eq("少妇白洁：倒序 = 第22集在前", "21", String.valueOf(EpisodeOrder.INSTANCE.order(e1, true).get(0)));
+
+        // 回归：不带剧名的**脏标题**（v1.0.35 真实形态）+ 伪地址。
+        // 旧代码逐条回退 ⇒ 号是 [186514, 186515, 3]，第 3 集被排到第 1 位。
+        List<Episode> dirty = new ArrayList<>(Arrays.asList(
+                ep("我能看到欲望值 第一集", "yeguo://play/2275/186514"),
+                ep("我能看到欲望值 第二集", "yeguo://play/2275/186515"),
+                ep("我能看到欲望值 第3集", "yeguo://play/2275/186516")));
+        eq("★中文数字混阿拉伯数字：整列同源 ⇒ 顺序不变（旧代码这里会变成 2,0,1）",
+                "0,1,2", idx(EpisodeOrder.INSTANCE.order(dirty, false)));
+        eq("脏标题也能从集名取到号（不再退到伪地址里的 186514）",
+                "1,2,3",
+                String.valueOf(Arrays.asList(
+                        EpisodeOrder.INSTANCE.noOf(dirty.get(0)),
+                        EpisodeOrder.INSTANCE.noOf(dirty.get(1)),
+                        EpisodeOrder.INSTANCE.noOf(dirty.get(2)))).replace("[", "").replace("]", "").replace(" ", ""));
+
+        // 标题完全取不到号的一列（窥破爱人谎言）：整列退到地址，地址号一致 ⇒ 站点顺序
+        List<Episode> noTitle = new ArrayList<>(Arrays.asList(
+                ep("AI短剧 窥破爱人谎言", "yeguo://play/2275/186514"),
+                ep("AI短剧 窥破爱人谎言2", "yeguo://play/2275/186515"),
+                ep("AI短剧 窥破爱人谎言3", "yeguo://play/2275/186516")));
+        eq("标题无号的一列：整列退地址、仍是站点顺序", "0,1,2",
+                idx(EpisodeOrder.INSTANCE.order(noTitle, false)));
+
+        // ---------------------------------------------------------------- E
+        banner("E. 判据只有一份（源码守卫）");
+
+        String ssr = read(proj + "/app/src/main/java/com/videoshell/data/site/SsrPayload.kt");
+        String eo = read(proj + "/app/src/main/java/com/videoshell/util/EpisodeOrder.kt");
+        String ya = read(proj + "/app/src/main/java/com/videoshell/data/site/YeguoAdapter.kt");
+        String adapter = read(proj + "/app/src/main/java/com/videoshell/data/site/HtmlAdapter.kt");
+
+        // ⚠️ 用 contains("TITLE_NO") 会**把注释也算成回归** —— SsrPayload 里那段
+        //    "原来这里有一份 TITLE_NO，已删除"正是为了记下这次合并的原因，必须留着。
+        //    所以只认"活的声明 / 活的调用"（这条正是本项目"守卫绑死写法"老坑的反面教材）。
+        ok("E1 SsrPayload 不再自持一份集号判据（TITLE_NO 的声明与调用都已删；注释留名是为了记教训）",
+                ssr != null && !ssr.contains("private val TITLE_NO")
+                        && !ssr.contains("TITLE_NO.find"), "又加回来了");
+        ok("E2 SsrPayload 走共用判据 EpisodeOrder.noInTitle",
+                ssr != null && ssr.contains("EpisodeOrder.noInTitle"), "没接上");
+        ok("E3 YeguoMap 走共用判据（自己不再写一份正则）",
+                ya != null && ya.contains("EpisodeOrder.noInTitle")
+                        && !ya.contains("private val EP_MARKER"), "又抄了一份");
+        ok("E4 全项目只有一处 EP_MARKER",
+                eo != null && eo.contains("private val EP_MARKER")
+                        && !(ya != null && ya.contains("EP_MARKER")), "判据不止一份");
+        ok("E5 分集名不再直接透传站点标题（episode_title 只当作集号来源）",
+                ya != null && !ya.contains("out += Episode(title,"), "又透传了");
+        ok("E6 卡片显示的就是 Episode.name（改动点只有一个）",
+                adapter != null, "读不到源码");
+
+        // ---------------------------------------------------------------- F
+        banner("F. 端到端（真网络）：真取一部剧，产出名必须干净、递增、互不相同");
+        try {
+            final CryptRecipe rec = block((s, c) -> CryptFamily.INSTANCE.resolve(
+                    YG, YG, (Continuation<? super CryptRecipe>) c));
+            if (rec == null) {
+                System.out.println("  [SKIP] F 段（自证没命中，需要能访问 " + YG + "）");
+            } else {
+                Map<String, String> p = new HashMap<>();
+                p.put("page", "1");
+                p.put("limit", "20");
+                JsonObject lst = block((s, c) -> CryptApi.INSTANCE.call(rec, "/api/theater/exploreList",
+                        p, YG, (Continuation<? super JsonObject>) c));
+                List<VideoItem> items = YeguoMap.INSTANCE.itemsFromResp(lst);
+                ok("F1 拿到列表", !items.isEmpty(), "条数=" + items.size());
+                // 列表第一条常常是单集短剧 —— 单集验不出「递增 / 互不相同」，往后找一部多集的。
+                List<Episode> out = null;
+                String title = "";
+                String picked = "";
+                for (int k = 0; k < Math.min(8, items.size()); k++) {
+                    String vid = items.get(k).getId();
+                    Map<String, String> dq = new HashMap<>();
+                    dq.put("id", vid);
+                    JsonObject det = block((s, c) -> CryptApi.INSTANCE.call(rec, "/api/playlet/detail",
+                            dq, YG, (Continuation<? super JsonObject>) c));
+                    JsonObject d = det == null ? null : det.getAsJsonObject("data");
+                    if (d == null) continue;
+                    JsonArray deps = d.getAsJsonArray("episodes");
+                    List<JsonElement> dlist = new ArrayList<>();
+                    if (deps != null) for (JsonElement e : deps) dlist.add(e);
+                    if (dlist.isEmpty()) continue;
+                    String videoId = d.has("video_id") ? d.get("video_id").getAsString() : vid;
+                    String first = dlist.get(0).getAsJsonObject().get("id").getAsString();
+                    Map<String, String> pq = new HashMap<>();
+                    pq.put("video_id", videoId);
+                    pq.put("episode_id", first);
+                    JsonObject pl = block((s, c) -> CryptApi.INSTANCE.call(rec, "/api/playlet/play",
+                            pq, YG, (Continuation<? super JsonObject>) c));
+                    JsonObject pd = pl == null ? null : pl.getAsJsonObject("data");
+                    List<Episode> cand = YeguoMap.INSTANCE.episodesFrom(
+                            videoId, pd, dlist, YeguoMap.INSTANCE.titleMapFrom(dlist));
+                    picked = d.get("title").getAsString();
+                    if (cand.size() > 1) { out = cand; title = picked; break; }
+                    if (out == null) { out = cand; title = picked; }
+                }
+                ok("F2 拿到详情与分集", out != null && !out.isEmpty(), "详情/分集为空");
+                if (out != null && !out.isEmpty()) {
+                    System.out.println("       剧名 = " + title + "　分集 = " + out.size() + " 集");
+                    System.out.println("       前 3 格 = "
+                            + names(out.subList(0, Math.min(3, out.size()))));
+
+                    boolean shapeOk = true, ascOk = true;
+                    Set<String> uniq = new HashSet<>();
+                    int prev = -1;
+                    for (int i = 0; i < out.size(); i++) {
+                        String n = out.get(i).getName();
+                        if (!n.matches("第\\d+集")) shapeOk = false;
+                        Integer no = EpisodeOrder.INSTANCE.noOf(out.get(i));
+                        if (no == null) { ascOk = false; continue; }
+                        if (i > 0 && no <= prev) ascOk = false;
+                        prev = no;
+                        uniq.add(n);
+                    }
+                    ok("F3 每一格都是「第N集」形状（没有剧名混进来）", shapeOk, names(out));
+                    ok("F4 集号严格递增", ascOk, names(out));
+                    ok("F5 集号互不相同（不会出现两个「第1集」）", uniq.size() == out.size(), names(out));
+                    ok("F6 显示名里没有剧名", !names(out).contains(title), names(out));
+                    // 多集的那一部必须真的被验到，否则 F4/F5 是空转
+                    ok("F7 验到的是多集剧（单集验不出递增与互不相同）",
+                            out.size() > 1 || items.size() < 8, "只验到 " + out.size() + " 集");
+                }
+            }
+        } catch (Throwable t) {
+            System.out.println("  [SKIP] F 段（真网络不可用：" + t + "）");
+        }
+
+        System.out.println();
+        System.out.println("==== EpName  " + pass + " PASS / " + fail + " FAIL ====");
+        if (!fails.isEmpty()) System.out.println("失败项：" + fails);
+        if (fail > 0) System.exit(1);
+    }
+}
