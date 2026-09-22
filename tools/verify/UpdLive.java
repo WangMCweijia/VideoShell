@@ -65,15 +65,25 @@ public class UpdLive {
 
         // ---------------------------------------------------------------- B 实验组
         System.out.println("\n================ B 实验组：UpdateChecker.check()（现在双通道） ================");
-        System.out.println("  —— 本机是 1.0.54（= 清单里的版本）⇒ 应当报「已是最新」");
-        UpdateChecker.State s54 = block((scope, cont) -> UpdateChecker.INSTANCE.check(
-                54, code, (Continuation<? super UpdateChecker.State>) cont));
-        report(s54);
+        // 先问出"线上最新是哪个 code" —— 后面拿它当基准，harness 就不必每发一版改一次。
+        System.out.println("  —— 假装本机是 code=0（比谁都老）⇒ 应当报「有新版本」，这就是**存量用户**看到的");
+        UpdateChecker.State s0 = block((scope, cont) -> UpdateChecker.INSTANCE.check(
+                0, code, (Continuation<? super UpdateChecker.State>) cont));
+        boolean newerPath = report(s0);
+        if (s0 instanceof UpdateChecker.State.Newer) {
+            final int latest = ((UpdateChecker.State.Newer) s0).getInfo().getVersionCode();
 
-        System.out.println("\n  —— 假装本机是 1.0.53 ⇒ 应当报「有新版本」，且备用下载地址非空");
-        UpdateChecker.State s53 = block((scope, cont) -> UpdateChecker.INSTANCE.check(
-                53, code, (Continuation<? super UpdateChecker.State>) cont));
-        boolean newerPath = report(s53);
+            System.out.println("\n  —— 假装本机**就是**最新（code=" + latest + "）⇒ 应当报「已是最新」");
+            report(block((scope, cont) -> UpdateChecker.INSTANCE.check(
+                    latest, code, (Continuation<? super UpdateChecker.State>) cont)));
+
+            System.out.println("\n  —— 假装本机差一版（code=" + (latest - 1) + "）⇒ 应当报「有新版本 v"
+                    + latest + "」；**这就是手上那一版现在会看到的东西**");
+            report(block((scope, cont) -> UpdateChecker.INSTANCE.check(
+                    latest - 1, code, (Continuation<? super UpdateChecker.State>) cont)));
+        } else {
+            System.out.println("\n  （取不到线上版本号，后两组对照跳过）");
+        }
 
         // ---------------------------------------------------------------- 结论
         System.out.println("\n================ 结论 ================");
