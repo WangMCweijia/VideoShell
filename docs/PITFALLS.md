@@ -87,6 +87,7 @@
 | E20 | "本地全绿"其实什么都没证明 | 本机还有一堆**未入仓**的抓取样本/产物；CI checkout 后没有它们 | 用 **`git archive HEAD` 单独铺一棵树**在那里跑一遍 —— 那才是 CI 会看到的世界（见 4.35） |
 | E21 | 长任务**零日志、零进展**、进程还活着 | 并发上传工具里用了非可重入的 `threading.Lock`，而临界区内又调了 `log()`/`save()`（同一把锁再抢一次）⇒ 第 25 次成功时**静默死锁** | 锁一律 `RLock`；**日志/落盘移出临界区**；进度按"已完成条数"打点，别只看终态（v1.0.53） |
 | E22 | 本机全绿的 5 个套件，在 CI 上 **20 条断言全红** | 它们对**真实域名发起了读请求**（`czzy.app` / `cupfoxyy.com` / 带签名的短效 CDN 直链）—— 本机能连、runner 连不上 | 判据只能是「**有没有对真实域名发起读请求**」；`SUITES`/`NET_SUITES` 的划分要按它做，别按"源码里有没有域名字符串"（反例见 §4.36）（v1.0.53） |
+| E23 | 代码推上去了、CI 也绿，用户却**下载不到新版** | 发布步骤带 `if: startsWith(github.ref,'refs/tags/')` ⇒ **push main 只出 Actions artifact，不出 Release**；v1.0.42~53 连推 12 版、一次 tag 都没打 ⇒ Releases 卡在 `v1.0.41` | **发版 = 打 tag**（`refs/tags/v<ver>` 指向 main HEAD）。判据要落到用户那侧：「**用户能不能从他平常下载的入口拿到当前版本号**」（见 §4.37）（v1.0.53） |
 
 ---
 
@@ -1067,3 +1068,33 @@ python tools/verify/ci_sim.py                      # 在那棵树里跑 runall.p
 · `runhdfix` / `runrank`（读带签名的短效 CDN 直链）· `runextract2`（真抓 `czzy.app` 播放页）。
 挪完在**本机**单独跑这 5 个：`PASS=104 FAIL=0` —— 这一步很重要，它是"**是地域网络问题，
 不是我们的回归**"的证据；只挪不证，就等于把真回归一起藏进 `NET_SUITES` 了。
+
+### 4.37 ★ 「推上去了」不等于「发版了」：Release 由 tag 触发（v1.0.53）
+
+用户问「我能下载最新版了吗」。一查 Releases，最新还停在 **`v1.0.41`** —— 而代码早已是 1.0.53。
+中间的 v1.0.42 ~ v1.0.53 **全是 push main、一次 tag 都没打**。
+
+根因在 workflow 里，不在构建：
+
+```yaml
+- name: Publish Release (on tag)
+  if: startsWith(github.ref, 'refs/tags/')      # ← 关键：只有 tag 才发布
+  uses: softprops/action-gh-release@v2
+```
+
+`on: push: branches: [main]` 只负责**构建 + 上传 artifact**（artifact 得登录 GitHub 才能下、有保留期）；
+`tags: ['v*']` 才触发**发布**。所以「CI 绿」和「用户下得到」之间隔着一个 **tag**。
+
+**通用教训**：一条流水线里，「构建成功」「上传了产物」「对外发布了」是**三件事**。
+只看到前两件绿就以为用户拿得到，又是一次把**进程状态**当成了**结果状态**
+（同 §4.34 的 `rc=0` vs 断言数）。**判据必须落到用户那一侧**：
+「用户能不能从**他平常下载的入口**拿到**当前版本号**」。
+
+**发版动作（三步，第三步最容易漏）**：
+1. bump `versionCode` / `versionName` → 提交 → 推 main（走区间推送工具）；
+2. `gh api -X POST repos/<o>/<r>/git/refs -f ref=refs/tags/v<ver> -f sha=<main HEAD>`；
+3. 等 tag 那轮 CI，确认发布步骤 success，**并核验 `releases/tags/v<ver>` 里的 asset 列表非空**
+   （只看到 release 出现、没看 asset，等于没核）。
+
+签名不需要为 CI 额外配置：`keystore.properties` 在库内 ⇒ CI 的 release 包是**真签名**；
+debug 也复用同一把钥匙 ⇒ 覆盖安装不会「应用未安装：签名冲突」。
