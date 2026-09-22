@@ -163,6 +163,10 @@ public class Adb {
                 sw.contains("'fixed'") && sw.contains("z>=90") && sw.contains("innerWidth*0.5"));
         ok("★ 含 <video> 的元素一律豁免（播控层不能被当浮层杀掉）",
                 sw.contains("querySelector('video')"));
+        ok("★ 含**站内链接**的浮层一律豁免（v1.0.58：导航栏和广告浮层在"
+                        + "位置/层级/尺寸上同形，只有内容能区分 —— 杀导航=分类全空）",
+                sw.contains("var na=el.querySelector&&el.querySelector('a[href]')")
+                        && sw.contains("if(na&&!CROSS(na.getAttribute('href')))continue;"));
         ok("锚点 / javascript: 链接不参与（没有目标可判就别动）",
                 sw.contains("javascript:") && sw.contains("charAt(0)==='#'"));
         ok("MutationObserver 兜住「广告比正文晚到」的路径", sw.contains("MutationObserver"));

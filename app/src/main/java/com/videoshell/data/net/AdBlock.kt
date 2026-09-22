@@ -284,6 +284,8 @@ object AdBlock {
      * ## 防误伤的硬约束
      *
      * - 含 `<video>` 的元素一律不动（那是播放器本体）；
+     * - 含**站内链接**的 fixed/sticky 元素一律不动（那是站自己的导航——v1.0.58 补的
+     *   第三道豁免：导航栏和广告浮层在"位置/层级/尺寸"上完全同形，只有内容能区分）；
      * - 杀掉的节点都打 `data-vs-ad` 标记：幂等 + 可回查（"这节点为什么没了"）；
      * - MutationObserver + 前几次定时清扫兜住"广告比正文晚到"的路径。
      *
@@ -319,6 +321,11 @@ object AdBlock {
             "var r2=el.getBoundingClientRect();" +
             "if(r2.width<innerWidth*0.5&&r2.height<innerHeight*0.25)continue;" +
             "if(el.querySelector&&el.querySelector('video'))continue;" +
+            // 内链豁免（v1.0.58）：站自己的 sticky 头部 / 底部导航栏也满足上面全部条件
+            // （fixed + z 高 + 满宽）—— 但它们身上一定有指向**本站**的链接；真广告浮层
+            // 里只有外链或根本没有链接。杀站自己的导航 = 分类全空 / 校准第一步就没了。
+            "var na=el.querySelector&&el.querySelector('a[href]');" +
+            "if(na&&!CROSS(na.getAttribute('href')))continue;" +
             "KILL(el,'overlay');}" +
             "}catch(e){}}" +
             "if(!window.__vsSweep){window.__vsSweep=1;" +

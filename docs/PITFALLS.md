@@ -94,6 +94,7 @@
 | E27 | 用户报"XX 站广告仍然很多"，实测该站**每个向量都干净** | 前提错了：同名站很多，用户看的未必是你测的这个站；或站点按 UA/IP 下发不同内容 | 先拿**真实广告样本**（用户看到的页面 URL / 截图）再改判据；没有它一个 `AD_HOSTS` 都不加。测"有没有广告"要覆盖五向量：静态页 / 活体 UA 差集 / 混淆类名 / 播放器 JS 链 / m3u8 流内。见 §4.50（v1.0.56） |
 | E28 | 用户拿截图证实 E27 那个站**真的有广告**（宽幅图幅），但 PC 端 40 次抓样 + WebView UA 对照全部干净 | 广告是**运行时 JS 注入**且服务端按请求特征选择性下发——"抓不到样本"不等于"没有广告"，五向量静态侦察有盲区 | 换判据层：与其追"哪个域名是广告"（追不完），不如在 WebView 里做 **DOM 清扫**（`AdBlock.sweepJs`）：宽(≥200px)幅(宽高比≥2.5)+外链图幅、大浮层(fixed+大尺寸)⇒隐藏。反例保护靠形状与外链双闸：海报是同站+竖版天然不命中。见 §4.51（v1.0.57） |
 | E29 | 开了 R8 后 APK 纹丝不动（还是 8.04MB）、无 mapping.txt，`minifyReleaseWithR8` 压根不在任务图里；而 `Edit` 工具**报成功**、实际 `minifyEnabled` 没落盘 | 工具"假成功"：会话里同一天发生 3 次（`domKills` 字段×2、`minifyEnabled`×1），表现为编译错"Unresolved reference"或行为不变 | **改动后必须 grep 落盘内容复核**，别信工具返回值；判定"改动没生效"要看**任务图**（R8 在不在）而不是"构建绿不绿"—— 编译绿 ≠ 配置生效。见 §4.52（v1.0.57） |
+| E30 | v1.0.57 首开 R8 后：站源列表读回为空 / 导入报"没有可识别的站点" / 添加后不出现，**零崩溃**；dex 字符串核验当时全过（假绿） | Gson keep 只 keep 了**模型类**一头，漏了 `TypeToken` 匿名子类一头 —— gson 2.10.1 无 consumer 规则，R8 把匿名类的 **Signature 注解**剥掉 ⇒ 泛型解析全灭。`-keepattributes Signature` 给了假安全感；且验包时拿**完整签名串**搜 dex **永远 GONE**（DEX 把签名拆成片段存），把"真坏"错判成"探针错" | keep 必须**两头**：模型类（字段=键）+ `* extends TypeToken`（签名=类型）。守卫 `runr8`（源码↔keep 对账）+ `rundexsig`（dex **片段级**断言 + debug/57/58 A/B 对照）。验"混淆生效"三件套对签名损伤**全部失明**。见 §4.53（v1.0.58） |
 
 ---
 
@@ -1511,6 +1512,58 @@ CI 产物里不能出现 `*.jks`（`upload-artifact` 的 path 要覆盖到 `$RUN
 **通用教训**：守卫的粒度要跟"覆盖"的粒度对齐。`SKIP` 是一个**覆盖**信号，不是**结果**信号；
 只统计 PASS/FAIL 的汇总表，天生看不见"这次少测了哪些"。凡是允许部分跳过的套件，
 都必须把跳过数打进汇总 —— 否则"绿"这个字就同时代表了两种完全不同的状态。
+
+### 4.53 R8 × Gson 全灭（v1.0.58，E30）：TypeToken 匿名子类的签名被剥，数据静默清零
+
+**现象**（v1.0.57 → 1.0.58 用户报告，三症一根）：升级后①已有站源列表异常；
+②导入此前导出的站源 .json 报「该文件里没有可识别的站点」；③添加新网址后
+列表里不出现。**全程零崩溃、零报错** —— 与 §4.52 里警告过的"Gson 静默清零"
+完全同形，只是清零的不是字段名，是**类型**。
+
+**根因链**：
+
+1. v1.0.57 首开 R8。`proguard-rules.pro` keep 了 6 个 Gson **模型类**（字段名
+   完好，dex 里逐一验过），但漏了另一头：`object : TypeToken<MutableList<SiteConfig>>() {}`
+   这类**匿名子类**。
+2. Gson 泛型解析的类型**唯一**来自匿名子类的 `Signature` 注解
+   （`getGenericSuperclass()`）。gson **2.10.1 的 jar 里没有 consumer 规则**
+   （2.11 才加），没有任何东西拦住 R8 把这些未被 keep 的类的 Signature
+   **整条剥掉**。
+3. `-keepattributes Signature` 只保证"属性不被全局剥"，保证不了"未被 keep
+   的类还带着属性" —— 这行给了假安全感。
+4. 签名一丢 ⇒ `getGenericSuperclass()` 拿到裸 Class ⇒ `fromJson` 退化为
+   LinkedTreeMap / 抛异常 ⇒ `Store.sites()` 的 `runCatching` 吞掉返回空列表、
+   `importLauncher` 同理报"没有可识别的站点"、`Store.addSite` 存进去的下一次
+   读不回来。
+
+**A/B 对照（判"混淆生效"必须带这一手）**：v1.0.57 与 v1.0.58 的 release dex
+按片段核对 —— `Lcom/google/gson/reflect/TypeToken<` 这个 Signature 片段
+**57 缺、58 有**；58 与 57 的片段差集里同时多出 `*>;` / `>;>;`（Map/List
+签名的收尾片段）。keep 规则加上后片段回来了，判据闭合。
+
+**⚠️ 判据写法上的二次坑（当天就踩）**：DEX 把 Signature 注解值**拆成多个
+字符串片段**存储（`Lcom/google/gson/reflect/TypeToken<`、`Ljava/util/List<`、
+`>;` 各自独立入池）。拿完整签名串去 dex 里搜**永远 GONE** —— 会把好的
+误判成坏的。第一次核验就这么把"57 坏"错判成"探针写错"，绕了一圈才用
+debug/57/58 三方片段对比锁死。正确姿势见 `tools/verify/rundexsig.py`
+（自带 dex 字符串池解析器）。
+
+**修复与防复发**：
+
+- `proguard-rules.pro`：`-keep class * extends com.google.gson.reflect.TypeToken { *; }`
+  （+ TypeToken 本尊）。费用可忽略（十来个几十字节的匿名类）。
+- 新套件 `runr8`（13 条，源码层）：开关状态必须"有人知道地改"；keep 清单
+  逐条在位；**源码 Gson 调用点 ↔ keep 清单对账**（新增 `fromJson` 目标不在
+  清单里就 FAIL）。
+- 新套件 `rundexsig`（17 条，构建产物层）：dex 片段级断言，debug↔release
+  A/B 对照内建。
+
+**通用教训**：Gson 的 keep 是**两头**的事 —— 模型类一头（字段名 = JSON 键），
+TypeToken 匿名子类一头（泛型签名 = 解析目标类型）。只 keep 一头，另一头
+静默坏。凡是"反射读类元数据"的库（Gson/Room/Jackson），开 R8 时都要问一句：
+**它读的元数据在不在被 keep 的那部分里？** 另外：验"混淆生效"的三件套
+（mapping.txt / 体积 / dex 字符串）对"签名被剥"这类损伤**全部失明** ——
+三件套验的是"R8 跑了"，不是"Gson 还活着"；跨包 A/B 片段对照才是对的探针。
 
 ## §4.48 自更新：清单链上的主机是**间歇可达**的，单通道 = 随机失效
 

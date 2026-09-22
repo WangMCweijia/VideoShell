@@ -17,6 +17,17 @@
 -keep class com.videoshell.data.HistEntry { *; }         # 历史记录
 -keep class com.videoshell.data.FavEntry { *; }          # 收藏
 
+# ---- ★ TypeToken 匿名子类（v1.0.58，v1.0.57 事故的根修）----
+# `object : TypeToken<MutableList<SiteConfig>>() {}` 这类匿名子类的**泛型签名**
+# 是 Gson 泛型解析的唯一类型来源。R8 会把它们（未被 keep 的类）的 Signature
+# 属性剥掉 ⇒ TypeToken 退化 ⇒ fromJson 静默返回 LinkedTreeMap/抛异常 ⇒
+# 站点列表读回为空、导入报"没有可识别的站点"—— v1.0.57 实测全灭（E30）。
+# 上面那行 `-keepattributes Signature` 只保证"属性不被全局剥"，保证不了
+# "被合并/重写的类还带着属性"—— 必须把子类整个 keep 住。gson 2.10.1 的 jar
+# 里**没有**自带 consumer 规则（2.11 才有），所以这里自己写。
+-keep class * extends com.google.gson.reflect.TypeToken { *; }
+-keep class com.google.gson.reflect.TypeToken { *; }
+
 # Gson 泛型解析靠签名信息（TypeToken 匿名子类）
 -keepattributes Signature,*Annotation*,EnclosingMethod,InnerClasses
 

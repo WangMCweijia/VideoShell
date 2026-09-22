@@ -99,9 +99,12 @@ object WebRender {
                         if (Store.adBlock(act)) WebAdBlock.intercept(r?.url?.toString()) else null
 
                     override fun onPageFinished(v: WebView?, u: String?) {
-                        // DOM 清扫先跑一遍（v1.0.57）：宽幅外链图幅这类运行时广告节点
-                        // 别等它们进 DOM 再被交回解析器 —— 杀在取 HTML 之前。
-                        v?.let { w -> if (Store.adBlock(act)) WebAdBlock.injectSweep(w) }
+                        // ⚠️ 这里**不能**注入 DOM 清扫（v1.0.58，v1.0.57 事故复盘）：
+                        // 本 WebView 是 1×1 视口 —— 清扫脚本里所有"尺寸闸"（宽≥200、
+                        // 盖半屏）都以视口为基准，1×1 下全部失效，浮层判据退化成
+                        // "任何 fixed/sticky 且 z≥90 的元素"，会误杀页面真身。
+                        // 解析必须看到**真实 DOM**：广告节点交给 v1.0.52 的资源拦截
+                        // （上面 shouldInterceptRequest）去减少，节点本身不藏。
                         handler.postDelayed({
                             runCatching {
                                 v?.evaluateJavascript(DOM_JS) { value ->

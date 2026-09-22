@@ -80,6 +80,12 @@ SUITES = [
     'runupd',
     # v1.0.56：自更新高速镜像层（行为断言走真编译产物，需先 assembleDebug）。
     'runupdmirror',
+    # v1.0.58：R8 混淆配置守卫 —— E30 事故（TypeToken 签名被剥 ⇒ Gson 全灭、
+    # 站源/导入/添加齐挂且不崩溃）的防复发闸。纯源码/配置判据，零构建依赖。
+    'runr8',
+    # v1.0.58：同一事故的**构建产物层**判据（dex 签名片段，片段级！整串搜必 GONE）。
+    # 需先 assembleDebug + assembleRelease；APK 缺席时落到源码层兜底断言。
+    'rundexsig',
 ]
 # 需要真实网络的；**默认不跑**（见文件头）。
 # runbs3 是 v1.0.53 从 SUITES 挪过来的：它跑的是 `https://www.bolyship.com`，
