@@ -40,3 +40,8 @@ videoshell-apk/
 # 而 Android 只认签名 —— 装了假的就等于把"更新"交到别人手里。见 docs/PITFALLS.md §4.43。
 keystore.properties
 keystore/*.jks
+
+# Python 字节码缓存：tools/ 下的脚本被 py_compile / import 时会生成，
+# 它跟机器和解释器版本绑定（cpython-314.pyc），对别人毫无用处。
+__pycache__/
+*.pyc
