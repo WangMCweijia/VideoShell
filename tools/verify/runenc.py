@@ -21,7 +21,7 @@ LIBS = [
 
 classes = os.path.join(ROOT, 'app', 'build', 'tmp', 'kotlin-classes', 'debug')
 if not os.path.isdir(classes):
-    raise SystemExit('先编译：python _build.py :app:assembleDebug')
+    raise SystemExit('先编译：python tools/build.py :app:assembleDebug')
 libs = []
 for pat in LIBS:
     h = glob.glob(os.path.join(CACHE, pat))

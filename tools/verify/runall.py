@@ -24,7 +24,18 @@
 只有 CI 会红）。第一次把 harness 接进 CI 时，红的多半是**分类错误**而不是代码错。
 
 **不在回归列表里的"工具"**（要参数、只编译不断言，放进 SUITES 只会得到一条假绿）：
-`runsurvey.py`（播放页媒体候选勘察，用法 `runsurvey.py <pageUrl>`）。
+`runsurvey.py`（播放页媒体候选勘察，用法 `runsurvey.py <pageUrl>`）；
+`runcaliblive.py`（校准矩阵端到端重放，用法 `runcaliblive.py [-v]`，站点用 `-Dvs.base=` 换）；
+`runadbprobe.py`（去广告覆盖勘察，用法 `runadbprobe.py <pageUrl>`）。
+
+⚠️ 登记这一节不是形式主义：这三个都是**排查工具**而不是断言套件，它们不进 SUITES 是对的
+（零断言会被标 WEAK），但**不登记就会被误以为"跑过了"** —— 本项目已经栽过一次同型的
+坑（v1.0.53 迁移后，每日探针一直在跑旧目录的旧副本，不报错、只安静给出过期结论）。
+
+**第三类：混合套件**（离线主体 + 一小段需要真网络，如 `runepname` 的 F 段）。
+它**留在 SUITES 里**，因为那一段只是补充、离线部分必须在 CI 上跑；但它的 PASS 数会随网络
+浮动，所以本文件把 `[SKIP]` 计数打进每一行、并在合计里单列 `SKIP段=`。
+**不要**为了"让数字稳定"把它整体挪进 NET_SUITES —— 那等于把它的离线断言从 CI 上摘掉。
 
 **判据纪律：零断言不算过。** rc=0 但一条 PASS/FAIL 都没有的套件标 `WEAK`
 并以退出码 1 结束 —— 否则「夹具没入仓 ⇒ 全部跳过」会伪装成全绿。
@@ -101,6 +112,8 @@ NET_SMELL = re.compile(r'UnknownHost|ConnectException|SocketTimeout|SocketTimeou
                        r'ETIMEDOUT|SSLHandshake|Connection reset|Read timed out|'
                        r'HTTP\s*5\d\d|HTTP\s*40[34]|不可达|抓取失败', re.I)
 total_ok = total_fail = bad = weak = 0
+total_skip = 0
+skip_suites = []
 targets = _targets()
 if not targets:
     sys.exit(2)
@@ -117,17 +130,31 @@ for s in targets:
     pt = out.count('[PASS]')
     if pt == 0:
         pt = len(BARE_PASS.findall(out))
+    # ★ 段级跳过必须**可见**（v1.0.54）。
+    #
+    # 原来只判"零断言 ⇒ WEAK"，那挡得住"整个套件没跑"，挡不住**部分跳过**：
+    # 实测 `runepname`（在 SUITES 离线列里）带一段需要真网络的 F 段，
+    # 网络一旦抖，7 条断言无声消失、套件照样报 `OK  PASS=41 FAIL=0` ——
+    # 而 PASS 从 48 掉到 41 这件事，不去手动逐套件对比是看不出来的。
+    # 这正是本项目最忌讳的"真回归被藏起来"：**覆盖变少 ≠ 通过**。
+    #
+    # 所以只做一件事：把 SKIP 数**打出来**。不判失败 —— 段级跳过（离线时跳活体段）
+    # 是合理设计；要的是让它出现在日志里，而不是消失。
+    sk = out.count('[SKIP]')
     weak_run = (r.returncode == 0 and f == 0 and pt == 0)
     total_ok += pt
     total_fail += f
+    total_skip += sk
+    if sk:
+        skip_suites.append('%s(%d)' % (s, sk))
     ok_run = (r.returncode == 0 and f == 0 and not weak_run)
     if weak_run:
         weak += 1
     elif not ok_run:
         bad += 1
-    print('%-14s %s  PASS=%-4d FAIL=%-3d rc=%d  %s'
+    print('%-14s %s  PASS=%-4d FAIL=%-3d rc=%d%s  %s'
           % (s, 'OK  ' if ok_run else ('WEAK' if weak_run else 'BAD '), pt, f, r.returncode,
-             (lines[-1] if lines else '')[:70]))
+             ('  SKIP=%d' % sk) if sk else '', (lines[-1] if lines else '')[:70]))
     if not ok_run:
         # 只看汇总行在 CI 里查不出原因 ⇒ 落一份完整输出，并在这里回显失败点。
         open(os.path.join(HERE, '_fail_%s.txt' % s), 'w', encoding='utf-8').write(out)
@@ -143,6 +170,11 @@ for s in targets:
                   '应归 NET_SUITES（判据见文件头）' % ', '.join(hits[:4]))
 
 print()
-print('==== 合计 PASS=%d  FAIL=%d  BAD_SUITES=%d  WEAK_SUITES=%d / %d ===='
-      % (total_ok, total_fail, bad, weak, len(targets)))
+print('==== 合计 PASS=%d  FAIL=%d  BAD_SUITES=%d  WEAK_SUITES=%d  SKIP段=%d / %d ===='
+      % (total_ok, total_fail, bad, weak, total_skip, len(targets)))
+if skip_suites:
+    # 有段级跳过时**必须多打这一行**：它解释"为什么这次 PASS 比上次少"。
+    # 没有它的话，一次网络抖动看起来就像一次断言被删。
+    print('     ⚠️ 有段级跳过（离线时跳活体段属正常，但覆盖确实变少了）：%s'
+          % ', '.join(skip_suites))
 sys.exit(1 if (total_fail or bad or weak) else 0)

@@ -200,7 +200,7 @@ if pre:
     print('   %s' % ','.join(pre))
 
 for rnd in range(1, ROUNDS + 1):
-    subprocess.run([sys.executable, os.path.join(ROOT, '_build.py'),
+    subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'build.py'),
                     ':app:compileDebugKotlin'],
                    capture_output=True, text=True, encoding='utf-8',
                    errors='replace', cwd=ROOT)

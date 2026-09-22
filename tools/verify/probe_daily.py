@@ -186,7 +186,7 @@ def build():
     """增量编译 debug。失败**不阻断**探针（用现有产物跑，并在报告里如实写明）。"""
     try:
         p = subprocess.run(
-            [PY, os.path.join(PROJ, '_build.py'), ':app:assembleDebug'],
+            [PY, os.path.join(PROJ, 'tools', 'build.py'), ':app:assembleDebug'],
             cwd=PROJ, capture_output=True, text=True,
             encoding='utf-8', errors='replace', timeout=1800)
     except Exception as e:                                     # noqa: BLE001
@@ -258,7 +258,7 @@ def main():
 
     if not os.path.isdir(BUILD_CLASSES):
         say()
-        say('**探针无法执行**：编译产物不存在（`%s`）。先跑 `python _build.py :app:assembleDebug`。'
+        say('**探针无法执行**：编译产物不存在（`%s`）。先跑 `python tools/build.py :app:assembleDebug`。'
             % BUILD_CLASSES)
         flush()
         return 1

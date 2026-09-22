@@ -194,6 +194,49 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
     private var searchTplSwap: String? = null
 
     /**
+     * 人工校准的 `detailTpl` 被**自动替换**时的留痕（v1.0.54）。
+     *
+     * 与 [searchTplSwap] 完全同型，只是当时只给 searchTpl 补了、漏了这一处。
+     *
+     * 触发条件写在写入点（`HtmlAdapter_Detail.hitDetail`）：**配方里原本那条详情模板
+     * 非空、且这次不是它成功** —— 也就是"校准过的详情形状被实测成功的那条顶掉了"。
+     *
+     * 为什么替换本身是对的、但必须留痕：`hitDetail` 成功后会把配方里的 `detailTpl`
+     * 覆写成实际成功的那条（自愈，站点改路径时靠它）。可一旦被覆写的是**用户亲手点出来的**
+     * 那条，配方就与它的 `calibNote` 各说各话 —— 用户下次看到的是「我明明校准过，
+     * 配方的详情模板却不是我校准的那个」，而这一路上没有任何一环会报错。
+     * 这正是 v1.0.33 给 `searchTpl` 立留痕时说的那件事，不能只在搜索那一处做。
+     *
+     * ⚠️ 必须 `internal`：写入点在扩展函数文件 `HtmlAdapter_Detail.kt` 里，
+     * 而扩展函数访问不了 `private`（见 PITFALLS §4.42）。
+     */
+    @Volatile
+    internal var detailTplSwap: String? = null
+
+    /**
+     * 「配方里的详情模板**这次到底有没有用上**」（v1.0.54）。
+     *
+     * 为什么单独立一个字段、而不是复用 [detailTrace]：`detailTrace` 只在
+     * `detail()` **彻底失败**（抛异常）时才被赋值 —— 详情**成功**时它一直是空串。
+     * 而这里要回答的恰恰是成功场景里的问题：**成功了，但靠的是配方还是兜底？**
+     *
+     * 三种取值（每次 `detail()` 开头清零）：
+     * - `""` —— 还没解析过详情；
+     * - `详情用上了配方模板：<tpl>` —— 配方那条第一个试就成了；
+     * - `⚠️ 配方里的详情模板 <tpl> 本次没能解析出分集（已改用兜底路径）` —— 配方是错的。
+     *
+     * 第三种是最要命的一种，因为**它不出错**：`detail()` 的候选链（配方 → 学到的 →
+     * 回首页现学 → 穷举 → 播放页兜底）里任何一条成功都算成功，于是"用户校准的详情形状
+     * 是错的"与"校准压根没生效"在结果上一模一样。CalibLive 实测：把配方里的
+     * `/bspvd/{id}.html` 故意改成 `/bspvs/`，矩阵那一行照样 `OK 4 线路 / 56 集`。
+     *
+     * 而且兜底路径**不写回配方**（只有 `hitDetail` 成功时才写），所以那条错模板会
+     * 一直留在配方里，每次进详情页都要再白发一次请求、再失败一次，用户永远不知道。
+     */
+    @Volatile
+    internal var detailTplOutcome: String = ""
+
+    /**
      * 「这次校准生效了没有」—— `SiteDoctor` 原样打印（见 [SiteAdapter.calibDiag]）。
      *
      * 三段拼起来：**配方有没有读到** → **哪来的、学到什么** → **本次页面用上了没有**。
@@ -210,10 +253,17 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
                     "｜分类容器=" + (manualNavSel ?: "（无）")
             val tail = calibOutcome.ifBlank { "（还没解析过分类页）" }
             val swap = searchTplSwap?.let { "\n      ⚠️ $it" } ?: ""
+            // 详情模板同理：它被自动替换时也必须在同一栏里说出来（v1.0.54）。
+            // 分类步的生效性有 [calibOutcome]、搜索步有 [searchTplSwap]，
+            // 详情步此前是**唯一没有任何观测**的一步 —— 于是"配方写错了"和"配方没被读"
+            // 在界面上长得一模一样。
+            val dswap = detailTplSwap?.let { "\n      ⚠️ $it" } ?: ""
+            // 详情步「配方到底有没有被用上」——只有它能在**成功**的情况下说出配方是错的。
+            val dout = detailTplOutcome.takeIf { it.isNotBlank() }?.let { "\n      $it" } ?: ""
             // 分类栏最终是**靠哪个规则**得到的（人工校准 / 形状普查 / 默认判据）——
             // 没有这一行时，用户只能看到"分类有 40 个"，看不出它到底是谁收的（v1.0.34）。
             val census = censusDiag.takeIf { it.isNotBlank() }?.let { "\n      $it" } ?: ""
-            return "配方来源：$head｜$shape\n      $tail$swap$census"
+            return "配方来源：$head｜$shape\n      $tail$swap$dswap$dout$census"
         }
 
     /** 校准规则**真的用上了**：形状/容器命中了本次页面（而不是静默退回默认判据） */
@@ -790,13 +840,26 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
         traceBuf.clear()
         detailTrace = ""
         detailPicHint = ""                      // 每部影片各算各的，别串上一部的封面
+        detailTplOutcome = ""                   // 同上：每部影片各算各的
         tr("影片 id=$id")
         tr("配方：详情模板=" + (detailTpl ?: "—") + "　播放模板=" + (playTpl ?: "—"))
 
         // 1) 配方 / 学到的模板优先。**关键**：它们来自磁盘，所以进详情页那个新 Activity
         //    也能直接用 —— 这正是修掉「分类列表都能出、一点详情就失败」的地方。
+        //
+        //    配方那条单独记一笔"用上了"：它是**用户亲手校准**的东西，
+        //    后面所有兜底路径（1.5 / 2 / 3 / 4）都不写回配方 —— 所以一旦这里失败，
+        //    配方会一直错下去，而整条链最终**还是成功**，界面上看不出任何异常。
+        val recipeTpl = detailTpl
         for (tpl in listOfNotNull(detailTpl, learnedDetailTpl).distinct()) {
-            hitDetail(tpl, id)?.let { return it }
+            hitDetail(tpl, id)?.let {
+                if (tpl == recipeTpl) detailTplOutcome = "详情用上了配方模板：$tpl"
+                return it
+            }
+        }
+        if (!recipeTpl.isNullOrBlank()) {
+            detailTplOutcome = "⚠️ 配方里的详情模板 $recipeTpl 本次没能解析出分集" +
+                    " ⇒ 已改用兜底路径（**配方没被改写**，下次还会先试这条错的）"
         }
 
         // 1.5) 详情页**抓到了**、分集却只在播放页 —— 直接去播放页，不必再回首页现学、

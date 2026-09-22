@@ -5,7 +5,7 @@
 A 段用真实播放页夹具 `_play/p1_line8.html` 等（由 runplayfetch.py 抓）；
 C/D/F 段为合成形状，不需要网络。
 
-依赖已编译的 debug 产物：python _build.py :app:assembleDebug
+依赖已编译的 debug 产物：python tools/build.py :app:assembleDebug
 """
 import os, subprocess, sys
 

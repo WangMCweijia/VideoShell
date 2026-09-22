@@ -231,6 +231,12 @@ public class YgImage {
                 cal.contains("confirmDiscardCalib()") && cal.contains("fun confirmDiscardCalib"), "");
         ok("E10 不在响应头里塞中文（HTTP 头只允许 ASCII —— 塞了每张封面都会抛异常）",
                 !imgc.contains("X-VideoShell-Image") && imgc.contains("header(\"Content-Type\", type)"), "");
+        ok("E11 ★ 详情步也有「配方模板有没有被用上」的观测"
+                        + "（分类步有 calibOutcome、搜索步有 searchTplSwap，详情步此前是空的）",
+                adap.contains("detailTplOutcome") && adap.contains("detailTplSwap")
+                        && adap.contains("配方里的详情模板") && adap.contains("没能解析出分集"), "");
+        ok("E12 ★ 两处留痕都真的拼进了 calibDiag（只加字段不打印 = 界面上照旧看不见）",
+                adap.contains("$tail$swap$dswap$dout$census"), "");
 
         // ---------------------------------------------------------------- F 端到端（真网络）
         System.out.println("\n== F 端到端：走 Http.client 真取封面（Coil 同一条栈） ==");

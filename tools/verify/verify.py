@@ -10,7 +10,7 @@
 
 用法：
   # 1) 先编译一次（生成 class）
-  cd D:/TRAE/视频壳 && python _build.py :app:assembleDebug
+  cd D:/TRAE/视频壳 && python tools/build.py :app:assembleDebug
   # 2) 校验
   python verify.py                       # 默认工程目录 D:/TRAE/视频壳
   python verify.py D:/TRAE/视频壳
@@ -90,7 +90,7 @@ def main():
 
     classes = os.path.join(root, 'app', 'build', 'tmp', 'kotlin-classes', 'debug')
     if not os.path.isdir(classes):
-        raise SystemExit('没找到 %s\n先跑: cd %s && python _build.py :app:assembleDebug' % (classes, root))
+        raise SystemExit('没找到 %s\n先跑: cd %s && python tools/build.py :app:assembleDebug' % (classes, root))
 
     cp = os.pathsep.join([classes] + find_libs())
     build_dir = os.path.join(HERE, '_vh')

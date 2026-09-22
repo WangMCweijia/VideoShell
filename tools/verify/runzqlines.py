@@ -6,7 +6,7 @@
 - A 段：真实页面夹具 `_zq/zq_detail_*.html`（先用 runzqfetch.py 抓）
 - B/C 段：合成形状，无需网络
 
-依赖已编译的 debug 产物：python _build.py :app:assembleDebug
+依赖已编译的 debug 产物：python tools/build.py :app:assembleDebug
 """
 import os, subprocess, sys
 

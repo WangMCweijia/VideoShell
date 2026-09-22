@@ -55,6 +55,21 @@ internal suspend fun HtmlAdapter.hitDetail(tpl: String, id: String): VideoDetail
     }
     tr("✓ $url → ${groups.sumOf { it.episodes.size }} 集")
     if (detailTpl != tpl) {
+        // 留痕：**配方里原本那条详情模板这次没成功**，才轮到这条（v1.0.54）。
+        //
+        // 判据是"原本那条**非空**且不是它" —— 非空才说明那是配方/人工校准给的；
+        // 为空时这次写入只是正常学习（首次访问本来就没有模板），不该报成告警。
+        //
+        // 为什么这件事必须说出来：`detail()` 的候选顺序是「配方模板 → 学到的 → 回首页现学
+        // → 穷举 → 播放页兜底」，任何一条成功都算成功。于是"用户校准的详情形状是错的"
+        // 与"校准压根没生效"在**结果上完全一样**（都是照样出分集），而配方已被悄悄改掉。
+        // 离线 harness `CalibLive` 实测过：把配方里的 `/bspvd/{id}.html` 故意改成
+        // `/bspvs/`，矩阵里那一行照样 `OK 4 线路 / 56 集` —— 就是这个道理。
+        val was = detailTpl
+        if (!was.isNullOrBlank()) {
+            detailTplSwap = "详情模板已被替换：$was → $tpl" +
+                    "（原模板本次没能解析出分集，已改用实测成功的那条）"
+        }
         detailTpl = tpl
         RecipeStore.update(site.baseUrl) { it.copy(detailTpl = tpl) }
     }

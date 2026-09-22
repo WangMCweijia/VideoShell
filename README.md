@@ -242,7 +242,7 @@ HTML 适配是「按主题猜 DOM」，HLS 规范化又直接决定播不播得�
 直接调用**刚编译出的 Kotlin 类**跑分类 / 列表 / 选集 / 播放地址抽取 / playlist 规范化，无需真机与网络。
 
 ```bash
-cd D:/TRAE/视频壳 && python _build.py :app:assembleDebug
+cd D:/TRAE/视频壳 && python tools/build.py :app:assembleDebug
 cd D:/TRAE/releases/.tools/videoshell_verify && python runall.py
 # 期望末行：==== 合计 PASS=447  FAIL=0 ====
 ```
