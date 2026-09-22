@@ -1266,3 +1266,52 @@ Kotlin **不报错**，改用父类的 `title`（`CharSequence`）。表现是
 **⑤ 顺带一条判据纪律**：上面 ④ 的限定名会让守卫里写的裸名（`mode == MODE_SEARCH`）失配 ——
 那是**位置**变了、不是行为变了，处理方式与"判据不带 `private ` 前缀"（§4.24）完全一样：
 在比较前把 `Owner.` 剥掉（`runui40.py` / `runui50.py` 里的 `unqual()`），**不要**把代码改回去。
+
+### 4.43 ★ 把私钥放进仓库 = **不可逆**的操作；「重写历史」并不能撤销它（v1.0.54）
+
+本工程的 `keystore/videoshell.jks` 与 `keystore.properties`（**含明文口令**）从根提交 `c68c93a`
+起就是被跟踪文件，59 个提交全带着它。仓库从 private 转 public 的那一刻，签名私钥就公开了：
+任何人都能签一个 `versionCode` 更大的同名包，而 Android **只认签名** —— 用户装了它，就等于
+把「更新」交到别人手里（自更新功能会把这件事放大：它主动去下载并提示安装）。
+
+**最容易算错的一步**：以为"删掉文件 + 重写历史 + force push"就干净了。
+**不是。** GitHub 上不可达对象**按 SHA 仍可取到**（要等后端 GC，而它不保证发生）。
+所以只有两条真正有效的路：
+
+| 方案 | 私钥是否真的清掉 | 存量安装能否覆盖升级 | 代价 |
+|---|---|---|---|
+| **换新钥匙**（本项目选的） | ✅ 旧钥作废，新钥只在 Secrets / 仓库外 | ❌ 必须**卸载重装**一次 | 最小，且是唯一能立刻做成的 |
+| **删库重建**（同名） | ✅ 旧对象随之消失 | ✅ 继续用同一把钥匙 | star / issue / Release 记录清零，CI secret 与连接器要重配、tag 要重打 |
+
+选完之后的动作（本项目已落地的形态）：
+
+1. 新钥落在**仓库外**（`../releases/.keys/videoshell.jks`），`keystore.properties` 指向它并进 `.gitignore`；
+2. 四个值进 GitHub Secrets：`VS_KEYSTORE_B64` / `VS_STORE_PASSWORD` / `VS_KEY_ALIAS` / `VS_KEY_PASSWORD`；
+3. `git rm --cached` 掉两个文件，并加一条 `keystore/README.md` 说明"密钥不在这里、旧钥已作废"
+   —— 公开仓库里最容易被后来者误当成"忘了提交"；
+4. CI 里 `base64 -d` 解到 **`$RUNNER_TEMP/sign/`**，**刻意不放工作区**：放工作区会被
+   `actions/upload-artifact` 打包上传，等于换个地方再泄一次。解完立刻 `keytool -list` 自证，
+   这一步红比"签名悄悄没了、包却照样发出去"好得多；
+5. `app/build.gradle` 签名**优先读环境变量**，其次本地 properties ⇒ 本机与 CI 都能出真签名包。
+   **debug 也用 release 钥匙**：默认 debug 走调试密钥，会与 release 互相覆盖安装失败，
+   症状是「我明明装了新版，界面还是老的」—— 任何代码排查都解释不通。
+
+**发布前检查清单（转 public / 发版各一次）**
+`git ls-files | grep -iE 'keystore|\.jks|\.properties'` 的结果里**不能**有密钥材料；
+CI 产物里不能出现 `*.jks`（`upload-artifact` 的 path 要覆盖到 `$RUNNER_TEMP` **之外**才行）。
+
+### 4.44 ★ 「更新清单」必须和「包」在**同一个** Release，且版本号从 **APK** 里读（v1.0.54）
+
+应用内自更新读的是 `releases/latest/download/version.json`。两个坑：
+
+1. **清单与 APK 分两次上传** ⇒ 会出现"清单已更新、包还是旧的"的窗口，而且它**不报错**：
+   用户点更新，装到的还是老版本。所以两者必须由同一个 job 在同一次 `action-gh-release` 里发布。
+2. **版本号必须从 APK 里读**（`aapt dump badging` 优先），不能从 `build.gradle` 或 tag 里读。
+   源码里的版本号与**真正打进包里**的版本号是两件事（§4.38：同版本号的两代包就是这么来的）。
+   并且要**硬校验 `tag` 与 APK 的 `versionName` 一致，不一致就拒绝生成** —— 宁可不发，
+   也不要发一个"清单说 1.0.55、包里其实是 1.0.54"的更新。
+
+清单里的 `apkUrl` 指向 `releases/download/<tag>/<apk>`，所以**只在 tag 上生成**；
+在 main 上生成没有意义（那时还没有对应的 Release）。
+另外：仓库是 private 时，`releases/download/...` 的裸链接对未认证请求返回 404 ——
+那是"没权限"不是"没发出去"；判断发没发出去要用 `gh release view`。
