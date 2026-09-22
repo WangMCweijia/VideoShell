@@ -30,3 +30,5 @@ _s6/
 _an/
 _bs/
 _samples/
+# 本地导出的 APK 目录（约 18 MB，不是源码；CI 出的包在 Actions artifact / Releases 里）
+videoshell-apk/
