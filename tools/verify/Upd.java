@@ -119,7 +119,7 @@ public class Upd {
                 check.contains("① api.github.com") && check.contains("② github.com")
                         && check.contains("换"), "");
         ok("U4 报错/自检要说清**走的是哪条通道**（决策要可观测）",
-                check.contains("enum class Route { Api, Direct }") && check.contains("${got.route}"), "");
+                check.contains("enum class Route { Api, Direct, Mirror }") && check.contains("${got.route}"), "");
         ok("U5 解析通道：按名字在 assets 里找 version.json 与 app-release.apk",
                 check.contains("ASSET_MANIFEST") && check.contains("ASSET_APK")
                         && check.contains("byName[ASSET_MANIFEST]") && check.contains("byName[ASSET_APK]"), "");
@@ -135,15 +135,16 @@ public class Upd {
 
         // ------------------------------------------------------------ 下载
         System.out.println("\n== U 下载：候选顺序 + 半截文件的处理 ==");
-        ok("U9 候选地址 **api 在前、裸链在后**（顺序就是可达性结论本身）",
-                down.contains("listOfNotNull(info.apkApiUrl, info.apkUrl).distinct()"), "");
+        ok("U9 下载候选来自 UpdateMirror.candidates（v1.0.56 起直连在前 + 镜像在后，顺序由探测定）",
+                down.contains("UpdateMirror.candidates(info.apkUrl, info.apkApiUrl)")
+                        && down.contains("UpdateMirror.rank(cands, speed)"), "");
         ok("U10 下载请求带 Accept: application/octet-stream（与 U6 是同一件事的两端）",
                 down.contains("header(\"Accept\", \"application/octet-stream\")"), "");
-        String loop = seg(down, "for (u in cands)", "if (!ok)");
+        String loop = seg(down, "for (u in ordered)", "if (!ok)");
         ok("U11 换下一条地址前**先删半截文件**（否则第二条失败时报的是"
                         + "\"摘要对不上\"，真实原因被盖住）",
                 loop.contains("target.delete()") && loop.contains("lastErr"), "len=" + loop.length());
-        ok("U12 两条都失败时抛的是**真实原因**，不是空指针/占位话",
+        ok("U12 全部候选失败时抛的是**真实原因**，不是空指针/占位话",
                 down.contains("throw lastErr ?: IOException(\"没有可用的下载地址\")"), "");
 
         // ------------------------------------------------------------ 反例：不许为了"能下成"把安全放宽
@@ -152,10 +153,11 @@ public class Upd {
                 check.contains("host == it || host.endsWith(\".$it\")"), "");
         ok("U14 非 https 一律拒绝（清单与备用地址两条都要过）",
                 check.contains("下载地址不是 https") && check.contains("备用下载地址不是 https"), "");
-        ok("U15 sha256 校验与\"不符即删\"没被顺手删掉"
-                        + "（这是唯一能区分\"下全了\"与\"HTTP 200 但只下了一半\"的判据）",
-                down.contains("!got.equals(info.sha256, ignoreCase = true)")
-                        && down.contains("target.delete()"), "");
+        ok("U15 sha256 校验在**候选循环之内**且与\"不符即删\"没被顺手删掉"
+                        + "（在循环外时，说谎镜像耗掉唯一一次校验机会后整个更新失败；"
+                        + "这是唯一能区分\"下全了\"与\"HTTP 200 但给的不是包\"的判据）",
+                loop.contains("!got.equals(info.sha256, ignoreCase = true)")
+                        && loop.contains("target.delete()"), "");
         ok("U16 api.github.com 进了白名单（否则 parse 会把备用地址判为非法域名，改了个寂寞）",
                 check.contains("\"api.github.com\""), "");
 

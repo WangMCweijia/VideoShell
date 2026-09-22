@@ -72,6 +72,7 @@ public class UpdLive {
         boolean newerPath = report(s0);
         if (s0 instanceof UpdateChecker.State.Newer) {
             final int latest = ((UpdateChecker.State.Newer) s0).getInfo().getVersionCode();
+            final String latestSha = ((UpdateChecker.State.Newer) s0).getInfo().getSha256();
 
             System.out.println("\n  —— 假装本机**就是**最新（code=" + latest + "）⇒ 应当报「已是最新」");
             report(block((scope, cont) -> UpdateChecker.INSTANCE.check(
@@ -81,6 +82,43 @@ public class UpdLive {
                     + latest + "」；**这就是手上那一版现在会看到的东西**");
             report(block((scope, cont) -> UpdateChecker.INSTANCE.check(
                     latest - 1, code, (Continuation<? super UpdateChecker.State>) cont)));
+
+            // ---------------------------------------------------------------- C 镜像链路
+            System.out.println("\n================ C 实验组：镜像链路（wrap + getOnce + parse） ================");
+            System.out.println("  证明\"镜像表能服务清单\"这件事本身 —— 只靠 Python 探测说它行不算数，"
+                    + "要用 App 自己的 Http 走一遍（v1.0.56）。");
+            int mirrorOk = 0;
+            String mirrorSha = null;
+            java.lang.reflect.Method parse = findParse(UpdateChecker.INSTANCE.getClass());
+            java.util.List<String> prefixes = com.videoshell.data.net.UpdateMirror.INSTANCE
+                    .getMIRROR_PREFIXES();
+            for (String p : prefixes) {
+                String u = com.videoshell.data.net.UpdateMirror.INSTANCE.wrap(p, code);
+                try {
+                    String body = block((scope, cont) -> Http.INSTANCE.getOnce(
+                            u, null, Http.UA, Collections.emptyMap(), true,
+                            (Continuation<? super String>) cont));
+                    UpdateChecker.UpdateInfo info = (UpdateChecker.UpdateInfo) parse
+                            .invoke(UpdateChecker.INSTANCE, body, null);
+                    if (info == null) {
+                        System.out.println("  ✗ " + p + " → 正文解析不出（" + body.length() + " 字符）");
+                        continue;
+                    }
+                    boolean shaMatch = latestSha != null
+                            && info.getSha256().equalsIgnoreCase(latestSha);
+                    System.out.println("  ✅ " + p + " → " + info.getVersionName()
+                            + "  sha256 与 B 组一致：" + (shaMatch ? "是" : "否(!)"));
+                    if (shaMatch) mirrorOk++;
+                    if (mirrorSha == null) mirrorSha = info.getSha256();
+                } catch (Exception e) {
+                    System.out.println("  ✗ " + p + " → " + e.getClass().getSimpleName()
+                            + ": " + firstLine(e.getMessage()));
+                }
+                if (mirrorOk >= 2) break;   // 双源一致已凑齐，不必再打
+            }
+            System.out.println("  镜像双源一致：" + (mirrorOk >= 2
+                    ? "达成（" + mirrorOk + " 个一致）⇒ 就算两条 GitHub 通道都被阻断，清单也拿得到"
+                    : "未达成（" + mirrorOk + " 个）⇒ 该网络下镜像通道会被安全规则拒绝，属预期行为"));
         } else {
             System.out.println("\n  （取不到线上版本号，后两组对照跳过）");
         }
@@ -111,6 +149,7 @@ public class UpdLive {
             UpdateChecker.UpdateInfo i = ((UpdateChecker.State.Newer) s).getInfo();
             System.out.println("     结果：有新版本 " + i.getVersionName()
                     + "（code=" + i.getVersionCode() + "）");
+            System.out.println("     线路（via）         ：" + i.getVia());
             System.out.println("     apkUrl（清单裸链）  ：" + i.getApkUrl());
             System.out.println("     apkApiUrl（备用）   ：" + i.getApkApiUrl());
             System.out.println("     ← 备用地址**非空就说明走的是 api.github.com 通道**"
@@ -126,5 +165,20 @@ public class UpdLive {
         }
         System.out.println("     结果：未知类型 " + s);
         return false;
+    }
+
+    static String firstLine(String s) {
+        if (s == null) return "";
+        int i = s.indexOf('\n');
+        return (i < 0 ? s : s.substring(0, i)).trim();
+    }
+
+    /** `parse` 是 internal ⇒ JVM 名被 mangling，按"名字以 parse 开头 + 双参"找 */
+    static java.lang.reflect.Method findParse(Class<?> cls) {
+        for (java.lang.reflect.Method m : cls.getMethods()) {
+            if (m.getName().startsWith("parse") && m.getParameterCount() == 2
+                    && m.getParameterTypes()[0] == String.class) return m;
+        }
+        throw new IllegalStateException("UpdateChecker.parse 找不到（internal mangling 口径变了？）");
     }
 }

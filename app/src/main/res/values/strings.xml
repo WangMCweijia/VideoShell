@@ -67,6 +67,7 @@
     <string name="update_download">下载并安装</string>
     <string name="update_later">稍后</string>
     <string name="update_size">安装包约 %1$d MB</string>
+    <string name="update_via">线路：%1$s</string>
     <string name="update_no_notes">（本次没有更新说明）</string>
     <string name="update_downloading">正在下载 %1$d%%</string>
     <string name="update_download_failed_title">下载失败</string>

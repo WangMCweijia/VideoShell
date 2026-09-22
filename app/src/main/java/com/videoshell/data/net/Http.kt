@@ -310,7 +310,7 @@ object Http {
         throw last ?: IOException("请求失败：$url")
     }
 
-    /** 单次尝试（不含重试） */
+    /** 单次尝试（不含重试）；`fast = true` 用短超时探测客户端 */
     private fun once(
         url: String,
         referer: String?,
@@ -344,6 +344,23 @@ object Http {
             }
             throw e
         }
+    }
+
+    /**
+     * **只试一次**的 GET（不重试，v1.0.56）。
+     *
+     * 给"一层里有 N 个候选、每个候选都值得快速一试"的路径用（更新镜像清单就是这种）：
+     * [get] 的 3 次重试在那种场景下是**毒药** —— 最坏 8 个镜像 × 3 次 × 超时 = 两分钟，
+     * 用户早就认定"点了没反应"。调用方自己决定要不要、以及怎么重试。
+     */
+    suspend fun getOnce(
+        url: String,
+        referer: String? = null,
+        ua: String = UA,
+        headers: Map<String, String> = emptyMap(),
+        fast: Boolean = false
+    ): String = withContext(Dispatchers.IO) {
+        once(url, referer, ua, headers, fast)
     }
 
     /**

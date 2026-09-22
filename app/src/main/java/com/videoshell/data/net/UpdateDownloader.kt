@@ -7,6 +7,9 @@ import android.os.Build
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.Request
 import java.io.File
@@ -48,6 +51,11 @@ object UpdateDownloader {
     private fun dirOf(ctx: Context): File =
         File(ctx.getExternalFilesDir(null), "update").apply { mkdirs() }
 
+    /** 探测专用：Range 取前 128KB 量速，短超时、不重试（探测卡住就放弃那条候选） */
+    private val probeClient by lazy {
+        Http.fastClient
+    }
+
     /**
      * 下载并校验。
      *
@@ -66,16 +74,33 @@ object UpdateDownloader {
             }
             val target = File(dir, "videoshell-${info.versionName}.apk")
 
-            // 候选地址：**api.github.com 的资产地址在前**。
-            // 这不是"更官方"，而是实测：`github.com` 在部分地区/时段连不上，而
-            // `api.github.com` 与它重定向到的 `release-assets.githubusercontent.com` 都通
-            // （对照数据见 [UpdateChecker] 的类注释）。清单里那条裸链留作兜底。
-            val cands = listOfNotNull(info.apkApiUrl, info.apkUrl).distinct()
+            // 候选地址：直连两条在前（api 资产 / 裸链），镜像包一层在后（UpdateMirror.candidates）。
+            // 排序依据是真探测：各候选并发量一次速（见 [probeAll]），**快的在前**。
+            // v1.0.55 的"api 在前"只是静态顺序，v1.0.56 起由实测吞吐决定 ——
+            // 实测直连 74 KB/s vs 镜像 1860 KB/s，顺序本身就是十几倍的下载时长。
+            val cands = UpdateMirror.candidates(info.apkUrl, info.apkApiUrl)
+            val speed = probeAll(cands)
+            val ordered = UpdateMirror.rank(cands, speed)
+
             var lastErr: Exception? = null
             var ok = false
-            for (u in cands) {
+            for (u in ordered) {
                 try {
                     transfer(u, target, info, onProgress)
+                    // ★ sha256 校验必须在**候选循环之内**（v1.0.56 修正）：
+                    // 旧版放在循环外，"200 但给的是 HTML"的说谎镜像会把唯一一次
+                    // 摘要校验机会用在废数据上，然后整个更新直接失败 ——
+                    // 正确行为是"这个候选作废，换下一个"。
+                    if (info.sha256.isNotBlank()) {
+                        val got = sha256(target)
+                        if (!got.equals(info.sha256, ignoreCase = true)) {
+                            target.delete()
+                            throw IOException(
+                                "摘要不符（期望 ${info.sha256.take(12)}…，实得 ${got.take(12)}…）" +
+                                        "—— 该线路给的不是这个包，换线路"
+                            )
+                        }
+                    }
                     ok = true
                     break
                 } catch (e: Exception) {
@@ -85,24 +110,71 @@ object UpdateDownloader {
                     lastErr = e
                 }
             }
-            if (!ok) throw lastErr ?: IOException("没有可用的下载地址")
+            if (!ok) {
+                throw lastErr ?: IOException("没有可用的下载地址")
+            }
 
             if (target.length() <= 0L) throw IOException("下载到 0 字节")
-
-            // 坑 3：摘要对不上就丢弃 —— 宁可不装，也不能装一个半残的
-            if (info.sha256.isNotBlank()) {
-                val got = sha256(target)
-                if (!got.equals(info.sha256, ignoreCase = true)) {
-                    target.delete()
-                    throw IOException(
-                        "摘要校验失败（期望 ${info.sha256.take(12)}…，实得 ${got.take(12)}…）——" +
-                                "包可能没下全或被改动，已丢弃"
-                    )
-                }
-            }
             target
         }
     }
+
+    /**
+     * 并发探测每个候选：`Range: bytes=0-131071` 取前 128KB，算 KB/s。
+     *
+     * 两道门槛，都是被实测逼出来的：
+     * 1. **响应必须以 ZIP 魔数开头**（[UpdateMirror.looksLikeApk]）——
+     *    `ghps.cc` / `gh-proxy.net` 对任何地址都返回 `200 + HTML`，只看状态码
+     *    它们反而是"最快的线路"；不验魔数，整个测速就是在给说谎者排名。
+     * 2. 探测失败（超时/非 200/非 ZIP）= 该候选**不进测速表**，而不是淘汰：
+     *    探测只是一次采样，直连在慢速网络上探测超时、整包却可能下得动。
+     *
+     * 全部并发执行（约 1~3 秒），随后按 [UpdateMirror.rank] 排序。
+     */
+    private suspend fun probeAll(cands: List<String>): Map<String, Double> =
+        coroutineScope {
+            cands.map { u -> async { u to probeOnce(u) } }
+                .awaitAll()
+                .mapNotNull { (u, s) -> s?.let { u to it } }
+                .toMap()
+        }
+
+    /** 单条探测。返回 KB/s；失败返回 null（字节不足以判 ZIP / 网络 / 非 200 都算） */
+    private suspend fun probeOnce(url: String): Double? =
+        withContext(Dispatchers.IO) {
+            try {
+                val req = Request.Builder().url(url)
+                    .header("Accept", "application/octet-stream")
+                    .header("Range", "bytes=0-131071")
+                    .build()
+                probeClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext null
+                    val body = resp.body ?: return@withContext null
+                    val src = body.byteStream()
+                    val head = ByteArray(4)
+                    var n = 0
+                    while (n < 4) {
+                        val r = src.read(head, n, 4 - n)
+                        if (r < 0) break
+                        n += r
+                    }
+                    if (!UpdateMirror.looksLikeApk(head.copyOf(n))) return@withContext null
+                    val t0 = System.currentTimeMillis()
+                    var total = n.toLong()
+                    val buf = ByteArray(32 * 1024)
+                    while (total < 128 * 1024) {
+                        val r = src.read(buf, 0, buf.size)
+                        if (r < 0) break
+                        total += r
+                    }
+                    val ms = System.currentTimeMillis() - t0
+                    if (ms <= 0 || total < 64 * 1024) return@withContext null
+                    total / 1024.0 / (ms / 1000.0)
+                }
+            } catch (e: Exception) {
+                null
+            }
+        }
 
     /**
      * 从一个地址把包拖到 `target`。

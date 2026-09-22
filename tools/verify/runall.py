@@ -28,7 +28,9 @@
 `runcaliblive.py`（校准矩阵端到端重放，用法 `runcaliblive.py [-v]`，站点用 `-Dvs.base=` 换）；
 `runadbprobe.py`（去广告覆盖勘察，用法 `runadbprobe.py <pageUrl>`）；
 `runupdlive.py`（应用内自更新端到端对照实验：裸链直打 vs 双通道 `check()`，
-**自带对照组** —— 只有"旧路不通、新路通"才能证明改的是必要的）。
+**自带对照组** —— 只有"旧路不通、新路通"才能证明改的是必要的）；
+`runmirrorprobe.py`（GitHub 加速镜像活性实测：从 UpdateMirror.kt 解析候选清单逐个
+Range 探测并验 ZIP 魔数 —— 镜像表会腐化，怀疑"更新变慢/失败"时先跑它）。
 
 ⚠️ 登记这一节不是形式主义：这三个都是**排查工具**而不是断言套件，它们不进 SUITES 是对的
 （零断言会被标 WEAK），但**不登记就会被误以为"跑过了"** —— 本项目已经栽过一次同型的
@@ -76,6 +78,8 @@ SUITES = [
     'runseed',
     # v1.0.55：⑤⑥（配方导入导出 / 应用自更新）落仓时是**零断言**，这里补上。
     'runupd',
+    # v1.0.56：自更新高速镜像层（行为断言走真编译产物，需先 assembleDebug）。
+    'runupdmirror',
 ]
 # 需要真实网络的；**默认不跑**（见文件头）。
 # runbs3 是 v1.0.53 从 SUITES 挪过来的：它跑的是 `https://www.bolyship.com`，

@@ -43,6 +43,21 @@ import java.io.IOException
  * 两条都失败时，报错必须**把两条通道各自的错误都写上** —— 否则用户只知道"失败了"，
  * 而"换个网络/挂代理"这个唯一有效的动作就传不到他那儿。
  *
+ * ## 第三层：加速镜像（v1.0.56）—— 但它**不扩展信任**
+ *
+ * v1.0.56 起还有第三条兜底（[UpdateMirror]）：8 个公共 URL 前缀反代。它们同时解决
+ * 两个问题 —— `github.com` 整个被阻断时的**可达性**，以及国际出口只有几十 KB/s 时的
+ * **速度**（实测直连 74 KB/s vs 镜像 1860 KB/s，8 MB 的包 110 秒 vs 5 秒）。
+ *
+ * 但镜像只是**字节搬运工**，不能成为信任源：清单里的 sha256 是整个自更新的信任锚点，
+ * 而一个镜像想篡改清单是做得到的。所以镜像通道取清单受两道约束：
+ *
+ * 1. **双源一致才接受**：至少 2 个**不同**镜像返回的清单在 `versionCode / sha256 /
+ *    apkUrl` 上完全一致（两个无关联的公共镜像合谋篡改，不在威胁模型内）；
+ *    只有一个镜像应答 ⇒ **拒绝**，报错写明原因。
+ * 2. 清单里的 `apkUrl` 白名单仍然只认 GitHub 本尊（镜像主机不进白名单）—— 镜像可以
+ *    帮我们"搬字节"，但**指向哪儿**不由它决定。
+ *
  * ## 清单里有什么、以及两条防线
  *
  * CI 在打 tag 发版时**顺手生成** `version.json`，和 APK 一起传进同一个 Release：
@@ -106,7 +121,14 @@ object UpdateChecker {
          * 放在**候选列表的第一位**（见 [UpdateDownloader]）—— 不是因为 api 更"官方"，
          * 而是因为上表那组数据：这个主机在这条网络上真的通，而 `github.com` 真的不通。
          */
-        val apkApiUrl: String? = null
+        val apkApiUrl: String? = null,
+        /**
+         * 清单是经哪条线路拿到的（`api.github.com` / `github.com` / 镜像短名）。
+         *
+         * 写进确认弹窗：镜像线路意味着"清单出自两个镜像的一致答案"而非 GitHub 本尊 ——
+         * 这件事应当**可见**，而不是只在出错时才说。
+         */
+        val via: String = ""
     )
 
     sealed class State {
@@ -122,7 +144,7 @@ object UpdateChecker {
     }
 
     /** 清单是哪条通道取到的 —— 报错与自检都要能说清"走的哪条路" */
-    enum class Route { Api, Direct }
+    enum class Route { Api, Direct, Mirror }
 
     /** 一次取到的清单，连同它的备用下载地址与"包摘要"（用于同源交叉校验） */
     class Manifest(
@@ -130,7 +152,9 @@ object UpdateChecker {
         val route: Route,
         val apkApiUrl: String?,
         /** GitHub 给 APK 资产算的摘要（`sha256:` 前缀已去掉）；裸链通道拿不到，为 null */
-        val apkDigest: String?
+        val apkDigest: String?,
+        /** 线路说明（镜像通道 = "经 X、Y 双源一致"；其它通道为 null） */
+        val viaNote: String? = null
     )
 
     /**
@@ -178,15 +202,23 @@ object UpdateChecker {
 
         return when {
             parsed.versionCode <= currentVersionCode -> State.Latest
-            else -> State.Newer(parsed)
+            else -> State.Newer(parsed.copy(via = viaLabel(got)))
         }
     }
 
+    /** 线路标签：报给用户看的"这份清单从哪来" */
+    private fun viaLabel(m: Manifest): String = when (m.route) {
+        Route.Api -> "api.github.com"
+        Route.Direct -> "github.com"
+        Route.Mirror -> m.viaNote ?: "加速镜像"
+    }
+
     /**
-     * 按顺序试两条通道取清单。**任何一条成功就停**（别把两条的耗时叠起来）。
+     * 按顺序试三层取清单。**任何一层成功就停**（别把几层的耗时叠起来）：
+     * api → 裸链 → 镜像（双源一致）。
      *
-     * 失败时抛出的异常消息里同时带上两条通道各自的错误 —— 这是用户唯一能据以行动的
-     * 信息（"两条都不通 ⇒ 多半是本机网络到不了 GitHub"）。
+     * 失败时抛出的异常消息里同时带上各层各自的错误 —— 这是用户唯一能据以行动的
+     * 信息（"层层都不通 ⇒ 多半是本机网络到不了 GitHub"）。
      */
     internal suspend fun fetchManifest(directUrl: String): Manifest {
         val apiErr: String
@@ -200,13 +232,71 @@ object UpdateChecker {
             if (body.isBlank()) throw IOException("正文为空（若仓库被改成 private，未认证就读不到 asset）")
             return Manifest(body, Route.Direct, null, null)
         } catch (e: Exception) {
+            val directErr = describe(e)
+            // 第三层：镜像。单镜像的清单不可信 ⇒ 必须双源一致（见类注释「不扩展信任」）。
+            val mirrorErr: String
+            try {
+                return viaMirrors(directUrl)
+            } catch (me: Exception) {
+                mirrorErr = me.message.orEmpty()
+            }
             throw IOException(
-                "两条通道都取不到更新清单：\n" +
+                "三条通道都取不到更新清单：\n" +
                         "① api.github.com —— $apiErr\n" +
-                        "② github.com —— ${describe(e)}\n" +
-                        "→ 两条都不通时，多半是本机网络到不了 GitHub（换个网络 / WiFi 再试）"
+                        "② github.com —— $directErr\n" +
+                        "③ 加速镜像 —— $mirrorErr\n" +
+                        "→ 层层都不通时，多半是本机网络到不了 GitHub（换个网络 / WiFi 再试）"
             )
         }
+    }
+
+    /**
+     * 第三层：经公共镜像取清单，**≥2 个独立镜像一致才接受**。
+     *
+     * 为什么是"一致"而不是"第一个应答的"：镜像能看到并改写清单正文 —— 而清单里的
+     * sha256 是整个自更新的信任锚点。两个互不相关的镜像给出完全相同的内容，
+     * 同时被篡改的概率才可以忽略；只有一个应答时**宁可拒绝**（报错说清楚），
+     * 也不把信任押在一个第三方身上。
+     *
+     * 每个镜像**只试一次**（`Http.getOnce` + 短超时）：走到这一层说明前两层都已失败，
+     * 用户在等结果，这里再多花两倍时间就成"点了没反应"。
+     */
+    private suspend fun viaMirrors(directUrl: String): Manifest {
+        data class Hit(val prefix: String, val body: String, val info: UpdateInfo)
+        val hits = ArrayList<Hit>(2)
+        val errs = ArrayList<String>(2)
+        for (p in UpdateMirror.MIRROR_PREFIXES) {
+            if (hits.size >= 2) break          // 双源一致已凑齐，后面不必再试
+            try {
+                val body = Http.getOnce(UpdateMirror.wrap(p, directUrl), fast = true)
+                if (body.isBlank()) throw IOException("正文为空")
+                val info = parse(body) ?: throw IOException("清单里没有可用的版本号/下载地址")
+                hits += Hit(p, body, info)
+            } catch (e: Exception) {
+                errs += "${UpdateMirror.labelOf(p)}：${describe(e)}"
+            }
+        }
+        if (hits.size >= 2) {
+            val (a, b) = hits
+            val same = a.info.versionCode == b.info.versionCode &&
+                    a.info.apkUrl == b.info.apkUrl &&
+                    a.info.sha256.equals(b.info.sha256, ignoreCase = true)
+            if (!same) {
+                throw IOException(
+                    "两个镜像给出的清单互相矛盾（${a.info.versionName} vs ${b.info.versionName}）" +
+                            "—— 有镜像在篡改内容，已拒绝"
+                )
+            }
+            val note = "经 ${UpdateMirror.labelOf(a.prefix)}、${UpdateMirror.labelOf(b.prefix)} " +
+                    "双源一致"
+            return Manifest(a.body, Route.Mirror, null, null, note)
+        }
+        val seen = hits.joinToString("、") { UpdateMirror.labelOf(it.prefix).orEmpty() }
+        throw IOException(
+            (if (seen.isBlank()) "所有镜像都不应答" else "只有 1 个镜像（$seen）应答，" +
+                    "单镜像清单不可信，已按安全规则拒绝") +
+                    (if (errs.isEmpty()) "" else "\n" + errs.joinToString("\n"))
+        )
     }
 
     /**
@@ -284,8 +374,15 @@ object UpdateChecker {
         Regex("^https://([^/]+)", RegexOption.IGNORE_CASE).find(url)?.groupValues?.get(1)
             ?.lowercase().orEmpty()
 
+    /**
+     * 白名单。**镜像地址先剥皮再判**：镜像主机本身不进 [ALLOWED_HOSTS]，
+     * 合法形态只有"GitHub 本尊"和"`已知镜像前缀 + GitHub 本尊`"两种 ——
+     * `wrap(镜像, https://evil.com/x.apk)` 在这里被剥出内层主机后照样拒绝。
+     */
     private fun hostAllowed(url: String): Boolean {
-        val host = hostOf(url)
+        val inner = UpdateMirror.innerOf(url) ?: url
+        if (UpdateMirror.isMirrored(url) && UpdateMirror.prefixOf(url) == null) return false
+        val host = hostOf(inner)
         return ALLOWED_HOSTS.any { host == it || host.endsWith(".$it") }
     }
 }

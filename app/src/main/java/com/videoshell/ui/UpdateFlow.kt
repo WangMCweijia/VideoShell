@@ -90,9 +90,13 @@ object UpdateFlow {
         val size = if (info.size > 0) {
             act.getString(R.string.update_size, info.size / 1024 / 1024)
         } else ""
+        // 线路要可见：镜像线路意味着"清单出自两个镜像的一致答案"而非 GitHub 本尊（安全语义不同）
+        val via = if (info.via.isNotBlank()) {
+            "\n" + act.getString(R.string.update_via, info.via)
+        } else ""
         AlertDialog.Builder(act)
             .setTitle(act.getString(R.string.update_found_title, info.versionName))
-            .setMessage(notes + "\n\n" + size)
+            .setMessage(notes + "\n\n" + size + via)
             .setPositiveButton(R.string.update_download) { _, _ -> download(act, info) }
             .setNegativeButton(R.string.update_later, null)
             .show()
