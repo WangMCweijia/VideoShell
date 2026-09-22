@@ -42,6 +42,24 @@
             android:layout_weight="1"
             android:textSize="17sp" />
 
+        <!--
+          去广告开关（v1.0.52）。校准学的是"用户点的那个链接的形状"，而广告浮层会劫持这次
+          点击 ⇒ 写进配方的是广告链接的形状（所有报错都是绿的，只有规则是错的）。
+          所以默认拦，并且把这个开关摆在顶栏：万一错杀了本站的正常跳转，用户能立刻关掉。
+        -->
+        <TextView
+            android:id="@+id/btnAdBlock"
+            android:layout_width="wrap_content"
+            android:layout_height="28dp"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_chip"
+            android:gravity="center"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:text="@string/adblock_on"
+            android:textColor="@color/text_primary"
+            android:textSize="12sp" />
+
         <TextView
             android:id="@+id/btnRestart"
             android:layout_width="wrap_content"

@@ -41,7 +41,20 @@ import com.videoshell.data.model.SiteConfig
  * ⇒ 全线换接口。判定结果（含否定）落盘，每个域名只发生一次。
  *
  * 顺序：**域名白名单 → 已自证的域名 → 人工校准（压过采集接口）→ 采集接口 →
- * 网页解析（外边套家族路由）**。
+ * 签名种子配置族（外边套种子路由）→ 加密接口族 → 网页解析**。
+ *
+ * ## v1.0.53：种子路由在最外层
+ *
+ * 默认兜底从 [FamilyRouter] 换成了 [SeedRouter]，它是**再包一层**的延迟路由：
+ * 先判「签名种子配置族」，不命中就原样交给 [FamilyRouter]（原有链路一字未改）。
+ * 放在最外层是因为它的判据与域名无关（解开站点自己的 `{origin}/config.json` 信封），
+ * 而这一族恰恰**最会换域名**（配置文件里就带着一串种子地址互相兜底）。
+ * 详见 [SeedFamily] / [SeedRouter]。
+ *
+ * ⚠️ 换默认兜底时**不能顺手丢掉第 ② 步那条规矩**：已判定「不是加密接口族」的域名
+ * （`CryptFamily.State.Absent` 落盘）不该再被包一层只为读缓存的外壳 ——
+ * 该规矩仍然生效，只是现在由 [SeedRouter] 的 `familyAbsent` 落点体现（Absent ⇒ 直接从 [HtmlAdapter] 起）。
+ * v1.0.53 第一次改这一步时把它删掉了，是 `Family.java` 的 D4 源码守卫把它抓回来的。
  */
 object AdapterFactory {
     fun create(site: SiteConfig): SiteAdapter {
@@ -70,8 +83,18 @@ object AdapterFactory {
             }
         }
 
-        // ⑤ 未知域名 ⇒ 套一层延迟家族自证：命中就整程换接口，不命中就原样用网页解析
-        //    （已判定"不是本族"的域名直接返回 HtmlAdapter，零成本）
-        return if (fam is CryptFamily.State.Absent) HtmlAdapter(site) else FamilyRouter(site)
+        // ⑤ 未知域名 ⇒ 套一层延迟路由。
+        //    顺序是 **种子配置族 → 加密接口族 → 网页解析**：
+        //    种子族最先判，因为它的判据是"解开 {origin}/config.json 的信封"，
+        //    与域名无关、且命中后能一次解决分类/列表/搜索/详情/播放全部五件事；
+        //    没命中就原样交给 [FamilyRouter]（它再判加密族、再退回 HtmlAdapter）。
+        //    两层各一次探测，都在 IO 协程里（本函数保持同步，理由见文件头）。
+        //
+        //    ⚠️ **已判定「不是加密接口族」的域名不再套 [FamilyRouter]** —— 这是 v1.0.35 定下的
+        //    「零成本」规矩（缓存里已有否定结论，就不该再包一层只为读缓存的外壳）。
+        //    但 `Absent` 只说明它**不是加密族**，种子配置族是**另一个族**，
+        //    所以那一层探测仍然要过；只是它跑完之后的落点直接从 [HtmlAdapter] 起。
+        return if (fam is CryptFamily.State.Absent) SeedRouter(site, familyAbsent = true)
+        else SeedRouter(site)
     }
 }

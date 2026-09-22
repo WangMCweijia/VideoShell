@@ -33,6 +33,15 @@
             android:exported="false"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout" />
 
+        <!-- 搜索结果二级页（v1.0.50）：左侧站源栏 + 右侧结果。
+             ⚠️ 声明 configChanges 是为了**不重建**（重建会把结果丢掉、再搜一遍），
+             所以列数（竖 2 / 横 4）必须在 onConfigurationChanged 里重排 ——
+             只在 onCreate 排一次的话，转一次屏就错位。 -->
+        <activity
+            android:name=".ui.SearchActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout" />
+
         <activity
             android:name=".ui.DetailActivity"
             android:exported="false"

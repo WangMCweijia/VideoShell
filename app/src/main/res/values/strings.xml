@@ -261,6 +261,16 @@
     <string name="sniffer_browse_hint">提示：先在这个网页里找到影片播放页，再点下方两个按钮</string>
     <string name="sniffer_browse_found">浏览模式：已抓到 %1$d 个媒体地址，可点下方按钮把本站收进来</string>
     <string name="sniffer_close_web">关闭网页</string>
+
+    <!--
+      去广告（v1.0.52）。用"去广告：开/关"而不是"拦截广告"这种动词短语：开关要一眼看出
+      **当前是什么状态**，而不是"按下去会发生什么"（本项目在暗色三态那版吃过这个亏）。
+    -->
+    <string name="adblock_on">去广告：开</string>
+    <string name="adblock_off">去广告：关</string>
+    <string name="adblock_on_toast">已开启去广告（本页已重载）</string>
+    <string name="adblock_off_toast">已关闭去广告（本页已重载）—— 广告浮层可能又挡住按钮</string>
+    <string name="adblock_nav_blocked">已拦截一次广告跳转（%1$s）—— 若这是本站的正常跳转，请关掉「去广告」</string>
     <string name="web_reload">刷新</string>
 
     <!-- 浮窗收起 / 展开（v1.0.38）。这个名字很要紧：不给它一个动作词，
@@ -350,4 +360,22 @@
     <!-- ===================== 搜索历史（FN-2） ===================== -->
     <string name="search_history_title">最近搜索</string>
     <string name="search_history_clear">清空</string>
+
+    <!-- ===================== 搜索结果二级页（v1.0.50） =====================
+         搜索结果从首页网格挪到这里，左侧多一列站源 —— 于是"换一个站看看有没有"
+         从"退出去、换站、再搜一遍"变成"点一下左边"。
+         ============================================================ -->
+    <string name="search_exit">退出搜索</string>
+    <string name="search_result_title">「%1$s」的结果</string>
+    <string name="search_rail_agg">聚合</string>
+    <string name="search_rail_agg_hint">全部站源</string>
+    <string name="search_rail_sites">%1$d 站</string>
+    <string name="search_count">%1$d 条</string>
+    <string name="search_rail_tip">点左侧站源可切换查看该站的结果</string>
+    <string name="search_no_site">还没有已保存的站源</string>
+    <string name="search_running">正在搜索「%1$s」…</string>
+    <string name="search_site_empty">「%1$s」在 %2$s 没有结果</string>
+    <string name="search_site_failed">%1$s 搜索失败：%2$s</string>
+    <string name="search_agg_failed">全部站源都没能返回结果（%1$d 个站失败）</string>
+    <string name="search_fail_title">搜索失败的站</string>
 </resources>

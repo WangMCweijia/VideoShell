@@ -3,6 +3,7 @@ package com.videoshell.ui
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.videoshell.data.model.VideoItem
@@ -45,9 +46,25 @@ class SiteActivity : AppCompatActivity() {
             act = this,
             b = binding.browser,
             launchCalib = { key -> calibLauncher.launch(CalibrateActivity.intent(this, key)) },
-            onOpenDetail = { key, item -> openDetail(key, item) }
+            onOpenDetail = { key, item -> openDetail(key, item) },
+            // 与首页同一条口径（v1.0.50）：搜索结果交给二级页，本站默认选中
+            openSearch = { kw, agg -> startActivity(SearchActivity.intent(this, kw, agg, siteKey)) }
         )
-        browser.setup(showBack = true) { finish() }
+        browser.setup(showBack = true) {
+            // 标题栏那枚返回也要先退搜索 —— 否则"界面上有返回、按了却整页退掉"
+            if (!browser.exitSearch()) finish()
+        }
+
+        // 返回键：先退搜索，再退出本页（v1.0.50）。
+        // 不做这件事的话，在二级页搜完之后只能一路按返回退到首页 —— 而首页的搜索区
+        // 是另一边的事，用户会觉得"退不出去"（这正是他报的那条）。
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (browser.exitSearch()) return
+                isEnabled = false
+                onBackPressedDispatcher.onBackPressed()
+            }
+        })
 
         if (siteKey.isBlank()) {
             toast("站点不存在")

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  搜索结果页 · 左侧站源栏的一格（v1.0.50）。
+
+  两个角色合一：站名（最多两行 —— "XX影视"这种四五个字的站名很常见）与命中条数。
+  形状直接复用 `bg_chip`：它已经有 `state_selected` = 品牌实心那一支，
+  所以"当前在看哪个站"不需要额外加指示器 —— 整块变色是这套 UI 里已经有的语言
+  （搜索范围 chip 就是这么做的），新造一种反而要多解释一次。
+
+  ⚠️ 子 TextView 必须写 `duplicateParentState="true"`：`@color/chip_text` 那个
+     selector 认的是**控件自己的** selected 状态，而 selected 是设在根布局上的。
+     不写这一句，选中时文字仍是深色压在品牌蓝底上 —— 正是 chip_text 注释里
+     警告过的"选中了但字看不见"。
+  ⚠️ 不要加 `layout_weight`：栏宽由父级的固定宽度决定，格子按内容高度排。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="@dimen/space_xs"
+    android:layout_marginTop="@dimen/space_xs"
+    android:layout_marginEnd="@dimen/space_xs"
+    android:background="@drawable/bg_chip"
+    android:gravity="center"
+    android:minHeight="52dp"
+    android:orientation="vertical"
+    android:paddingStart="@dimen/space_xs"
+    android:paddingTop="@dimen/space_sm"
+    android:paddingEnd="@dimen/space_xs"
+    android:paddingBottom="@dimen/space_sm">
+
+    <TextView
+        android:id="@+id/tvRailName"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:duplicateParentState="true"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:maxLines="2"
+        android:textColor="@color/chip_text"
+        android:textSize="@dimen/text_caption" />
+
+    <TextView
+        android:id="@+id/tvRailCount"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:duplicateParentState="true"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:maxLines="1"
+        android:textColor="@color/chip_text"
+        android:textSize="@dimen/text_badge"
+        android:visibility="gone" />
+</LinearLayout>

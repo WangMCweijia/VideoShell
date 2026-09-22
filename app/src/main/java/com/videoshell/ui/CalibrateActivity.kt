@@ -10,6 +10,7 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -21,7 +22,9 @@ import com.videoshell.data.Store
 import com.videoshell.data.model.Episode
 import com.videoshell.data.model.MediaSource
 import com.videoshell.data.model.SiteConfig
+import com.videoshell.data.net.AdBlock
 import com.videoshell.data.net.Http
+import com.videoshell.data.net.WebAdBlock
 import com.videoshell.data.site.AdapterFactory
 import com.videoshell.data.site.HtmlTemplates
 import com.videoshell.data.site.RecipeStore
@@ -77,6 +80,19 @@ class CalibrateActivity : AppCompatActivity() {
 
     private var step = SiteCalib.Step.CAT
     private var pageUrl = ""
+
+    /**
+     * 去广告（v1.0.52）：**默认开**，顶栏上可关。
+     *
+     * 这一页比嗅探页更需要它：校准学的是**用户点的那个链接的形状**，而广告浮层
+     * （盖住正文的浮层、劫持点击的透明层、"3 秒后跳转"的弹窗）会让这次点击落在广告上 ——
+     * 于是写进配方的是广告链接的形状，之后这个站"怎么点都不对"，
+     * 而所有报错都是绿的。这类错误的排查成本最高，所以默认拦。
+     */
+    private var adBlockOn = true
+
+    /** 「已拦截广告跳转」每页只提示一次（弹窗会反复重试） */
+    private var navBlockNotified = false
 
     /** 三步各自学到的规则 */
     private var navSel: String? = null
@@ -157,6 +173,12 @@ class CalibrateActivity : AppCompatActivity() {
         binding.btnConfirm.setOnClickListener { confirm() }
         binding.btnReselect.setOnClickListener { reselect() }
         binding.btnSkip.setOnClickListener { skipStep() }
+
+        // ---- 去广告（v1.0.52）----
+        adBlockOn = WebAdBlock.on(this)
+        WebAdBlock.reset()
+        binding.btnAdBlock.setOnClickListener { toggleAdBlock() }
+        renderAdBlockChip()
 
         // 已校准过的话，把上次的规则先亮出来，方便对照着点
         RecipeStore.load(site.baseUrl)?.let {
@@ -354,20 +376,54 @@ class CalibrateActivity : AppCompatActivity() {
         binding.webView.addJavascriptInterface(Bridge(), "VS")
         binding.webView.webChromeClient = WebChromeClient()
         binding.webView.webViewClient = object : WebViewClient() {
+            /**
+             * 子资源拦截（v1.0.52）：广告脚本 / 统计 / 广告 iframe 一律回空响应。
+             *
+             * 校准本身**不看渲染后的 DOM**（分类形状判据走 `Http.getOrNull` 拿到的服务端
+             * 原始 HTML），所以这里拦广告不会让"学到的规则"变成"拦过广告的 DOM 的规则" ——
+             * 它只影响用户眼前那一片：少几个浮层，也就少几次点错。
+             */
+            override fun shouldInterceptRequest(
+                view: WebView?,
+                request: WebResourceRequest?
+            ): WebResourceResponse? =
+                if (adBlockOn) WebAdBlock.intercept(request?.url?.toString()) else null
+
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 pageUrl = url.orEmpty()
+                navBlockNotified = false
+                injectAdBlockCss()
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 pageUrl = url.orEmpty()
                 injectPicker()
+                injectAdBlockCss()
             }
 
+            /**
+             * 顶层跳转守卫。
+             *
+             * ⚠️ **必须在 `pageUrl = ...` 之前**：被拦下的广告页一旦写进 [pageUrl]，
+             * 第 4 步学到的"结果页地址"就成了广告页的地址 —— 而用户看到的还是原来那一页。
+             * 这是本版要修的那种错：所有报错都是绿的，只有学出来的规则是错的。
+             */
             override fun shouldOverrideUrlLoading(
                 view: WebView?,
                 request: WebResourceRequest?
             ): Boolean {
-                pageUrl = request?.url?.toString().orEmpty()
+                val to = request?.url?.toString().orEmpty()
+                if (guardNav(to, request)) return true
+                pageUrl = to
+                return false
+            }
+
+            /** API 21~23 走的老签名（新签名 24 才有，那边拿不到手势信息） */
+            @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                val to = url.orEmpty()
+                if (guardNav(to, null)) return true
+                pageUrl = to
                 return false
             }
 
@@ -381,6 +437,51 @@ class CalibrateActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    // ------------------------------------------------------------------ 去广告（v1.0.52）
+
+    private fun renderAdBlockChip() {
+        binding.btnAdBlock.setText(if (adBlockOn) R.string.adblock_on else R.string.adblock_off)
+    }
+
+    /**
+     * 开关去广告：切换后**重载当前页**。
+     *
+     * 已经拦下的资源不会因为我们改了主意而复活；只改判据不重载，用户会看到
+     * "关掉了但广告还在"这种无法解释的中间态。重载不重置步骤 —— 用户是在同一页上做实验。
+     */
+    private fun toggleAdBlock() {
+        adBlockOn = !adBlockOn
+        WebAdBlock.setOn(this, adBlockOn)
+        renderAdBlockChip()
+        WebAdBlock.reset()
+        navBlockNotified = false
+        toast(getString(if (adBlockOn) R.string.adblock_on_toast else R.string.adblock_off_toast))
+        binding.webView.reload()
+    }
+
+    /**
+     * 顶层跳转守卫：拦下弹窗 / 诱导跳 App，**并且说出来**。
+     *
+     * 那条"跨站 + 无手势 = 弹窗"是推断，一定会偶尔错杀站点自己的 JS 跳转（域名轮换的站
+     * 就靠它）。所以拦下时不能静默 —— 一句提示 + 顶栏那个开关，就是用户自救的路。
+     */
+    private fun guardNav(to: String, request: WebResourceRequest?): Boolean {
+        if (!adBlockOn || to.isBlank()) return false
+        val from = binding.webView.url.orEmpty().ifBlank { pageUrl }
+        if (!WebAdBlock.navBlocked(from, to, request)) return false
+        if (!navBlockNotified) {
+            navBlockNotified = true
+            toast(getString(R.string.adblock_nav_blocked, Store.hostOf(to)))
+        }
+        return true
+    }
+
+    /** 反复注入隐藏样式：站点自己插的浮层在加载完之后才出现（幂等，见 AdBlock.hideJs） */
+    private fun injectAdBlockCss() {
+        if (!adBlockOn) return
+        WebAdBlock.injectCss(binding.webView)
     }
 
     private fun injectPicker() {

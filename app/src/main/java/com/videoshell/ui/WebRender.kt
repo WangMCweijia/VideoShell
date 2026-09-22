@@ -4,11 +4,15 @@ import android.annotation.SuppressLint
 import android.os.Handler
 import android.os.Looper
 import android.view.ViewGroup
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.appcompat.app.AppCompatActivity
+import com.videoshell.data.Store
 import com.videoshell.data.net.Http
+import com.videoshell.data.net.WebAdBlock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -80,6 +84,20 @@ object WebRender {
                 root?.addView(view)
                 viewAdded = true
                 view.webViewClient = object : WebViewClient() {
+                    /**
+                     * 广告 / 统计资源不回内容（v1.0.52）。
+                     *
+                     * 这个隐藏 WebView 存在的意义只是"把 DOM 跑出来"，而广告脚本恰恰是
+                     * 往 DOM 里塞节点的东西 —— 少塞一批，交回解析器的 DOM 就更接近正文。
+                     * 判据与嗅探页、校准页**共用同一份**（[com.videoshell.data.net.AdBlock]），
+                     * 三处"什么算广告"永远一致，不会出现"这个页面拦、那个页面不拦"。
+                     */
+                    override fun shouldInterceptRequest(
+                        v: WebView?,
+                        r: WebResourceRequest?
+                    ): WebResourceResponse? =
+                        if (Store.adBlock(act)) WebAdBlock.intercept(r?.url?.toString()) else null
+
                     override fun onPageFinished(v: WebView?, u: String?) {
                         handler.postDelayed({
                             runCatching {

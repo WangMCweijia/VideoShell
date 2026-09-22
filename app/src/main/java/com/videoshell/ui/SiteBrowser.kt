@@ -56,7 +56,18 @@ class SiteBrowser(
     private val act: AppCompatActivity,
     private val b: ViewSiteBrowserBinding,
     private val launchCalib: (String) -> Unit,
-    private val onOpenDetail: (String, VideoItem) -> Unit
+    private val onOpenDetail: (String, VideoItem) -> Unit,
+    /**
+     * 搜索结果交给谁（v1.0.50）。
+     *
+     * 搜索**不再**在本页网格里显示：结果挪到了二级页（[SearchActivity]），
+     * 那一页左侧能直接切换站源 —— "这个站没有，换一个站看看"从
+     * "退出去、换站、再搜一遍"变成"点一下左边"。
+     *
+     * 参数是「关键词」+「是不是聚合（全站源）」。默认 null ⇒ 维持旧行为
+     * （在本页网格里搜），这样离线自检与将来别的宿主都不会被这次改动打断。
+     */
+    private val openSearch: ((keyword: String, aggregate: Boolean) -> Unit)? = null
 ) {
 
     companion object {
@@ -132,19 +143,23 @@ class SiteBrowser(
         engine = SearchEngine.of(Store.searchEngine(act))
         enhance = Store.searchEnhance(act)
         b.btnSearchToggle.setOnClickListener {
-            val show = b.searchRow.visibility != View.VISIBLE
-            b.searchRow.visibility = if (show) View.VISIBLE else View.GONE
-            // 范围选择与搜索框同生共死：单看"全站"两个字，没有任何意义
-            b.scopeRow.visibility = if (show) View.VISIBLE else View.GONE
-            renderScope()
-            if (!show && mode == MODE_SEARCH) {
-                mode = MODE_CATEGORY
-                catAdapter.select(0)
-                currentType = ""
-                reload()
+            if (b.searchRow.visibility == View.VISIBLE) {
+                // 再点一次 = **退出搜索**，走与 ✕ / 返回键**同一个**入口（v1.0.50）。
+                // 旧实现是在这里自己重排一遍状态（只改可见性、不动关键词），
+                // 于是"放大镜点一次收起了、分类条却没回来"这类不一致就从这个分支冒出来 ——
+                // 同一件事有三个入口各写一遍，迟早长得不一样。
+                exitSearch()
+            } else {
+                b.searchRow.visibility = View.VISIBLE
+                // 范围选择与搜索框同生共死：单看"全站"两个字，没有任何意义
+                b.scopeRow.visibility = View.VISIBLE
+                renderScope()
             }
         }
         b.btnSearch.setOnClickListener { doSearch() }
+        // 退出搜索（v1.0.50）：唯一的显式出口。返回键走的是同一个方法，
+        // 所以"按 ✕"和"按返回"不会出现两种结果。
+        b.btnExitSearch.setOnClickListener { exitSearch() }
         b.inputSearch.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEARCH) {
                 doSearch()
@@ -177,7 +192,18 @@ class SiteBrowser(
         scope = s
         Store.setSearchScope(act, s.name)
         renderScope()
-        if (mode != MODE_SEARCH || keyword.isBlank()) return
+        // ⚠️「已经在搜」的判据是**搜索区开着 + 关键词非空**，不能用 `mode == MODE_SEARCH`：
+        // v1.0.50 起搜索结果在二级页里，本页网格始终是分类内容 ⇒ mode 恒为 MODE_CATEGORY。
+        // 继续用 mode 判断的话，换范围会静默什么都不做（用户："我改成全站了，没反应"）。
+        if (b.searchRow.visibility != View.VISIBLE || keyword.isBlank()) return
+        // v1.0.50：换范围 = 用新范围**重新打开那一页**。不重开的话用户会经历
+        // "我明明改成全站了，怎么屏幕上还是本站的结果" —— 那一页还停在返回栈上，
+        // 他看到的确实还是旧的（与 setEngine 同一个理由）。
+        val page = openSearch
+        if (page != null && s != SearchScope.WEB) {
+            page(keyword, s == SearchScope.ALL)
+            return
+        }
         // 已经在搜了 ⇒ 按新范围重来一遍。唯独 WEB 不重来网格（结果不在网格里，在网页里）
         when (s) {
             SearchScope.WEB -> openWebSearch(keyword)
@@ -371,12 +397,44 @@ class SiteBrowser(
 
     // ------------------------------------------------------------------ 分类 / 列表
 
+    /**
+     * 分类加载的代次（v1.0.50）。
+     *
+     * 分类是**异步且带重试**的（最多 3 轮，退避 1.5s / 3s，最坏约 4.5s 才收尾），
+     * 而用户完全可能在这段时间里就去搜索了。晚到的那一轮若照旧执行收尾，会做两件坏事：
+     * ① 把 `catHintRow` / `rvCats` 重新拉成 VISIBLE —— 搜索结果上方冒出一排站点分类标签；
+     * ② 调 `onCategory(0)`，把 mode 打回分类并 reload —— 刚搜出来的结果整屏被换掉。
+     * 这正是「搜索结果带当前站源的分类行」的真因（v1.0.41 只在 reload() 里收口，
+     * 没管住这条异步尾巴）。
+     *
+     * 判据用**代次**而不是布尔标记：连续两次 loadCategories（切站、校准回来）时，
+     * 只看"有没有在搜"分不出哪一轮是旧的，旧的那轮会把新的那轮结果覆盖掉。
+     */
+    private var catSeq = 0
+
+    /**
+     * 现在是不是"搜索真的发起过"。
+     *
+     * ⚠️ 不能用 `mode == MODE_SEARCH`：v1.0.50 起搜索结果在二级页里，本页网格始终是
+     * 分类内容 ⇒ mode 恒为 MODE_CATEGORY。也不能只看"搜索区开着"：
+     * 用户点了放大镜、还没输关键词时分类条不该消失。两个条件合起来才是准确判据。
+     */
+    private fun searchingNow(): Boolean = mode == MODE_SEARCH || keyword.isNotBlank()
+
+    /** 分类条可见性的**唯一**出口：三处调用点（reload / loadCategories 首尾）共用一份判据 */
+    private fun applyCatVisibility() {
+        val searching = searchingNow()
+        b.rvCats.visibility = if (searching) View.GONE else View.VISIBLE
+        b.catHintRow.visibility = if (searching) View.GONE else View.VISIBLE
+    }
+
     private fun loadCategories() {
         val a = adapter ?: return
+        val seq = ++catSeq
         b.pb.visibility = View.VISIBLE
         showState(null)
         b.tvCatHint.text = act.getString(R.string.cat_loading)
-        b.catHintRow.visibility = View.VISIBLE
+        applyCatVisibility()
         act.lifecycleScope.launch {
             var list: List<Category> = emptyList()
             var why = ""
@@ -384,9 +442,14 @@ class SiteBrowser(
             // 旧实现一抖整条分类栏就消失，只能靠用户手动点"重新加载"。这里自动补两轮
             // （退避 1.5s / 3s），抖动就自愈了 —— 用户不该为这种事点第二次。
             for (round in 0 until 3) {
+                // 已经有更新的一轮在跑 ⇒ 立刻收工，别把旧结果写回去
+                if (seq != catSeq) return@launch
                 if (round > 0) {
                     b.tvCatHint.text = act.getString(R.string.cat_retrying, round)
                     delay(if (round == 1) 1_500L else 3_000L)
+                    // ⚠️ delay 之后必须**再查一次**：这 1.5s / 3s 正是用户最可能切站
+                    // 或去搜索的窗口，退避睡醒才检查等于把窗口白留
+                    if (seq != catSeq) return@launch
                 }
                 val res = runCatching { a.categories() }
                 list = res.getOrElse { emptyList() }
@@ -396,6 +459,7 @@ class SiteBrowser(
                     ?.takeIf { it.isNotBlank() }
                     ?: a.lastDiag.ifBlank { NetLog.lastFailure() }
             }
+            if (seq != catSeq) return@launch
             b.pb.visibility = View.GONE
             cats = list
             val all = listOf(Category("", act.getString(R.string.cat_latest))) + list
@@ -409,7 +473,11 @@ class SiteBrowser(
                 act.getString(R.string.cat_count, list.size)
             }
             b.btnCatRetry.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
-            b.catHintRow.visibility = View.VISIBLE
+            // ⚠️ 搜索发起过时**不许**把分类条拉回来、也不许 onCategory(0) 换掉网格（v1.0.50）。
+            // 分类数据本身照常写进 cats / catAdapter —— 退出搜索后立刻可用、不用重拉；
+            // 被压住的只有"可见性"与"切网格"这两个动作。
+            applyCatVisibility()
+            if (searchingNow()) return@launch
             onCategory(0, all[0])
         }
     }
@@ -444,15 +512,61 @@ class SiteBrowser(
             return
         }
         keyword = kw
-        mode = MODE_SEARCH
+        hideSuggestions()
+        // FN-2 的搜索历史以前**从来没被写过盘**（`Store.addSearchHistory` 全工程零调用），
+        // 于是"最近搜索"永远是空的、长按删单条也就无从谈起。收口在这里：
+        // 只要真的发起了一次搜索（本站 / 全站 / 全网任一），就该记一笔。
+        Store.addSearchHistory(act, kw)
         if (scope == SearchScope.WEB) {
             // 全网：结果在网页里看。**刻意不清空网格** —— 清空会让人以为"没搜到"，
             // 而真相是结果换了地方显示；留着旧内容，视线自然跟着新开的网页走。
             openWebSearch(kw)
             return
         }
+        val page = openSearch
+        if (page != null) {
+            // v1.0.50：结果交给二级页（左侧可换站源）。
+            // ⚠️ 这里**不动**本页的网格，也不动 mode：网格仍然是分类浏览的内容，
+            // 从二级页返回时看到的还是刚才那一屏，不会被清空再重拉。
+            page(kw, scope == SearchScope.ALL)
+            return
+        }
+        // 没有二级页宿主（离线自检 / 别的入口）⇒ 维持旧行为：在本页网格里搜
+        mode = MODE_SEARCH
         if (scope == SearchScope.ALL) refreshSiteNames()
         reload()
+    }
+
+    /**
+     * 退出搜索（v1.0.50）。
+     *
+     * 判据是**搜索区开着**，而不是"网格里是不是搜过"：搜索结果已经在二级页里了，
+     * 本页要退的只是这个操作区。收敛到一个方法、✕ 与返回键共用，避免出现
+     * "按 ✕ 收起了、按返回却没反应"这种两套判据各说各话的情况。
+     *
+     * @return true = 确实退出了搜索（调用方据此决定要不要把返回键继续往下传）
+     */
+    fun exitSearch(): Boolean {
+        if (b.searchRow.visibility != View.VISIBLE) return false
+        hideSuggestions()
+        keyword = ""
+        b.inputSearch.setText("")
+        b.searchRow.visibility = View.GONE
+        b.scopeRow.visibility = View.GONE
+        b.engineRow.visibility = View.GONE
+        // 网格里可能留着搜索结果（openSearch 为 null 的那条旧路径），也可能因为
+        // **分类是异步的、首屏那次加载被搜索打断**而还是空的（v1.0.50 新增的路径）
+        // ⇒ 一律退回「最新」分类重拉一次。反过来，网格里已经有分类内容时不重拉，
+        // 免得用户退出搜索的瞬间看见列表闪一下。
+        if (mode == MODE_SEARCH || videoAdapter.itemCount == 0) {
+            mode = MODE_CATEGORY
+            catAdapter.select(0)
+            currentType = ""
+            reload()
+        }
+        // 没走重拉那条路时，分类条的可见性还得拨回来（reload 里已经拨过一次）
+        applyCatVisibility()
+        return true
     }
 
     // ------------------------------------------------------------------ 搜索历史（FN-2）
@@ -475,14 +589,12 @@ class SiteBrowser(
         page = 1
         videoAdapter.clear()
         showState(null)
-        // 搜索态把站点自己的分类条（ chips 行 + 「分类 N 个」提示）一起收掉（v1.0.40）。
-        // 搜索结果跟站点分类无关，留着会让人以为这排标签还在参与过滤；
-        // 卡片副标题的藏标签是 v1.0.39 做的，但只藏了卡片、没藏这条 —— 漏了这一层。
-        // 判据与 setSearchKeyword 完全一致（mode == MODE_SEARCH），
-        // 三条 mode 变更路径（doSearch / onCategory / 收起搜索行）都汇入 reload()，一处收口。
-        val searching = mode == MODE_SEARCH
-        b.rvCats.visibility = if (searching) View.GONE else View.VISIBLE
-        b.catHintRow.visibility = if (searching) View.GONE else View.VISIBLE
+        // 搜索态把站点自己的分类条（chips 行 + 「分类 N 个」提示）一起收掉（v1.0.40）。
+        // 搜索结果跟站点分类无关，留着会让人以为这排标签还在参与过滤。
+        // ⚠️ v1.0.50 起判据收敛进 applyCatVisibility()：原来 reload() 与
+        // loadCategories 的异步尾巴**各判一次**，尾巴那一次判漏了 ——
+        // 于是"搜索结果上方重新冒出分类条"。判据只能有一份。
+        applyCatVisibility()
         b.pb.visibility = View.VISIBLE
         load(1, false)
     }

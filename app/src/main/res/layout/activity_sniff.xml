@@ -132,6 +132,23 @@
                 android:textSize="12sp"
                 android:visibility="gone" />
 
+            <!--
+              去广告开关（v1.0.52）。
+              放在**手柄这一行**而不是展开区：拦截判据里有一条是推断（跨站 + 无手势 = 弹窗），
+              万一错杀了本站的正常跳转，用户必须能立刻关掉它 —— 而那时浮窗多半是收起的。
+            -->
+            <TextView
+                android:id="@+id/btnAdBlock"
+                android:layout_width="wrap_content"
+                android:layout_height="28dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:gravity="center"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:text="@string/adblock_on"
+                android:textColor="#B3FFFFFF"
+                android:textSize="12sp" />
+
             <TextView
                 android:id="@+id/btnPanelToggle"
                 android:layout_width="wrap_content"

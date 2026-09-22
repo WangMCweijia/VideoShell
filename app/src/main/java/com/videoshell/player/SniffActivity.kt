@@ -26,8 +26,10 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.videoshell.R
 import com.videoshell.data.Store
+import com.videoshell.data.net.AdBlock
 import com.videoshell.data.net.Http
 import com.videoshell.data.net.NetLog
+import com.videoshell.data.net.WebAdBlock
 import com.videoshell.data.site.JxParser
 import com.videoshell.data.site.SniffSession
 import com.videoshell.data.site.WebSiteKit
@@ -120,6 +122,22 @@ class SniffActivity : AppCompatActivity() {
 
     /** 「识别并添加」正在进行中：防连点（每次识别都要真发几个请求） */
     private var grabbing = false
+
+    /**
+     * 去广告（v1.0.52）：**默认开**，浮窗上可关。
+     *
+     * 这个页面是全 App 唯一把第三方站真跑起来的地方，而广告在这里造成的是**实打实的误判**：
+     * 广告播放器会先于正片发出自己的 m3u8（[SniffRank] 只能事后给它减分），
+     * 广告浮层还会盖住网页上真正该点的「选集 / 播放」。
+     *
+     * 留开关不留成"永远开"：判据里有一条（跨站 + 无手势 + 非重定向 = 弹窗）是**靠行为推断**
+     * 的，而域名轮换的站在点击后确实可能无手势地跳到别的域名 —— 推断就会错，
+     * 错了必须让人关得掉（关不掉的过滤器比没有过滤器更危险）。
+     */
+    private var adBlockOn = true
+
+    /** 「已拦截广告跳转」每页只提示一次（弹窗会反复重试，不节流会连弹十几个 toast） */
+    private var navBlockNotified = false
 
     /** 播放页地址里的视频 id —— 候选地址含它时是很强的正面信号 */
     private var videoId: String = ""
@@ -243,6 +261,13 @@ class SniffActivity : AppCompatActivity() {
         binding.btnCopy.setOnClickListener { copyReport() }
         binding.tvStatus.setOnClickListener { copyReport() }
 
+        // ---- 去广告（v1.0.52）----
+        // 计数器按"这一页"算，报告里的数字才有意义（换页/重新嗅探时清零）
+        adBlockOn = WebAdBlock.on(this)
+        WebAdBlock.reset()
+        binding.btnAdBlock.setOnClickListener { toggleAdBlock() }
+        renderAdBlockChip()
+
         // ---- 浮窗：可收起 + 可拖动（v1.0.38）----
         // 浏览模式默认收起：这个页面是拿来看网页的，浮窗不管内容只挡按钮
         panelCollapsed = browse
@@ -260,6 +285,46 @@ class SniffActivity : AppCompatActivity() {
         binding.webView.alpha = if (show) 1f else 0f
         binding.btnToggleWeb.text =
             getString(if (show) R.string.sniffer_hide_web else R.string.sniffer_show_web)
+    }
+
+    // ------------------------------------------------------------------ 去广告（v1.0.52）
+
+    private fun renderAdBlockChip() {
+        binding.btnAdBlock.setText(
+            if (adBlockOn) R.string.adblock_on else R.string.adblock_off
+        )
+    }
+
+    /**
+     * 开关去广告。切换后**重载一次**当前页 —— 已经拦下的资源不会因为我们改了主意而复活，
+     * 只改判据不重载，用户会看到"关掉了但广告还在"这种无法解释的中间态。
+     */
+    private fun toggleAdBlock() {
+        adBlockOn = !adBlockOn
+        WebAdBlock.setOn(this, adBlockOn)
+        renderAdBlockChip()
+        WebAdBlock.reset()
+        navBlockNotified = false
+        toast(getString(if (adBlockOn) R.string.adblock_on_toast else R.string.adblock_off_toast))
+        binding.webView.reload()
+    }
+
+    /**
+     * 顶层跳转守卫：拦下弹窗/诱导跳 App，**并且说出来**。
+     *
+     * 那条"跨站 + 无手势 = 弹窗"的规则是推断，一定会偶尔错杀站点自己的 JS 跳转，
+     * 所以拦下时不能静默：状态栏那句提示就是用户判断"是不是它挡了我"的依据，
+     * 而浮窗上的开关是他能立刻自救的手段（PITFALLS：静默失败最贵）。
+     */
+    private fun guardNav(to: String, request: WebResourceRequest?): Boolean {
+        if (!adBlockOn || to.isBlank()) return false
+        val from = binding.webView.url.orEmpty()
+        if (!WebAdBlock.navBlocked(from, to, request)) return false
+        if (!navBlockNotified) {
+            navBlockNotified = true
+            toast(getString(R.string.adblock_nav_blocked, Store.hostOf(to)))
+        }
+        return true
     }
 
     // ------------------------------------------------------------------ 浮窗：收起 / 拖动
@@ -386,17 +451,44 @@ class SniffActivity : AppCompatActivity() {
                 view: WebView?,
                 request: WebResourceRequest?
             ): WebResourceResponse? {
-                request?.url?.toString()?.let { offer(it) }
+                val u = request?.url?.toString()
+                // ★ 去广告（v1.0.52）：命中就**不发出去**（回一个空响应）。
+                //   效果不是"少显示一张图"，而是**广告播放器根本没被创建** ——
+                //   于是它那条 m3u8 请求压根不会出现，候选清单从源头就干净了
+                //   （[SniffRank] 只能事后给广告减分，拦在门口省事得多）。
+                //   ⚠️ 媒体地址一律不拦（判据在 [AdBlock.blockedResource] 里）：
+                //   漏拦一个广告只是少省一次请求，误拦一个分片就是播放挂掉。
+                if (adBlockOn) WebAdBlock.intercept(u)?.let { return it }
+                u?.let { offer(it) }
                 return null
             }
 
+            override fun shouldOverrideUrlLoading(
+                view: WebView?,
+                request: WebResourceRequest?
+            ): Boolean = guardNav(request?.url?.toString().orEmpty(), request)
+
+            /**
+             * API 21~23 走的是这个老签名（带手势信息的新签名 24 才有）。
+             * 那边拿不到"有没有用户手势" ⇒ 只拦"目标本身就是广告 / 跳 App"，
+             * 不拦推断出来的弹窗 —— 老设备上少拦一次弹窗，比多拦一次正常跳转划算。
+             */
+            @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean =
+                guardNav(url.orEmpty(), null)
+
             override fun onLoadResource(view: WebView?, url: String?) {
+                // 被拦下的资源在 onLoadResource 里**仍会被通知一次** ⇒ 这里要再挡一道，
+                // 否则"广告不进候选清单"只做了一半：另一条路又把它捡回来了
+                if (adBlockOn && url != null && AdBlock.blockedResource(url)) return
                 url?.let { offer(it) }
             }
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 pageError = ""
+                navBlockNotified = false
                 injectHook()
+                injectAdBlockCss()
             }
 
             override fun onReceivedError(
@@ -454,6 +546,8 @@ class SniffActivity : AppCompatActivity() {
         loginWords = ""
         pageError = ""
         loggedOneShot = false
+        navBlockNotified = false
+        WebAdBlock.reset()
         binding.tvStatus.text = getString(
             if (browse) R.string.sniffer_browse else R.string.sniffer_running
         )
@@ -474,6 +568,16 @@ class SniffActivity : AppCompatActivity() {
         runCatching { binding.webView.evaluateJavascript(HOOK_JS, null) }
     }
 
+    /**
+     * 隐藏广告容器的样式要**反复补**：站点自己的脚本会在页面加载完之后再插浮层
+     * （那些脚本不在我们的黑名单里，拦不掉），只在 onPageStarted 注入一次会漏掉它们。
+     * 注入是幂等的（脚本里 `window.__vsAdCss` 挡了一道），所以挂在轮询上很便宜。
+     */
+    private fun injectAdBlockCss() {
+        if (!adBlockOn) return
+        WebAdBlock.injectCss(binding.webView)
+    }
+
     private fun collectJs() {
         runCatching {
             binding.webView.evaluateJavascript(COLLECT_JS) { value ->
@@ -491,6 +595,8 @@ class SniffActivity : AppCompatActivity() {
                     for (item in parseJs(value)) offer(item)
                 }
             }
+            // 隐藏样式跟着这一趟一起补：站点自己插的浮层是在加载完之后才出现的（见函数注释）
+            injectAdBlockCss()
         }
     }
 
@@ -775,6 +881,9 @@ class SniffActivity : AppCompatActivity() {
         sb.appendLine("视频 id：${videoId.ifBlank { "(未识别)" }}")
         sb.appendLine("页面错误：${pageError.ifBlank { "无" }}")
         sb.appendLine("登录墙：${if (loginWall) loginWords else "未检测到"}")
+        // 去广告拦了什么必须跟着报告一起走：否则"网页里少了个东西"事后分不清是站点的
+        // 问题还是我们的问题（被拦的地址本身也已经进了 NetLog 的底下那段）
+        sb.appendLine(WebAdBlock.reportLine(adBlockOn))
         sb.appendLine("候选 ${candidates.size} 个（含排序依据）：")
         ranked().forEachIndexed { i, c ->
             sb.appendLine("  [${i + 1}] ${c.display()}   分数=${c.score}")

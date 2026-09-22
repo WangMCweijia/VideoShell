@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  搜索结果二级页（v1.0.50）。
+
+  为什么要有这一页：搜索结果原来铺在首页网格里，于是"这个站没有，换个站看看"必须
+  退出去、换默认站、再搜一遍 —— 三步。现在结果独立成一页，**左侧一列就是站源**，
+  点一下即换。首页网格因此回到"只做分类浏览"这一件事上，两边的状态不再互相污染。
+
+  ⚠️ 左栏宽度不要随手调：76dp 是按结果区卡片宽度反算的（见 dimens/search_rail_w）。
+  ⚠️ 结果区只有 2 列（横屏 4 列）而不是首页的 3 列：宽度被左栏吃掉 76dp + 缝，
+     还按 3 列排的话每张卡片只剩 ~70dp，封面会明显变小。列数在 SearchActivity 里定。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_ambient"
+    android:orientation="vertical">
+
+    <!-- ==================== 标题行（浮岛） ==================== -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/island_gap"
+        android:layout_marginTop="@dimen/space_md"
+        android:layout_marginEnd="@dimen/island_gap"
+        android:background="@drawable/bg_glass"
+        android:gravity="center_vertical"
+        android:minHeight="@dimen/island_min_h"
+        android:orientation="horizontal"
+        android:paddingStart="4dp"
+        android:paddingEnd="8dp">
+
+        <ImageButton
+            android:id="@+id/btnBack"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/back"
+            android:src="@drawable/ic_back"
+            android:tint="@color/text_primary" />
+
+        <TextView
+            android:id="@+id/tvQuery"
+            style="@style/TextTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textSize="17sp" />
+
+        <TextView
+            android:id="@+id/tvCount"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="4dp"
+            android:textColor="@color/text_hint"
+            android:textSize="@dimen/text_caption" />
+    </LinearLayout>
+
+    <!-- 状态 / 提示行：聚合时显示「几个站有结果」，单站时显示"点左侧可换站" -->
+    <TextView
+        android:id="@+id/tvTip"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/space_lg"
+        android:layout_marginTop="@dimen/space_sm"
+        android:layout_marginEnd="@dimen/space_lg"
+        android:layout_marginBottom="@dimen/space_sm"
+        android:ellipsize="end"
+        android:maxLines="2"
+        android:textColor="@color/text_hint"
+        android:textSize="@dimen/text_caption" />
+
+    <!-- ==================== 主体：左站源栏 + 右结果 ==================== -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <!-- 站源栏：整列是一块玻璃，格子用它自己的 bg_chip 叠在上面。
+             ⚠️ paddingTop/Bottom 取 8dp（= radius_sm）：玻璃圆角是 16dp，
+             第一格若贴着顶边，它的方角会顶出玻璃的圆角之外，看着像"漏出来了"。 -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rvRail"
+            android:layout_width="@dimen/search_rail_w"
+            android:layout_height="match_parent"
+            android:layout_marginStart="@dimen/island_gap"
+            android:layout_marginBottom="@dimen/island_gap"
+            android:background="@drawable/bg_glass"
+            android:clipToPadding="false"
+            android:paddingTop="@dimen/radius_sm"
+            android:paddingBottom="@dimen/radius_sm"
+            android:scrollbars="none" />
+
+        <FrameLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="@dimen/space_md"
+            android:layout_weight="1">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rvVideos"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:paddingStart="10dp"
+                android:paddingTop="@dimen/space_xs"
+                android:paddingEnd="10dp"
+                android:paddingBottom="20dp" />
+
+            <ProgressBar
+                android:id="@+id/pb"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:indeterminateTint="@color/brand"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/tvState"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:layout_marginStart="16dp"
+                android:layout_marginEnd="16dp"
+                android:gravity="center"
+                android:textColor="@color/text_hint"
+                android:textSize="@dimen/text_caption"
+                android:visibility="gone" />
+        </FrameLayout>
+    </LinearLayout>
+
+</LinearLayout>

@@ -192,6 +192,26 @@ object Store {
         sp(ctx).edit().putString(KEY_SEARCH_HIST, gson.toJson(list)).apply()
     }
 
+    // ------------------------------------------------------------------ 去广告（v1.0.52）
+
+    private const val KEY_ADBLOCK = "adblock"
+
+    /**
+     * 网页里的广告拦截，**默认开**。
+     *
+     * 嗅探页与校准页都在真站点上跑 WebView，而广告浮层恰好会盖住"该点的那个链接" ——
+     * 校准学到的就是广告链接的形状。所以默认必须是开。
+     *
+     * 留成可关的：拦截判据里有一条（"跨站 + 无手势 = 弹窗"）是**靠行为推断**的，
+     * 而域名轮换的站在点击后确实可能无手势地跳到另一个域名。推断就一定会错，
+     * 错了必须让人关得掉 —— 关不掉的过滤器比没有过滤器更危险。
+     */
+    fun adBlock(ctx: Context): Boolean = sp(ctx).getBoolean(KEY_ADBLOCK, true)
+
+    fun setAdBlock(ctx: Context, on: Boolean) {
+        sp(ctx).edit().putBoolean(KEY_ADBLOCK, on).apply()
+    }
+
     // ------------------------------------------------------------------ 站点导入 / 合并（FN-6）
 
     /**

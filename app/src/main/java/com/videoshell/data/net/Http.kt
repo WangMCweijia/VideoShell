@@ -42,22 +42,41 @@ object Http {
      * 必要：雷池（SafeLine）这类 WAF / 防盗链会在响应里下发 cookie，
      * 后续请求必须带上才不会被拦；旧实现没有 CookieJar（OkHttp 默认 NO_COOKIES），
      * 首屏之后的所有请求都是"裸奔"，容易被判定为异常流量。
+     *
+     * ## ★ 不能按「请求方 host」分桶（v1.0.53 的真根因）
+     *
+     * 旧实现是 `store[url.host]` 存、`store[url.host]` 取 —— 于是
+     * **`Domain=.example.com` 的跨子域 cookie 永远送不出去**：
+     * 响应来自 `api.example.com`，cookie 被记在 `api.example.com` 这一桶下，
+     * 而真正要用它的 `video.example.com` 查自己的桶、什么也查不到。
+     *
+     * 实测（红果黄剧 huangju.net）：`/play/{id}` 在 `api.huangju.net` 下发
+     * `CloudFront-Policy/Signature/Key-Pair-Id`（`Domain=.huangju.net`），
+     * m3u8 与分片在 `video.huangju.net` 上做 CloudFront 签名校验 ——
+     * 桶对不上 ⇒ 每个分片都 **403 `MissingKey`**，而自检、接口、详情全部正常。
+     *
+     * 正确做法：**不分桶**，一律交给 [Cookie.matches]（它按 `Domain` / `Path` /
+     * `hostOnly` 自己判该不该发给这个 URL），顺带清掉已过期的，避免内存里越攒越多。
+     * 键取 `name|domain|path` 三元组：同名 cookie 挂在不同域下要各占一格。
      */
     private val cookieJar = object : CookieJar {
-        private val store = HashMap<String, MutableList<Cookie>>()
+        private val store = LinkedHashMap<String, Cookie>()
+
+        private fun key(c: Cookie) = c.name + "|" + c.domain + "|" + c.path
 
         @Synchronized
         override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
-            val list = store.getOrPut(url.host) { mutableListOf() }
+            val now = System.currentTimeMillis()
             for (c in cookies) {
-                list.removeAll { it.name == c.name }
-                list.add(c)
+                if (c.expiresAt <= now) store.remove(key(c)) else store[key(c)] = c
             }
         }
 
         @Synchronized
-        override fun loadForRequest(url: HttpUrl): List<Cookie> =
-            store[url.host].orEmpty().filter { it.matches(url) }
+        override fun loadForRequest(url: HttpUrl): List<Cookie> {
+            val now = System.currentTimeMillis()
+            return store.values.filter { it.expiresAt > now && it.matches(url) }
+        }
     }
 
     /**

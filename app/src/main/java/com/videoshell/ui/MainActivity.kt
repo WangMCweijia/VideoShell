@@ -9,6 +9,9 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import com.videoshell.App
+import android.graphics.drawable.LayerDrawable
+import androidx.activity.OnBackPressedCallback
+import androidx.core.content.ContextCompat
 import androidx.core.view.doOnLayout
 import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.lifecycleScope
@@ -169,7 +172,12 @@ class MainActivity : AppCompatActivity() {
             act = this,
             b = binding.browserHome,
             launchCalib = { key -> calibLauncher.launch(CalibrateActivity.intent(this, key)) },
-            onOpenDetail = { key, item -> openDetail(key, item) }
+            onOpenDetail = { key, item -> openDetail(key, item) },
+            // 搜索结果统一交给二级页：左侧能直接换站源，比"退出去换站再搜一遍"省两步。
+            // 当前站默认选中 —— 用户点了「本站」范围进来，第一眼就该是它的结果。
+            openSearch = { kw, agg ->
+                startActivity(SearchActivity.intent(this, kw, agg, browserHome.site?.key.orEmpty()))
+            }
         )
         browserHome.setup(showBack = false) { }
 
@@ -255,6 +263,9 @@ class MainActivity : AppCompatActivity() {
         // 底部导航现在是**浮**在内容之上的一层，各列表得自己让出它的高度
         // （实测高度而不是写死，理由见 applyNavClearance 的注释）
         applyNavClearance()
+        // 边缘折射层（v1.0.50）：透明度管"看得见背后"，这一层管"像不像玻璃"
+        applyNavRefraction()
+        setupBack()
         showPage(PAGE_HOME)
     }
 
@@ -362,6 +373,60 @@ class MainActivity : AppCompatActivity() {
                 pad
             )
         }
+    }
+
+    // ------------------------------------------------------------------ 导航栏边缘折射（v1.0.50）
+
+    /**
+     * 给底部导航浮岛加一圈**边缘折射**。
+     *
+     * 为什么是"叠一层"而不是替换 `bg_glass_nav`：那一份 XML 里已经有主体渐变、顶部高光、
+     * 砂质、描边四层，换掉就得在这里把四层重画一遍 —— 下次改配色要改两处，
+     * 而"两处各维护一份必然不一致"正是本项目反复踩过的坑（见 bg_glass_nav 注释里
+     * radius_hero 那段：注释说的和代码做的已经不是一回事了）。
+     * `LayerDrawable` 里**后画的在上**，所以折射层放第二个。
+     *
+     * ⚠️ 三支颜色随主题（values / values-night 各一份，极性相反 —— 亮色用暗棱、
+     * 暗色用亮棱），所以必须在这里按当前主题构造。切深浅色会重建 Activity，
+     * 这一层自然跟着换，不需要额外监听。
+     */
+    private fun applyNavRefraction() {
+        val base = ContextCompat.getDrawable(this, R.drawable.bg_glass_nav) ?: return
+        binding.bottomNav.background =
+            LayerDrawable(arrayOf(base, GlassEdgeDrawable.forNav(this)))
+    }
+
+    // ------------------------------------------------------------------ 返回键
+
+    /**
+     * 返回键的三级语义（v1.0.50）。
+     *
+     * 1. 搜索区开着 ⇒ **先退出搜索**（收起搜索行 + 回到分类浏览）。
+     *    搜索以前根本没有出口：唯一的开关是标题栏那枚放大镜，而它在搜索态下看起来
+     *    仍然是"搜索"，没人知道再点一次是退出 —— 用户的原话就是
+     *    「搜索后无法退出搜索回到首页」。现在 ✕ 与返回键走**同一个入口**
+     *    （[SiteBrowser.exitSearch]），两条路不会各说各话。
+     * 2. 不在首页 ⇒ 回首页，并把底栏选中态一起拨过去，否则会出现
+     *    "内容回首页了、底栏还亮着站源"的分裂状态。
+     * 3. 首页且没在搜索 ⇒ 交回系统（退出应用）。
+     *
+     * 用 `OnBackPressedCallback` 而不是覆写已废弃的 `onBackPressed()`：
+     * 第 3 步要"把自己摘出去再转交"，只有 dispatcher 这套能做到不递归。
+     */
+    private fun setupBack() {
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (currentPage == PAGE_HOME && browserHome.exitSearch()) return
+                if (currentPage != PAGE_HOME) {
+                    // 设 selectedItemId 会触发 listener ⇒ showPage；这里的显式调用只是兜底
+                    binding.bottomNav.selectedItemId = R.id.nav_home
+                    showPage(PAGE_HOME)
+                    return
+                }
+                isEnabled = false
+                onBackPressedDispatcher.onBackPressed()
+            }
+        })
     }
 
     // ------------------------------------------------------------------ 首页：默认站源

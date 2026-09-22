@@ -122,6 +122,22 @@
             android:minWidth="72dp"
             android:text="@string/search"
             android:textSize="14sp" />
+
+        <!-- 退出搜索（v1.0.50）。
+             以前**没有任何**退出搜索的出口：唯一能回到分类浏览的是标题栏那枚放大镜，
+             而它在搜索态下看起来仍然是"搜索"—— 没人知道再点一次是退出。
+             用户的原话就是「搜索后无法退出搜索回到首页」。
+             这里给一个语义明确的 ✕（关闭），不依赖用户去猜图标的第二种含义。
+             它与返回键走的是同一个入口（SiteBrowser.exitSearch）⇒ 两条路不会不一致。 -->
+        <ImageButton
+            android:id="@+id/btnExitSearch"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginStart="4dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/search_exit"
+            android:src="@drawable/ic_close"
+            android:tint="@color/text_primary" />
     </LinearLayout>
 
     <!-- FN-2：搜索历史下拉。搜索框聚焦且为空时弹出，点一项即回填并搜索 -->

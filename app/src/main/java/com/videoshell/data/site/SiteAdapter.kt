@@ -103,9 +103,10 @@ abstract class SiteAdapter(val site: SiteConfig) {
      * 把剧集地址解析为可直接交给播放器的地址：
      * 1) 本身是 m3u8/mp4 -> 直接用
      * 2) 是播放页 -> 尝试直接从 HTML 里抠真实地址（快，不用 WebView）
-     * 3) 页面把地址交给第三方 **jx 解析接口** -> 跟过去取流
-     * 4) 页面用 maccms 的 **player_list 解析模板**（`ps:1`）-> 跟到解析页再抠一次（v1.0.29）
-     * 5) 都抠不到 -> 交给网页嗅探
+     * 3) 集地址本身就是 **JSON 接口**（响应体里带 `url`）-> 直接取用（v1.0.53）
+     * 4) 页面把地址交给第三方 **jx 解析接口** -> 跟过去取流
+     * 5) 页面用 maccms 的 **player_list 解析模板**（`ps:1`）-> 跟到解析页再抠一次（v1.0.29）
+     * 6) 都抠不到 -> 交给网页嗅探
      */
     open suspend fun resolve(episode: Episode): MediaSource {
         val u = episode.url.trim()
@@ -120,6 +121,19 @@ abstract class SiteAdapter(val site: SiteConfig) {
         var pageUrl = u
         var html = Http.getOrNull(pageUrl, referer = site.baseUrl)
         Media.extractFromHtml(html)?.takeIf { it.isNotBlank() }?.let {
+            return MediaSource.Direct(Media.encodeUrl(it), playHeaders(), Media.isHls(it))
+        }
+        // 集地址本身就是一个 **JSON 接口**（v1.0.53）：`GET …/play/17949` →
+        // `{"url":"https://…/index.m3u8","expiresAt":…}`。这一形状以前完全没被覆盖，
+        // 于是整站只能退嗅探（而它的播放地址压根不在任何 HTML 里，嗅探才是正解 ——
+        // 但能少一跳就少一跳）。
+        //
+        // 自门控两道，非这类站**零额外请求、零误判**：
+        //   ① [PlayerShell.jsonUrl] 要求整个响应体是 JSON 对象（HTML 页面解析不出来 ⇒ null）；
+        //   ② 取出的 `url` 必须**看起来是媒体**（`looksLikeMedia`）才认 ——
+        //      防止把普通接口里指向图片/页面的 `url` 字段当成片子。
+        // ⚠️ 换回来的地址带时效签名（如 CloudFront 的签名 Cookie），**只当次取用，绝不固化**。
+        PlayerShell.jsonUrl(html)?.takeIf { Media.looksLikeMedia(it) }?.let {
             return MediaSource.Direct(Media.encodeUrl(it), playHeaders(), Media.isHls(it))
         }
         // 解析服务「mui-player 外壳」（v1.0.30）：页面本身就是它时直接换地址。
