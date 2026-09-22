@@ -16,7 +16,8 @@ JAVAC = _cp.javac()
 JAVA = _cp.java()
 SRC = _cp.src('app/src/main/java/com/videoshell/player/PlayerActivity.kt')
 
-kt = open(SRC, encoding='utf-8').read()
+# 主文件 + 同主名的拆分子文件一起拼（见 _cp.kt）
+kt = _cp.kt(SRC)
 # 剥掉 /* ... */ 与 // ... 注释后再守卫（本文件没有把 // 写进字符串的情况）
 code = re.sub(r'/\*[\s\S]*?\*/', '', kt)
 code = re.sub(r'//[^\n]*', '', code)

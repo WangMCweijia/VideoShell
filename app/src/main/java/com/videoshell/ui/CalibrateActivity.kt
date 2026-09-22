@@ -75,11 +75,11 @@ class CalibrateActivity : AppCompatActivity() {
             Intent(context, CalibrateActivity::class.java).putExtra(EXTRA_KEY, siteKey)
     }
 
-    private lateinit var binding: ActivityCalibrateBinding
-    private lateinit var site: SiteConfig
+    internal lateinit var binding: ActivityCalibrateBinding
+    internal lateinit var site: SiteConfig
 
-    private var step = SiteCalib.Step.CAT
-    private var pageUrl = ""
+    internal var step = SiteCalib.Step.CAT
+    internal var pageUrl = ""
 
     /**
      * 去广告（v1.0.52）：**默认开**，顶栏上可关。
@@ -89,21 +89,21 @@ class CalibrateActivity : AppCompatActivity() {
      * 于是写进配方的是广告链接的形状，之后这个站"怎么点都不对"，
      * 而所有报错都是绿的。这类错误的排查成本最高，所以默认拦。
      */
-    private var adBlockOn = true
+    internal var adBlockOn = true
 
     /** 「已拦截广告跳转」每页只提示一次（弹窗会反复重试） */
-    private var navBlockNotified = false
+    internal var navBlockNotified = false
 
     /** 三步各自学到的规则 */
-    private var navSel: String? = null
-    private var catTpl: String? = null
-    private var detailTpl: String? = null
-    private var playTpl: String? = null
+    internal var navSel: String? = null
+    internal var catTpl: String? = null
+    internal var detailTpl: String? = null
+    internal var playTpl: String? = null
     /** 第 4 步（可选）学到的搜索模板 */
-    private var searchTpl: String? = null
+    internal var searchTpl: String? = null
 
     /** 第 3 步选中的播放页地址 —— 第 4 步结束时才真正去解析 / 试播 */
-    private var playPickAbs: String = ""
+    internal var playPickAbs: String = ""
 
     // ---------------------------------------------------------------- v1.0.29：可跳过某一步
     //
@@ -112,9 +112,9 @@ class CalibrateActivity : AppCompatActivity() {
     // 交差 —— 于是把**错误模板**固化进去，接下来解析全用错规则，
     // 表现就是「校准完了结果还是没生效」。
 
-    private var skipCat = false
-    private var skipDetail = false
-    private var skipPlay = false
+    internal var skipCat = false
+    internal var skipDetail = false
+    internal var skipPlay = false
 
     /**
      * 配方**真的被写过**。v1.0.29 修 ③ 用：
@@ -125,10 +125,10 @@ class CalibrateActivity : AppCompatActivity() {
     private var committed = false
 
     /** 第三步走完（别再响应网页点击）；真正收尾看 [resolvingStarted] */
-    private var finished = false
+    internal var finished = false
 
     /** 试播 / 固化流程已启动 —— 按钮退场，别再响应确定 */
-    private var resolvingStarted = false
+    internal var resolvingStarted = false
 
     /**
      * 当前**已选中但还没确认**的点击。
@@ -137,7 +137,7 @@ class CalibrateActivity : AppCompatActivity() {
      * 上一版是"点完链接判据通过就自动推进"，判据一否决策略性 `return`，
      * 用户既没有按钮可按、也不知道自己在等什么 —— 于是卡死在第一步。
      */
-    private var pending: Pick? = null
+    internal var pending: Pick? = null
 
     /**
      * 一次点击的原始信息。
@@ -147,7 +147,7 @@ class CalibrateActivity : AppCompatActivity() {
      * v1.0.36 起两处依赖它：① 容器反推时可以退到"用户真正点的那一页"；
      * ② 第 4 步点结果页时能记住地址（搜索模板就是从这个地址里学的）。
      */
-    private data class Pick(
+    internal data class Pick(
         val raw: String,
         val abs: String,
         val text: String,
@@ -190,538 +190,15 @@ class CalibrateActivity : AppCompatActivity() {
         binding.webView.loadUrl(site.baseUrl)
     }
 
-    // ------------------------------------------------------------------ 引导文案
-
-    /**
-     * 跳过当前这一步（v1.0.29）。
-     *
-     * 跳过 ≠ 什么都不做：它表示「本站确实没有这一步」，所以要**清空**该步的旧规则 ——
-     * 否则 [commit] 里的 `?:` 会把上一次校准的残留留着，越校越错。
-     */
-    private fun skipStep() {
-        if (resolvingStarted) return
-        pending = null
-        when (step) {
-            SiteCalib.Step.CAT -> {
-                skipCat = true
-                catTpl = null
-                navSel = null
-                step = SiteCalib.Step.DETAIL
-                state(getString(R.string.calib_skip_cat))
-            }
-            SiteCalib.Step.DETAIL -> {
-                skipDetail = true
-                detailTpl = null
-                step = SiteCalib.Step.PLAY
-                state(getString(R.string.calib_skip_detail))
-            }
-            SiteCalib.Step.PLAY -> {
-                skipPlay = true
-                playTpl = null
-                // ⚠️ 不清 playPickAbs：如果第 2 步点到的是播放页（"点封面直接播放"的站），
-                // 那个地址就是可用的试播样本，留着还能验一次；从没点过才是空。
-                step = SiteCalib.Step.SEARCH
-                state(getString(R.string.calib_skip_play))
-                binding.webView.loadUrl(site.baseUrl)
-            }
-            // 第 4 步本来就是「按确定后留空 = 跳过」，不再给第二个入口
-            SiteCalib.Step.SEARCH -> state(getString(R.string.calib_skip_none))
-        }
-        render()
-    }
-
-    private fun render() {
-        // v1.0.20：三步之后还有可选的第 4 步（搜索），标题统一显示步数
-        binding.tvTitle.text = getString(R.string.calib_title, step.n)
-        when (step) {
-            SiteCalib.Step.CAT -> {
-                binding.tvStep.setText(R.string.calib_step1)
-                binding.tvHint.setText(R.string.calib_hint1)
-            }
-            SiteCalib.Step.DETAIL -> {
-                binding.tvStep.setText(R.string.calib_step2)
-                binding.tvHint.setText(R.string.calib_hint2)
-            }
-            SiteCalib.Step.PLAY -> {
-                binding.tvStep.setText(R.string.calib_step3)
-                binding.tvHint.setText(R.string.calib_hint3)
-            }
-            SiteCalib.Step.SEARCH -> {
-                binding.tvStep.setText(R.string.calib_step4)
-                binding.tvHint.setText(R.string.calib_hint4)
-            }
-        }
-        renderActions()
-    }
-
-    /**
-     * 确定按钮的文案随步骤变，用户一眼知道"按下去会发生什么"。
-     * 按钮**永远可点**（不置灰）：置灰等于又一次"点了没反应"，宁可点了给提示。
-     */
-    private fun renderActions() {
-        binding.btnConfirm.setText(
-            when (step) {
-                SiteCalib.Step.CAT -> R.string.calib_confirm_cat
-                SiteCalib.Step.DETAIL -> R.string.calib_confirm_detail
-                SiteCalib.Step.PLAY -> R.string.calib_confirm_play
-                SiteCalib.Step.SEARCH -> R.string.calib_confirm_search
-            }
-        )
-        binding.btnConfirm.alpha = if (pending != null || step == SiteCalib.Step.SEARCH) 1f else 0.55f
-        val show = !resolvingStarted
-        binding.btnConfirm.visibility = if (show) View.VISIBLE else View.GONE
-        binding.btnReselect.visibility =
-            if (show && pending != null) View.VISIBLE else View.GONE
-        // 前三步都能跳过；第 4 步本身就是「留空 = 跳过」，不再给第二个入口
-        binding.btnSkip.visibility =
-            if (show && step != SiteCalib.Step.SEARCH) View.VISIBLE else View.GONE
-    }
-
-    private fun state(msg: String) {
-        binding.tvState.text = msg
-    }
-
-    private fun restart() {
-        step = SiteCalib.Step.CAT
-        finished = false
-        resolvingStarted = false
-        pending = null
-        // ⚠️ 分类那两项以前没清（只清了详情/播放/搜索）。
-        // 于是"重新校准"时旧形状会一直挂在 `mergeRecipe` 的 `?:` 兜底上，
-        // 用户以为在重新学，实际用的还是上一次的点法 —— 越校越错。
-        catTpl = null
-        navSel = null
-        detailTpl = null
-        playTpl = null
-        searchTpl = null
-        playPickAbs = ""
-        skipCat = false
-        skipDetail = false
-        skipPlay = false
-        binding.pb.visibility = View.GONE
-        render()
-        state(getString(R.string.calib_restarted))
-        binding.webView.loadUrl(site.baseUrl)
-    }
-
-    // ------------------------------------------------------------------ 确认 / 重选
-
-    private fun confirm() {
-        if (resolvingStarted) return
-        val p = pending
-        when (step) {
-            SiteCalib.Step.SEARCH -> {
-                // 第 4 步不靠点击靠结果页地址；直接弹词框（留空 = 跳过）
-                pending = null
-                renderActions()
-                askSearchKeyword()
-                return
-            }
-            else -> Unit
-        }
-        if (p == null) {
-            state(
-                getString(
-                    when (step) {
-                        SiteCalib.Step.CAT -> R.string.calib_need_pick_cat
-                        SiteCalib.Step.DETAIL -> R.string.calib_need_pick_detail
-                        SiteCalib.Step.PLAY -> R.string.calib_need_pick_play
-                        SiteCalib.Step.SEARCH -> R.string.calib_confirm_search
-                    }
-                )
-            )
-            return
-        }
-        pending = null
-        renderActions()
-        when (step) {
-            SiteCalib.Step.CAT -> lifecycleScope.launch { pickCategory(p) }
-            SiteCalib.Step.DETAIL -> pickDetail(p)
-            SiteCalib.Step.PLAY -> pickPlay(p)
-            SiteCalib.Step.SEARCH -> Unit
-        }
-    }
-
-    private fun reselect() {
-        pending = null
-        renderActions()
-        state(
-            getString(
-                when (step) {
-                    SiteCalib.Step.CAT -> R.string.calib_need_pick_cat
-                    SiteCalib.Step.DETAIL -> R.string.calib_need_pick_detail
-                    SiteCalib.Step.PLAY -> R.string.calib_need_pick_play
-                    SiteCalib.Step.SEARCH -> R.string.calib_hint4
-                }
-            )
-        )
-    }
-
-    // ------------------------------------------------------------------ WebView
-
-    @SuppressLint("SetJavaScriptEnabled", "AddJavascriptInterface")
-    private fun setupWebView() {
-        binding.webView.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            databaseEnabled = true
-            loadsImagesAutomatically = true
-            mediaPlaybackRequiresUserGesture = false
-            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-            useWideViewPort = true
-            loadWithOverviewMode = true
-            cacheMode = WebSettings.LOAD_DEFAULT
-            userAgentString = Http.UA
-        }
-        binding.webView.addJavascriptInterface(Bridge(), "VS")
-        binding.webView.webChromeClient = WebChromeClient()
-        binding.webView.webViewClient = object : WebViewClient() {
-            /**
-             * 子资源拦截（v1.0.52）：广告脚本 / 统计 / 广告 iframe 一律回空响应。
-             *
-             * 校准本身**不看渲染后的 DOM**（分类形状判据走 `Http.getOrNull` 拿到的服务端
-             * 原始 HTML），所以这里拦广告不会让"学到的规则"变成"拦过广告的 DOM 的规则" ——
-             * 它只影响用户眼前那一片：少几个浮层，也就少几次点错。
-             */
-            override fun shouldInterceptRequest(
-                view: WebView?,
-                request: WebResourceRequest?
-            ): WebResourceResponse? =
-                if (adBlockOn) WebAdBlock.intercept(request?.url?.toString()) else null
-
-            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                pageUrl = url.orEmpty()
-                navBlockNotified = false
-                injectAdBlockCss()
-            }
-
-            override fun onPageFinished(view: WebView?, url: String?) {
-                pageUrl = url.orEmpty()
-                injectPicker()
-                injectAdBlockCss()
-            }
-
-            /**
-             * 顶层跳转守卫。
-             *
-             * ⚠️ **必须在 `pageUrl = ...` 之前**：被拦下的广告页一旦写进 [pageUrl]，
-             * 第 4 步学到的"结果页地址"就成了广告页的地址 —— 而用户看到的还是原来那一页。
-             * 这是本版要修的那种错：所有报错都是绿的，只有学出来的规则是错的。
-             */
-            override fun shouldOverrideUrlLoading(
-                view: WebView?,
-                request: WebResourceRequest?
-            ): Boolean {
-                val to = request?.url?.toString().orEmpty()
-                if (guardNav(to, request)) return true
-                pageUrl = to
-                return false
-            }
-
-            /** API 21~23 走的老签名（新签名 24 才有，那边拿不到手势信息） */
-            @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
-            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                val to = url.orEmpty()
-                if (guardNav(to, null)) return true
-                pageUrl = to
-                return false
-            }
-
-            override fun onReceivedError(
-                view: WebView?,
-                request: WebResourceRequest?,
-                error: WebResourceError?
-            ) {
-                if (request?.isForMainFrame == true) {
-                    state(getString(R.string.calib_page_failed, "${error?.errorCode}: ${error?.description}"))
-                }
-            }
-        }
-    }
-
-    // ------------------------------------------------------------------ 去广告（v1.0.52）
-
-    private fun renderAdBlockChip() {
-        binding.btnAdBlock.setText(if (adBlockOn) R.string.adblock_on else R.string.adblock_off)
-    }
-
-    /**
-     * 开关去广告：切换后**重载当前页**。
-     *
-     * 已经拦下的资源不会因为我们改了主意而复活；只改判据不重载，用户会看到
-     * "关掉了但广告还在"这种无法解释的中间态。重载不重置步骤 —— 用户是在同一页上做实验。
-     */
-    private fun toggleAdBlock() {
-        adBlockOn = !adBlockOn
-        WebAdBlock.setOn(this, adBlockOn)
-        renderAdBlockChip()
-        WebAdBlock.reset()
-        navBlockNotified = false
-        toast(getString(if (adBlockOn) R.string.adblock_on_toast else R.string.adblock_off_toast))
-        binding.webView.reload()
-    }
-
-    /**
-     * 顶层跳转守卫：拦下弹窗 / 诱导跳 App，**并且说出来**。
-     *
-     * 那条"跨站 + 无手势 = 弹窗"是推断，一定会偶尔错杀站点自己的 JS 跳转（域名轮换的站
-     * 就靠它）。所以拦下时不能静默 —— 一句提示 + 顶栏那个开关，就是用户自救的路。
-     */
-    private fun guardNav(to: String, request: WebResourceRequest?): Boolean {
-        if (!adBlockOn || to.isBlank()) return false
-        val from = binding.webView.url.orEmpty().ifBlank { pageUrl }
-        if (!WebAdBlock.navBlocked(from, to, request)) return false
-        if (!navBlockNotified) {
-            navBlockNotified = true
-            toast(getString(R.string.adblock_nav_blocked, Store.hostOf(to)))
-        }
-        return true
-    }
-
-    /** 反复注入隐藏样式：站点自己插的浮层在加载完之后才出现（幂等，见 AdBlock.hideJs） */
-    private fun injectAdBlockCss() {
-        if (!adBlockOn) return
-        WebAdBlock.injectCss(binding.webView)
-    }
-
-    private fun injectPicker() {
-        runCatching {
-            binding.webView.evaluateJavascript(PICK_JS) { r ->
-                // 自检：脚本到底挂上了没有。没挂上，用户点任何东西都不会有反馈，
-                // 他只会看到"卡住了" —— 这种情况必须明确说出来，而不是让他对着死界面点。
-                val plain = r?.trim()?.removeSurrounding("\"")
-                if (plain != "ok") {
-                    state(getString(R.string.calib_inject_failed, plain ?: "null"))
-                }
-            }
-        }
-    }
-
     /** JS 只做一件事：把用户点了哪个链接报上来。判定全在 Kotlin。 */
-    private inner class Bridge {
+    internal inner class Bridge {
         @JavascriptInterface
         fun onPick(json: String) {
             runOnUiThread { handlePick(json) }
         }
     }
-
-    // ------------------------------------------------------------------ 点击处理
-
-    /**
-     * 一次网页点击 = **选中候选**（不推进）。推进只发生在用户按「确定」时。
-     *
-     * 关键：**任何点击都要给出反馈**。上一版对「没有 href」「javascript:」「判据不认」
-     * 三种情况一律静默 `return`，用户点半天界面纹丝不动 —— 这就是"卡在第一步"的观感来源。
-     * 现在这三种都会在引导卡上写明原因，且已选中的候选不会被一次误点冲掉。
-     */
-    private fun handlePick(json: String) {
-        if (finished || resolvingStarted) return
-        val o = runCatching { JSONObject(json) }.getOrNull() ?: return
-        val raw = o.optString("href").trim()
-        val text = o.optString("text").trim()
-        val jsSel = o.optString("sel").trim()
-        val page = o.optString("url").trim().ifBlank { pageUrl }
-
-        if (step == SiteCalib.Step.SEARCH) {
-            // 第 4 步不用点击判据，但**要靠地址**：搜索大多不换页（AJAX / pushState），
-            // 而 pushState 不触发 onPageFinished ⇒ [pageUrl] 会一直停在首页，
-            // 于是用户在结果页上点任何东西，我们都记不到"他现在在哪一页"。
-            // JS 每次点击都上报 `location.href`，这里就把它收下来。
-            // （v1.0.36：这是「填了关键词点确定却永远学不到模板」的直接成因。）
-            if (page.isNotBlank()) pageUrl = page
-            state(getString(R.string.calib_hint4))
-            return
-        }
-        val abs = absUrl(raw, page)
-        when (SiteCalib.classify(raw, abs, step)) {
-            SiteCalib.PickKind.NOT_LINK -> {
-                state(getString(R.string.calib_not_link))
-                return
-            }
-            SiteCalib.PickKind.SCRIPT_LINK -> {
-                state(getString(R.string.calib_script_link))
-                return
-            }
-            else -> Unit
-        }
-
-        val p = Pick(raw, abs, text, jsSel, page)
-        pending = p
-        renderActions()
-        state(pickedHint(p))
-    }
-
-    /** 选中后的提示：判据认了就报"已选中"，不认就先说清"哪一条没学到、仍可继续"。 */
-    private fun pickedHint(p: Pick): String {
-        val kind = SiteCalib.classify(p.raw, p.abs, step)
-        val label = p.text.ifBlank { p.abs }
-        if (kind == SiteCalib.PickKind.GOOD) {
-            return getString(
-                when (step) {
-                    SiteCalib.Step.CAT -> R.string.calib_picked_cat
-                    SiteCalib.Step.DETAIL -> R.string.calib_picked_detail
-                    SiteCalib.Step.PLAY -> R.string.calib_picked_play
-                    SiteCalib.Step.SEARCH -> R.string.calib_hint4
-                },
-                label
-            )
-        }
-        val soft = when (step) {
-            SiteCalib.Step.CAT -> getString(R.string.calib_soft_cat)
-            SiteCalib.Step.DETAIL ->
-                if (HtmlTemplates.isPlayLink(p.raw) || HtmlTemplates.isPlayLink(p.abs)) {
-                    getString(R.string.calib_soft_detail_is_play)
-                } else {
-                    getString(R.string.calib_soft_detail)
-                }
-            SiteCalib.Step.PLAY -> getString(R.string.calib_soft_play)
-            SiteCalib.Step.SEARCH -> getString(R.string.calib_hint4)
-        }
-        return soft + "\n" + getString(R.string.calib_picked_other, label)
-    }
-
-    /**
-     * ① 分类：记下两样东西 —— **分类页 URL 形状**（主）与**所在容器**（备）。
-     *
-     * 形状才是"分类逻辑"：站点把 maccms 的目录名改成了 `bspvt`，这件事只有用户点一下才能知道；
-     * 而分类标签会散落在主菜单 / 二级面板 / 底部导航里，认形状才能一次全收。
-     *
-     * 形状没认出来（`catTpl == null`）**也照样推进** —— 容器 / 默认逻辑还在，不该把用户锁在第一步。
-     *
-     * ## v1.0.33：学到形状之后，**当场数一遍**再决定收不收
-     *
-     * 野果实测（2026-09-19）：用户点的是侧栏导航项 `<a href="/explore/drama/">探索分类</a>`。
-     * 它会被 [HtmlTemplates.catTplFrom] 泛化成 `/explore/{slug}/`，与站点真分类 `/tag/{slug}/`
-     * 形状**完全一样**（同一个文件的注释早就点名 `/explore/drama/` 是"功能页形状"）；
-     * 但首页 330 个 `<a>` 里它只出现 **1 次**，而 `/tag/{slug}/` 有 **252 条**。
-     * 运行时判据要求 ≥2 ⇒ 这一条规则**永远不可能生效**。
-     *
-     * 于是就有了那句查不出原因的反馈：「校准走完了，但还是按原规则显示」。
-     * 现在改成当场拦下并说明白：**不收、并告诉用户他点的是导航项而不是分类列表**。
-     *
-     * ⚠️ 拒收时**保留旧配方**（`catTpl = null`，`mergeRecipe` 按「没学到」处理）。
-     * 点错一次不等价于"本站没有分类"，不能拿它抹掉上一次学对的规则；
-     * 真要清规则，走站源页的「站点配方重置」。
-     */
-    private suspend fun pickCategory(p: Pick) {
-        val shape = HtmlTemplates.catTplFrom(p.abs)
-        // -1 = 数不出来（抓不到页面 / 不是 HTML 适配器）⇒ 放弃判断，绝不误杀用户的点击
-        val hits = if (shape != null) {
-            runCatching { Http.getOrNull(site.baseUrl, referer = site.baseUrl) }.getOrNull()
-                ?.let { html ->
-                    runCatching { AdapterFactory.create(site).countCatTplHits(html, shape) }
-                        .getOrDefault(-1)
-                } ?: -1
-        } else -1
-        val rejected = hits in 0..1
-
-        catTpl = if (rejected) null else shape
-
-        // ⚠️ 拒收时**容器也不收**（v1.0.34 的实测结论，别改回去）：
-        //    用户点的是导航项 `/explore/drama/`，而从**同一次点击**推出来的容器是
-        //    `div.app-layout` 这种**页面外壳**，不是分类列表 —— 收下它只会让
-        //    HtmlAdapter 的 manualNavSel 分支提前 return，把本来好用的默认判据顶掉。
-        //    （野果实测：默认判据给出 40 个真分类。）
-        //
-        // v1.0.36 改的是**另一件事**：形状没被拒收、只是归纳不出来时（`/riju` 这类
-        // 单段别名、maccms 的数字分类 id），容器照推 —— 那时推出来的是真容器。
-        // 并且**先试用户点的那一页再试首页**：用户常在二级页面上点分类，
-        // 首页里根本没有那条链接，只说"未识别"会让人以为白点了。
-        val nav: NavPick? = if (rejected) null else deriveNavSel(p.abs, p.page)
-        navSel = if (rejected) null
-        else (nav?.sel ?: p.jsSel.takeIf { it.isNotBlank() })
-        step = SiteCalib.Step.DETAIL
-        render()
-
-        val head = getString(R.string.calib_got_cat, p.text.ifBlank { p.abs })
-        val shapeText = when {
-            rejected -> "⚠️ 已跳过这条形状（$shape 在本页只命中 $hits 条，判据要求 ≥2）"
-            catTpl != null -> getString(R.string.calib_cat_tpl, catTpl!!)
-            // 「不需要学」与「没学到」必须分开说。站点自带判据本来就能认的数字分类 id
-            // （maccms 的 `/vodshow/id/6.html`）形状归纳不出来，但它根本不需要形状规则。
-            HtmlTemplates.isCategoryHref(p.abs, false) -> getString(R.string.calib_cat_shape_builtin)
-            else -> getString(R.string.calib_cat_shape_none2)
-        }
-        // 拒收这条要说清"为什么不写" —— 用户看到"什么都没学到"会以为白点了，
-        // 而真相是**故意不写**（写了会把上一次学对的规则挡掉）。
-        val tail = if (rejected)
-            "它多半是**一个导航项**、不是分类列表 —— 本次**不写入任何分类规则**" +
-                    "（写了反而会把上一次学对的规则挡掉；容器也只从这一次点击推、那只是页面外壳）。" +
-                    "本站分类继续走默认判据；要学形状，请返回上一步、点页面上真正的那一串分类标签。"
-        else navTail(nav, navSel)
-        state("$head　$shapeText　$tail")
-    }
-
     /** 容器反推的结果：[sel] 是选择器，[fromPage] = 取自"用户点的那一页"而不是首页 */
-    private data class NavPick(val sel: String, val fromPage: Boolean)
-
-    /**
-     * 「容器」那一句人话。
-     *
-     * 取自**用户点的那一页**时要说明 —— 用户常常是在二级页面上点分类（先点进一个分类、
-     * 再点另一个），首页里本来就没有那条链接；把这种情况说成"未识别"会让人以为白点了。
-     */
-    private fun navTail(nav: NavPick?, fallback: String?): String = when {
-        nav != null && nav.fromPage -> getString(R.string.calib_nav_sel_off_page, nav.sel)
-        nav != null -> getString(R.string.calib_nav_sel, nav.sel)
-        fallback != null -> getString(R.string.calib_nav_sel, fallback)
-        else -> getString(R.string.calib_nav_sel_none_tried)
-    }
-
-    /** ② 影片：反推详情页模板。没学到也推进（退用默认逻辑），只有"这像播放页"会额外说一句。 */
-    private fun pickDetail(p: Pick) {
-        val isPlay = HtmlTemplates.isPlayLink(p.raw) || HtmlTemplates.isPlayLink(p.abs)
-        val id = HtmlTemplates.videoIdOf(p.raw, false) ?: HtmlTemplates.videoIdOf(p.abs, false)
-        // v1.0.36：学习顺序必须与**运行时**一致 —— HtmlAdapter 学详情模板时用的就是
-        // `videoIdOf + detailTplFrom`，再退到 `tplFromNumericSegment`（自研站的 `/…/{id}/`）。
-        // 校准这里少写一条，用户点对了却会被告知"没学到"。
-        detailTpl = when {
-            isPlay -> null
-            id != null -> HtmlTemplates.detailTplFrom(p.abs, id)
-                ?: HtmlTemplates.tplFromNumericSegment(p.abs)
-            else -> HtmlTemplates.tplFromNumericSegment(p.abs)
-        }
-        // "点封面就直接播放"的站：这个地址本身就是播放页 ⇒ 留作试播样本。
-        // 用户接下来如果跳过第 3 步（那种站第 3 步无从点起），第 4 步结束时照样能试播一次。
-        if (isPlay) playPickAbs = p.abs
-        step = SiteCalib.Step.PLAY
-        render()
-        val tpl = detailTpl
-        state(
-            when {
-                isPlay -> getString(R.string.calib_soft_detail_is_play)
-                tpl != null -> getString(R.string.calib_got_detail, tpl)
-                else -> getString(R.string.calib_soft_detail)
-            }
-        )
-    }
-
-    /**
-     * ③ 分集：反推播放页模板。v1.0.20 起这里**不再立刻试播收尾**，而是进入第 4 步
-     * （搜索校准）—— 试播挪到第 4 步按确定之后，规则一次性固化。
-     *
-     * v1.0.21：进第 4 步时**自动回到站点首页** —— 第 4 步的任务是"去站内搜一次"，
-     * 而用户此刻还停在第三步选中的播放页上；搜索框在首页，不回去就没法搜。
-     *
-     * v1.0.36：学习顺序与运行时 `learnPlayTpl` 对齐（maccms 形状 → 自研站 numeric segment），
-     * 并把"这一页已经记作试播样本"这件事说出来 —— 模板学不到**不等于**这一步白点。
-     */
-    private fun pickPlay(p: Pick) {
-        val t = HtmlTemplates.playTplFrom(p.abs)
-            ?: HtmlTemplates.tplFromNumericSegment(p.abs)?.takeIf { it != detailTpl }
-        playTpl = t
-        playPickAbs = p.abs
-        step = SiteCalib.Step.SEARCH
-        render()
-        state(
-            when {
-                t != null -> getString(R.string.calib_got_play, t)
-                else -> getString(R.string.calib_got_play_sample, short(p.abs)) + "\n" +
-                        getString(R.string.calib_play_tpl_none_named)
-            }
-        )
-        binding.webView.loadUrl(site.baseUrl)
-    }
+    internal data class NavPick(val sel: String, val fromPage: Boolean)
 
     // ------------------------------------------------------------------ ④ 搜索校准
 
@@ -737,7 +214,7 @@ class CalibrateActivity : AppCompatActivity() {
      * 「跳过搜索校准、把前三步固化掉并完成」。于是症状就是用户报的
      * **「填写搜索关键字后点确定，流程不会结束」**。
      */
-    private fun askSearchKeyword() {
+    internal fun askSearchKeyword() {
         val input = android.widget.EditText(this).apply {
             hint = "比如：测试"
             setSingleLine(true)
@@ -827,7 +304,7 @@ class CalibrateActivity : AppCompatActivity() {
      * 容器选择器必须在那上面也有效。所以顺序是「点的那一页 → 首页」，取到即用，
      * 并记下来源（非首页时界面要说明，见 [navTail]）。
      */
-    private suspend fun deriveNavSel(clickedAbs: String, page: String): NavPick? {
+    internal suspend fun deriveNavSel(clickedAbs: String, page: String): NavPick? {
         val home = site.baseUrl.trimEnd('/')
         val targets = LinkedHashSet<String>()
         page.trim().takeIf { it.startsWith("http") }?.let { targets += it }
@@ -1046,7 +523,7 @@ class CalibrateActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------ 工具
 
-    private fun absUrl(href: String, page: String): String {
+    internal fun absUrl(href: String, page: String): String {
         val u = href.trim()
         if (u.startsWith("http")) return u
         if (u.startsWith("//")) return "https:$u"
@@ -1066,7 +543,7 @@ class CalibrateActivity : AppCompatActivity() {
     }
 
     /** 给自检报告 / 配方备注用的短地址 */
-    private fun short(u: String): String = if (u.length <= 56) u else u.take(53) + "..."
+    internal fun short(u: String): String = if (u.length <= 56) u else u.take(53) + "..."
 
     // ------------------------------------------------------------------ 生命周期
 
@@ -1112,7 +589,7 @@ class CalibrateActivity : AppCompatActivity() {
      * 2. **末尾返回 `'ok'` 供 Kotlin 自检**——注入失败时用户点任何东西都不会有反应，
      *    这种情况必须显式告诉他，而不是让他对着一个死界面点。
      */
-    private val PICK_JS = """
+    internal val PICK_JS = """
         (function(){
           try {
             if (!window.__vsCalib) {

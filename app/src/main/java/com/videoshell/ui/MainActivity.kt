@@ -167,6 +167,14 @@ class MainActivity : AppCompatActivity() {
         // 版本号只在「我的」页展示一份 —— 顶部那行的版本号随整行一起去掉了（v1.0.26）
         binding.tvVersionMine.text = "v" + versionName()
 
+        // ---- 我的：检查更新（v1.0.54）----
+        // 结果写在右侧那格（不靠 toast）：「已是最新」这种答案一闪而过的话，
+        // 用户只会再点一遍 —— 他本来就是为了拿到一个确切的答案才点的。
+        binding.tvUpdateHint.text = UpdateFlow.idleHint(this)
+        binding.rowUpdate.setOnClickListener {
+            UpdateFlow.start(this) { hint -> binding.tvUpdateHint.text = hint }
+        }
+
         // ---- 首页：默认站源浏览器 ----
         browserHome = SiteBrowser(
             act = this,

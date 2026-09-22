@@ -12,6 +12,15 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # 签名密钥走 Secrets（v1.0.54 起仓库里不再放 *.jks / keystore.properties）。
+    # ⚠️ 这里用 env 转发、而不是在 step 的 if 里直接写 `secrets.X != ''`：
+    # `secrets` 上下文在部分条件位置不可用，env 转发是稳妥写法。
+    # 没配 Secrets 时（如 fork）四种变量都会是空串，构建照常进行，只是包为未签名。
+    env:
+      VS_KEYSTORE_B64: ${{ secrets.VS_KEYSTORE_B64 }}
+      VS_STORE_PASSWORD: ${{ secrets.VS_STORE_PASSWORD }}
+      VS_KEY_ALIAS: ${{ secrets.VS_KEY_ALIAS }}
+      VS_KEY_PASSWORD: ${{ secrets.VS_KEY_PASSWORD }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,6 +37,21 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
+      # 把密钥还原到 $RUNNER_TEMP（**不是工作区**）——放在工作区里会跟着
+      # actions/upload-artifact 一起被打包上传，等于换个地方再泄一次。
+      - name: Restore signing keystore
+        if: env.VS_KEYSTORE_B64 != ''
+        run: |
+          set -eu
+          d="$RUNNER_TEMP/sign"
+          mkdir -p "$d"
+          printf '%s' "$VS_KEYSTORE_B64" | base64 -d > "$d/videoshell.jks"
+          # 校验恢复出来的确实是个 jks：keytool 读不了就说明 base64 是断的，
+          # 这一步红比"签名悄悄没了、包却照样发出去"好得多。
+          keytool -list -keystore "$d/videoshell.jks" -storepass "$VS_STORE_PASSWORD" >/dev/null
+          echo "VS_KEYSTORE_FILE=$d/videoshell.jks" >> "$GITHUB_ENV"
+          echo "已恢复签名密钥（${#VS_KEYSTORE_B64} 字节 base64）"
+
       - name: Build APKs
         run: ./gradlew :app:assembleDebug :app:assembleRelease --stacktrace
 
@@ -36,7 +60,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      # 离线回归（37 个套件 / 1687 条源码·行为守卫，约 2 分钟）。
+      # 离线回归（37 个套件 / 1669 条源码·行为守卫，实测约 5 分钟）。
       # 它读的是**源码文本 + 上面刚编译出的 kotlin-classes/R.jar**，所以必须排在 Build 之后；
       # 联网套件（NET_SUITES，11 个）默认不跑 —— 它们**对真实域名发起读请求**，
       # 而 runner 的出口位置与开发机不同（中文站、带签名的短效 CDN 直链在 runner 上
@@ -57,6 +81,21 @@ jobs:
             tools/verify/_*.out.txt
           if-no-files-found: ignore
 
+      # 应用内自更新用的清单：App 启动时读 releases/latest/download/version.json。
+      # 只在打 tag 时生成 —— 清单里的 apkUrl 是**带 tag 的直链**，在 main 上生成没有意义。
+      # 版本号从 APK 里读（不是从源码读），见 tools/ci/make_version_json.py 的两条纪律。
+      - name: Generate version.json
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -eu
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          python tools/ci/make_version_json.py \
+            --apk "$APK" \
+            --tag "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --notes "$(git log -1 --pretty=%s)" \
+            --out app/build/outputs/apk/release/version.json
+
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -70,5 +109,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/release/*.apk
+          # version.json 与 APK **必须同一个 Release**：清单指向的直链就落在这里，
+          # 分两次上传会出现"清单已更新、包还是旧的"的窗口（而它不报错）。
+          files: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/release/version.json
           generate_release_notes: true

@@ -179,6 +179,72 @@ def src(rel):
     return os.path.join(project_root(), *rel.split('/'))
 
 
+def kt(path):
+    """读 Kotlin 源码 = **主文件 + 同主名的拆分子文件**（按文件名排序拼接）。
+
+    为什么要这样：源码守卫是用 `read(路径)` 拿到文本后做
+    `contains` / `body_of(...)` / `count(...) == N` 断言的 —— 它锁的是**代码文本**，
+    但路径本身把它绑死在了**文件布局**上。于是"把 god file 按职责拆成几个文件"
+    这种纯搬运（一行逻辑都没改）会把断言判红：不是规则丢了，只是规则搬了家。
+    逐条去改断言的路径更糟 —— 下次再拆又是满地红，且守卫从此只敢锁布局不敢锁行为。
+
+    把"某个类的全部源码"定义成 主文件 + `<主名>_*.kt`，搬运就与守卫无关了。
+    三条纪律：
+      1. 只对 `.kt` 生效（xml / properties 原样返回）；
+      2. 拼接**不复制**任何内容 —— 所以 `count(x) == 1`（"可见性赋值只此一处"）
+         这类计数断言的语义完全不变（内容仍只出现一次）；
+      3. 子文件里的顶层 `internal` 声明要**还原成类成员写法**（见 _unwrap）——
+         否则判据里写的 `private fun xxx(` 会因为接收者前缀（`internal fun Owner.xxx(`）
+         而对不上，症状是"函数明明在、断言却说没有"。见 PITFALLS §4.41。
+    """
+    try:
+        text = io.open(path, encoding='utf-8').read()
+    except (IOError, OSError):
+        text = None
+    if text is None or not path.endswith('.kt'):
+        return text
+    d = os.path.dirname(path)
+    base = os.path.basename(path)[:-3]
+    pre = base + '_'
+    try:
+        names = sorted(n for n in os.listdir(d)
+                       if n.startswith(pre) and n.endswith('.kt'))
+    except OSError:
+        names = []
+    for n in names:
+        try:
+            sub = io.open(os.path.join(d, n), encoding='utf-8').read()
+        except (IOError, OSError):
+            continue
+        text += '\n' + '\n'.join(_unwrap(l, base) for l in sub.split('\n'))
+    return text
+
+
+def _unwrap(line, owner):
+    """把拆出去的子文件里的顶层 internal 声明还原成类成员的写法。
+
+    拆分后子文件里是 `internal fun Owner.xxx(` / `internal val xxx = …`
+    （扩展函数访问不了 private，被它读到的字段也要放宽），而守卫的判据写的是拆分前的
+    样子 `private fun xxx(`。两者是**一一对应的同一段代码**，差别只在可见性修饰符与
+    接收者前缀 —— 那是"搬到哪、谁能看见"，不是"代码做了什么"。
+
+    所以按行做恒等改写，让聚合文本与拆分前逐行等价。只在**子文件**上做；1:1 行替换，
+    不复制也不删除 ⇒ 真被删掉的代码不会因为改写而"看起来还在"。
+    """
+    if not line.startswith('internal '):
+        return line
+    rest = line[len('internal '):]
+    for mod in ('fun ', 'suspend fun '):
+        p = mod + owner + '.'
+        if rest.startswith(p):
+            return 'private ' + mod + rest[len(p):]
+    if rest.startswith('val '):
+        return 'private val ' + rest[4:]
+    if rest.startswith('var '):
+        return 'private var ' + rest[4:]
+    return line
+
+
 # ---------------------------------------------------------------- classpath
 JAR_PATTERNS = [
     'org.jetbrains.kotlin/kotlin-stdlib/1.9.22/*/kotlin-stdlib-1.9.22.jar',

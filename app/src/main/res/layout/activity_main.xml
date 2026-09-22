@@ -573,6 +573,40 @@
                         android:layout_height="0.5dp"
                         android:background="@color/line" />
 
+                    <!-- 检查更新（v1.0.54）。放在「版本」正下方是**刻意的**：
+                         用户看到"当前 v1.0.53"之后，脑子里的下一个问题就是"有没有新的"。
+                         右侧那格是结果位（已是最新 / 有新版本 / 检查失败），
+                         不靠 toast —— 见 UpdateFlow 类注释第 3 条。 -->
+                    <LinearLayout
+                        android:id="@+id/rowUpdate"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="?android:attr/selectableItemBackground"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:padding="14dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/about_check_update"
+                            android:textColor="@color/text_primary"
+                            android:textSize="14sp" />
+
+                        <TextView
+                            android:id="@+id/tvUpdateHint"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="0.5dp"
+                        android:background="@color/line" />
+
                     <TextView
                         android:id="@+id/tvAbout"
                         android:layout_width="match_parent"

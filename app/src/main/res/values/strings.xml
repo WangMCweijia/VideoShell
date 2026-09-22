@@ -52,6 +52,30 @@
     <string name="cancel">取消</string>
     <string name="ok">确定</string>
 
+    <!-- ===== 应用内自更新（v1.0.54）=====
+         文案纪律：失败一律「原文照给」，不要概括。
+         "检查更新失败"这四个字让用户唯一能做的事就是再点一遍；
+         而"仓库是 private / 还没发过版 / 网络不通"三条的下一步动作完全不同。 -->
+    <string name="about_check_update">检查更新</string>
+    <string name="update_idle">当前 v%1$s</string>
+    <string name="update_checking">正在检查更新…</string>
+    <string name="update_latest">已是最新版本（v%1$s）</string>
+    <string name="update_check_failed_title">检查更新失败</string>
+    <string name="update_check_failed_short">检查失败</string>
+    <string name="update_found_title">发现新版本 v%1$s</string>
+    <string name="update_found_short">有新版本 v%1$s</string>
+    <string name="update_download">下载并安装</string>
+    <string name="update_later">稍后</string>
+    <string name="update_size">安装包约 %1$d MB</string>
+    <string name="update_no_notes">（本次没有更新说明）</string>
+    <string name="update_downloading">正在下载 %1$d%%</string>
+    <string name="update_download_failed_title">下载失败</string>
+    <string name="update_need_permission_title">还差一步授权</string>
+    <string name="update_need_permission_msg">系统里还没允许「视频壳」安装应用。点「去设置」打开「允许来自此来源的应用」，再回来点一次「下载并安装」即可（安装包已经下好了，不用重下）。</string>
+    <string name="update_need_permission_go">去设置</string>
+    <string name="update_installing">正在唤起系统安装器…</string>
+    <string name="update_install_failed">安装失败：%1$s</string>
+
     <string name="search_hint">搜索影片 / 剧集</string>
     <string name="cat_latest">最新</string>
     <string name="loading">加载中…</string>
@@ -139,6 +163,17 @@
     <string name="site_doctor_copied">报告已复制到剪贴板</string>
     <string name="site_recipe_reset">重学本站</string>
     <string name="site_recipe_reset_done">已清空本站配方，正在重新学习…</string>
+    <!-- 配方导出 / 导入（v1.0.54）：把"在这里学过的东西"搬到另一台设备，省掉重学一遍 -->
+    <string name="site_recipe_io">配方…</string>
+    <string name="site_recipe_io_title">站点配方</string>
+    <string name="site_recipe_export">导出配方（复制成文本）</string>
+    <string name="site_recipe_export_empty">本站还没有可导出的配方（先正常用一会儿，或进调试校准模式学一次）</string>
+    <string name="site_recipe_exported">配方已复制到剪贴板 —— 发给另一台设备粘贴导入即可</string>
+    <string name="site_recipe_import">从剪贴板导入配方</string>
+    <string name="site_recipe_import_empty">剪贴板里没有文本</string>
+    <string name="site_recipe_import_ok">已导入 %1$s 的配方</string>
+    <string name="site_recipe_import_failed">导入失败：%1$s</string>
+    <string name="site_recipe_io_copy_failed">读剪贴板失败：%1$s</string>
     <string name="err_prefix">失败：%1$s</string>
 
     <!-- 调试校准模式 -->

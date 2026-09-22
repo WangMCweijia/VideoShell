@@ -61,13 +61,72 @@ public class Agg38 {
     }
 
     static String read(String p) {
+        String text;
         try {
             Path q = Paths.get(p);
-            return Files.exists(q) ? new String(Files.readAllBytes(q), "UTF-8") : null;
+            if (!Files.exists(q)) return null;
+            text = new String(Files.readAllBytes(q), "UTF-8");
         } catch (Exception e) {
             return null;
         }
+        return agg(p, text);
     }
+
+    /** 源码的"有效文本" = 主文件 + 同主名的拆分子文件（`<主名>_*.kt`），
+     *  子文件里的顶层 internal 声明经 unwrap() 还原成类成员写法。
+     *
+     * 守卫锁的是**代码文本**，不该锁**文件布局**：把 god file 按职责拆成几个文件是纯搬运
+     * （逻辑一行没改）。为什么需要还原、以及为什么这样做不会掩盖真改动，见 unwrap 的注释。
+     */
+    static String agg(String p, String text) {
+        String name = new java.io.File(p).getName();
+        if (!name.endsWith(".kt")) return text;
+        String owner = name.substring(0, name.length() - 3);
+        java.io.File dir = new java.io.File(p).getParentFile();
+        String[] ns = dir == null ? null : dir.list();
+        if (ns == null) return text;
+        Arrays.sort(ns);
+        String pre = owner + "_";
+        StringBuilder sb = new StringBuilder(text);
+        for (String n : ns) {
+            if (!n.startsWith(pre) || !n.endsWith(".kt")) continue;
+            String sub;
+            try {
+                sub = new String(
+                        Files.readAllBytes(new java.io.File(dir, n).toPath()), "UTF-8");
+            } catch (Exception e) {
+                continue;
+            }
+            sb.append('\n');
+            for (String line : sub.split("\n", -1)) sb.append(unwrap(line, owner)).append('\n');
+        }
+        return sb.toString();
+    }
+
+    /** 把拆出去的子文件里的顶层 internal 声明**还原成类成员的写法**。
+     *
+     * 拆分后子文件里是 `internal fun Owner.xxx(` / `internal val xxx = …`
+     * （扩展函数访问不了 private，被它读到的字段也要放宽），而守卫的判据写的是
+     * 拆分前的样子 `private fun xxx(`。两者是**一一对应的同一段代码**，差别只在
+     * 可见性修饰符与接收者前缀 —— 那是"搬到哪、谁能看见"，不是"代码做了什么"。
+     *
+     * 所以读取时按行做恒等改写，让聚合出来的文本与拆分前**逐行等价**，
+     * 守卫从此不必知道文件被拆过（见 PITFALLS 4.41）。
+     * 只在**子文件**上做；1:1 行替换，不复制、不删除 ⇒ 计数断言语义不变，
+     * 真被删掉的代码也不会因为改写而"看起来还在"。
+     */
+    static String unwrap(String line, String owner) {
+        if (!line.startsWith("internal ")) return line;
+        String rest = line.substring("internal ".length());
+        String p = "fun " + owner + ".";
+        if (rest.startsWith(p)) return "private fun " + rest.substring(p.length());
+        p = "suspend fun " + owner + ".";
+        if (rest.startsWith(p)) return "private suspend fun " + rest.substring(p.length());
+        if (rest.startsWith("val ")) return "private val " + rest.substring(4);
+        if (rest.startsWith("var ")) return "private var " + rest.substring(4);
+        return line;
+    }
+
 
     /**
      * 源码里在**注释之外**是否出现某个片段。
@@ -507,14 +566,19 @@ public class Agg38 {
         }
 
         // ---- 播放「卡住看门狗」----
-        ok("★ 有 watchStall 定义", live(player, "private fun watchStall()"));
+        // ⚠️ 判据**不带 `private ` 前缀**（v1.0.54 改）。原来写的是 `private fun xxx(`，
+        //    那是把「可见性修饰符」也钉进了判据 —— 而 god file 拆分时，被搬到扩展文件里的
+        //    函数一律变 `internal fun Owner.xxx(`（扩展函数访问不了 private）。
+        //    于是"功能一行没改、只是搬了家"也会判红（见 PITFALLS §4.24 / §4.41）。
+        //    这里要钉的是「这个名字、这个签名的声明存在」，可见性不是它要表达的东西。
+        ok("★ 有 watchStall 定义", live(player, "fun watchStall()"));
         ok("★ watchStall 在刷新循环里真的被调用（不是只写了函数）",
                 countLive(player, "watchStall()") >= 2, "count=" + countLive(player, "watchStall()"));
         ok("★ 卡住判据用的是 bufferedPosition（观测得到的事实）",
                 live(player, "p.bufferedPosition"));
         ok("★ 有卡住时长常量（不能立刻判定，慢链路会被误伤）", live(player, "STALL_MS = "));
         ok("★ 有下一路候选时自动换源", live(player, "stalledSwitched"));
-        ok("★ 卡住面板复用出错面板（同一套 UI）", live(player, "private fun showStallPanel("));
+        ok("★ 卡住面板复用出错面板（同一套 UI）", live(player, "fun showStallPanel("));
         ok("★ 面板会报出 isLive（判错直播是转圈的第一嫌疑）",
                 live(player, "isCurrentMediaItemLive"));
         ok("★ 重试次数被压小（原为 10 ⇒ 四十多秒静默转圈）",
@@ -522,12 +586,12 @@ public class Agg38 {
         ok("★ 播放器补 Origin（浏览器走 XHR 一定带，我们原来不带）",
                 live(player, "\"Origin\""));
         ok("browserHeaders 只补缺失、不覆盖站点试出来的头",
-                live(player, "private fun browserHeaders(): Map<String, String>"));
+                live(player, "fun browserHeaders(): Map<String, String>"));
         ok("用页面源算 Origin", live(player, "originOf(fallbackPage)"));
 
         // ---- HlsFix ----
         ok("★ 目录从 URI 的 rawPath 取（旧实现直接按最后一个斜杠切）", live(hls, "rawPath"));
-        ok("★ 有独立的 dirOf（可断言的那一份判据）", live(hls, "private fun dirOf("));
+        ok("★ 有独立的 dirOf（可断言的那一份判据）", live(hls, "fun dirOf("));
         ok("★ 静态整集阈值是常量（可调、可断言）",
                 live(hls, "STATIC_MIN_SEGMENTS") && live(hls, "STATIC_MIN_SECONDS"));
         ok("协议相对用 playlist 自己的协议", live(hls, "scheme"));
@@ -543,7 +607,7 @@ public class Agg38 {
                 live(sniff, "e.rawX") && live(sniff, "e.rawY"));
         ok("★ 有拖动/点击的位移阈值", live(sniff, "SLOP_DP"));
         ok("★ 浮窗被夹在父容器内（不能挪出屏幕找不回来）",
-                live(sniff, "private fun clampPanel()"));
+                live(sniff, "fun clampPanel()"));
         ok("★ 收起后重新夹取（否则拖到贴底的位置会浮在半空）",
                 live(sniff, "post { clampPanel() }"));
         ok("★ 浏览模式默认收起（那一页是用来看网页的）",

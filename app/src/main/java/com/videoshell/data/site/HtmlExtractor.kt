@@ -17,16 +17,16 @@ import org.jsoup.nodes.Element
  */
 object HtmlExtractor {
 
-    private val PIC_ATTRS = listOf("data-original", "data-src", "data-echo", "data-lazy", "src")
-    private val BG_ATTRS = listOf("data-bg", "data-background", "data-background-image")
+    internal val PIC_ATTRS = listOf("data-original", "data-src", "data-echo", "data-lazy", "src")
+    internal val BG_ATTRS = listOf("data-bg", "data-background", "data-background-image")
 
     /** 轮播/slide 类主题会把海报写成 CSS background-image */
-    private val BG_STYLE = Regex(
+    internal val BG_STYLE = Regex(
         "background(?:-image)?\\s*:\\s*url\\(\\s*['\"]?([^)'\"]+?)\\s*['\"]?\\s*\\)",
         RegexOption.IGNORE_CASE
     )
 
-    private val NAME_SELECTORS = listOf(
+    internal val NAME_SELECTORS = listOf(
         ".module-card-item-title",
         ".module-poster-item-title",
         ".info-title-box .title",
@@ -41,7 +41,7 @@ object HtmlExtractor {
         ".name"
     )
 
-    private val NOTE_SELECTORS = listOf(
+    internal val NOTE_SELECTORS = listOf(
         ".module-item-note",
         ".module-item-text",
         ".pic-text",
@@ -55,7 +55,7 @@ object HtmlExtractor {
     )
 
     /** 明显不是影片名的导航词 */
-    private val BAD_NAMES = setOf(
+    internal val BAD_NAMES = setOf(
         "首页", "全部", "更多", "排行", "排行榜", "登录", "注册", "求片", "留言",
         "历史", "专题", "关于", "反馈", "APP", "手机版", "换一换"
     )
@@ -71,7 +71,7 @@ object HtmlExtractor {
      * `aria-label` 是 CTA、`img[alt]` 才是真标题；旧实现按「title → aria-label → 选择器 → alt」
      * 取值 ⇒ **整页 53 张卡片全叫「查看剧集」**。命中这个词表就往后顺延，别停在这里。
      */
-    private val CTA_NAMES = setOf(
+    internal val CTA_NAMES = setOf(
         "查看剧集", "查看详情", "查看更多", "查看", "点击查看", "详情",
         "立即播放", "马上播放", "开始观看", "立即观看", "点击播放", "去播放", "播放", "观看",
         "选集", "下载", "收藏", "追剧", "免费观看", "在线观看"
@@ -80,7 +80,7 @@ object HtmlExtractor {
     // ------------------------------------------------------------------ 列表
 
     /** 单张卡片 */
-    private data class Card(
+    internal data class Card(
         val id: String,
         val href: String,
         val name: String,
@@ -154,105 +154,6 @@ object HtmlExtractor {
         return null
     }
 
-    /** 判定一条 `<a>` 是不是影片卡片；不是返回 null。卡片必须自带图片（见类注释）。 */
-    private fun card(a: Element, vodIsCategory: Boolean): Card? {
-        val href = a.attr("href").trim()
-        if (href.isEmpty()) return null
-        if (href.startsWith("javascript") || href.startsWith("#") || href.startsWith("mailto")) return null
-
-        val id = HtmlTemplates.videoIdOf(href, vodIsCategory) ?: return null
-
-        val img = pickImage(a)
-        var pic = img?.let { picOf(it) }.orEmpty()
-        // 有些主题把懒加载图放在 <a> 自身（stui: a[data-original]），也认
-        if (pic.isBlank()) pic = picOf(a)
-        // 没图的必须是「强详情链接」才认，否则一律视为导航/功能链接
-        if (pic.isBlank() && !HtmlTemplates.isStrongDetail(href)) return null
-
-        val name = pickName(a, img) ?: return null
-        if (name in BAD_NAMES) return null
-
-        return Card(id, href, name, pic, pickRemarks(a))
-    }
-
-    /**
-     * 取卡片图片：只认锚点自己的后代，或往上走最多两层、且该层不含其它锚点
-     * （不含其它锚点 = 它是这张卡片自己的包裹层，不是导航容器）。
-     */
-    private fun pickImage(a: Element): Element? {
-        a.selectFirst("img")?.let { return it }
-        var p: Element? = a.parent()
-        var depth = 0
-        while (p != null && depth < 2) {
-            if (p.select("a[href]").size > 1) return null
-            p.selectFirst("img")?.let { return it }
-            p = p.parent()
-            depth++
-        }
-        return null
-    }
-
-    private fun picOf(el: Element): String {
-        for (at in PIC_ATTRS) {
-            val v = el.attr(at).trim()
-            if (v.isNotBlank() && !v.startsWith("data:")) return v
-        }
-        for (at in BG_ATTRS) {
-            val v = el.attr(at).trim()
-            if (v.isNotBlank() && !v.startsWith("data:")) return v
-        }
-        val style = el.attr("style")
-        if (style.isNotBlank()) {
-            val v = BG_STYLE.find(style)?.groupValues?.getOrNull(1)?.trim().orEmpty()
-            if (v.isNotBlank() && !v.startsWith("data:")) return v
-        }
-        return ""
-    }
-
-    /**
-     * 取卡片名。
-     *
-     * 顺序：`a[title]` → `a[aria-label]` → 名称选择器 → `img[alt]` → 锚点文本。
-     * **每一层都要过 [CTA_NAMES]**：命中的是"查看剧集 / 立即播放"这类按钮文案，
-     * 不代表它不能用 —— 只代表**它不是名字**，继续往下一层找。
-     * 野果首页的 `aria-label="查看剧集"` + `img[alt]="庆余年 第三季"` 就靠这一条纠正。
-     */
-    private fun pickName(a: Element, img: Element?): String? {
-        cleanName(a.attr("title"))?.takeIf { !isCta(it) }?.let { return it }
-        cleanName(a.attr("aria-label"))?.takeIf { !isCta(it) }?.let { return it }
-        for (s in NAME_SELECTORS) {
-            cleanName(a.selectFirst(s)?.text())?.takeIf { !isCta(it) }?.let { return it }
-        }
-        cleanName(img?.attr("alt"))?.takeIf { !isCta(it) }?.let { return it }
-        return cleanName(a.ownText().ifBlank { a.text() })?.takeIf { !isCta(it) }
-    }
-
-    /** 按钮文案不是影片名（含"XX · 更多"这种带尾巴的形态） */
-    private fun isCta(s: String): Boolean =
-        s in CTA_NAMES || s.substringBefore(" ·").substringBefore("·").trim() in CTA_NAMES
-
-    private fun cleanName(raw: String?): String? {
-        val t = raw.orEmpty().replace(Regex("\\s+"), " ").trim()
-        if (t.isBlank() || t.length > 40) return null
-        if (t.endsWith(":") || t.endsWith("：") || t.endsWith("，") || t.endsWith(",")) return null
-        return t
-    }
-
-    private fun pickRemarks(a: Element): String {
-        val box = a.parent() ?: return ""
-        var r = ""
-        for (s in NOTE_SELECTORS) {
-            r = a.selectFirst(s)?.text()?.trim().orEmpty()
-            if (r.isNotBlank()) break
-            r = box.selectFirst(s)?.text()?.trim().orEmpty()
-            if (r.isNotBlank()) break
-        }
-        r = r.replace(Regex("\\s+"), " ").trim()
-        if (r.contains("：") || r.contains(":") || r.contains("主演")) r = ""
-        if (r.length > 16) r = ""
-        return r
-    }
-
     // ------------------------------------------------------------------ 选集
 
     /** 播放列表容器（优先精确的、再有兜底的；尽量覆盖常见 maccms 主题） */
@@ -287,7 +188,7 @@ object HtmlExtractor {
     )
 
     /** 线路名兜底：向上找最近的标题节点 */
-    private val GROUP_TITLE_SELECTORS =
+    internal val GROUP_TITLE_SELECTORS =
         ".module-tab-item, .playlist-title, .play-source-tab, .stui-pannel__head h3, " +
             ".stui-pannel__head h4, .source-name, .line-name, .play-title, h3, .title"
 
@@ -295,7 +196,7 @@ object HtmlExtractor {
      * 「线路/播放源」类标签：`线路1080P`、`播放源2`、`片源`、`来源1`…
      * 这类文字描述的是**播放源**，不是第几集。
      */
-    private val LINE_LABEL = Regex(
+    internal val LINE_LABEL = Regex(
         "线路|播放源|片源|片\\s*源|来源|源\\s*\\d+|line\\s*\\d+" +
             "|云播|云\\s*[一二三四五六七八九十\\d]+|节点\\s*[一二三四五六七八九十\\d]*" +
             "|秒播|快播|极速源|超清源|高清源|蓝光源|原画源",
@@ -303,79 +204,10 @@ object HtmlExtractor {
     )
 
     /** 纯清晰度标签：`1080P`、`4K`、`HD中字`、`超清`、`蓝光`…（整串就是它本身） */
-    private val QUALITY_LABEL = Regex(
+    internal val QUALITY_LABEL = Regex(
         "^\\s*(?:\\d{3,4}\\s*[pPiI]|4K|8K|HD|BD|TS|TC|超清|高清|蓝光|标清|原画|国语|粤语|HD中字)\\s*$",
         RegexOption.IGNORE_CASE
     )
-
-    private fun isLineLabel(t: String): Boolean {
-        val s = t.trim()
-        if (s.isEmpty()) return false
-        return LINE_LABEL.containsMatchIn(s) || QUALITY_LABEL.matches(s)
-    }
-
-    /**
-     * **标签栏整段文本**：「线路1线路2」「播放源1播放源2」——
-     * tab 栏是若干个相邻的行内标签，Jsoup 的 `.text()` 会把它们**不加空格地连在一起**。
-     * 拿它当线路名就会得到一颗叫「线路1线路2」的 chip（两条线的名字缝在一起）。
-     * [nearestTitle] 撞见这种就跳过，让 [parseGroups] 落回「线路 N」。
-     */
-    private val TAB_BAR_TEXT = Regex(
-        "^(?:(?:线路|播放源|片源|来源|源|节点|云播|秒播|快播|极速|超清|高清|蓝光|原画|备用|移动|电信|联通)" +
-            "\\s*[一二三四五六七八九十\\d]*\\s*){2,}$",
-        RegexOption.IGNORE_CASE
-    )
-
-    /** 分组名清洗：去掉页面里带过来的分隔符尾巴（`肖申克的救赎|` → `肖申克的救赎`） */
-    private fun cleanGroupName(raw: String): String {
-        var t = raw.replace(Regex("\\s+"), " ").trim()
-            .trim('|', '｜', '-', '—', '_', '·', ':', '：', ',', '，', '/', '\\', ' ')
-        if (t.isBlank()) return ""
-        // 相邻重复词压掉：`云播四 云播四 云播四` -> `云播四`。
-        // 来源是 nearestTitle() 往祖先链上取文本时，同一段 tab 文本被重复取了几次。
-        val parts = t.split(' ').filter { it.isNotBlank() }
-        if (parts.size > 1) {
-            val uniq = ArrayList<String>(parts.size)
-            for (p in parts) if (uniq.isEmpty() || uniq.last() != p) uniq.add(p)
-            t = uniq.joinToString(" ")
-        }
-        return if (t.length > 16) t.take(16) else t
-    }
-
-    /**
-     * 容器里的 `<a>` 是否**全是「线路按钮」**（是则返回它们，否则 null）。
-     *
-     * 厂长资源这类 WordPress 影视站的详情页**根本没有分集列表**：`.paly_list_btn` 里每个
-     * `<a>` 是一条独立线路（`/v_play/{base64}.html`，解码后 `mv_849-nm_1` / `mv_849-nm_2`），
-     * 标签还都叫「线路1080P」。按分集去理解，一部电影会变成「2 集」，
-     * 点「第2集」实际跳到另一条线路 —— 线路数与集数全错。
-     *
-     * 判据（命中其一即认为是线路按钮）：
-     * 1) 每个标签都是线路/清晰度词汇；
-     * 2) 两个以上锚点且标签**完全相同** —— 分集不可能同名。
-     */
-    private fun asLineButtons(c: Element, base: String): List<Pair<String, Episode>>? {
-        // 注意：Elements 自带 filter(NodeFilter) 成员方法，会挡住 Kotlin 的 Iterable.filter，
-        // 所以必须先 toList() 转成普通 List 再用扩展函数。
-        val anchors = c.select("a[href]").toList().filter {
-            HtmlTemplates.isEpisodeLink(it.attr("href").trim())
-        }
-        if (anchors.size < 2) return null
-        val labels = anchors.map { episodeName(it) }
-        val allLine = labels.all { isLineLabel(it) }
-        val sameLabel = labels.all { it.isNotBlank() } && labels.distinct().size == 1
-        if (!allLine && !sameLabel) return null
-
-        val seen = HashSet<String>()
-        val out = ArrayList<Pair<String, Episode>>()
-        for (i in anchors.indices) {
-            val u = resolveUrl(base, anchors[i].attr("href").trim())
-            if (u.isBlank() || !seen.add(u)) continue
-            val lb = labels[i]
-            out.add(lb to Episode(lb.ifBlank { "第${out.size + 1}集" }, u))
-        }
-        return if (out.size >= 2) out else null
-    }
 
     fun parseGroups(doc: Document, base: String): List<PlayGroup> {
         // 1) tab 标题映射：href="#playlist2" -> "极速播放"（顺序也按 tab 来）
@@ -483,283 +315,6 @@ object HtmlExtractor {
         return if (all.isEmpty()) emptyList() else listOf(PlayGroup("默认线路", all))
     }
 
-    private fun scanWholePage(doc: Document, base: String, strict: Boolean): List<Episode> {
-        val all = ArrayList<Episode>()
-        val seen = HashSet<String>()
-        for (a in doc.select("a[href]")) {
-            val href = a.attr("href").trim()
-            val ok = if (strict) HtmlTemplates.isPlayLink(href) else HtmlTemplates.isEpisodeLink(href)
-            if (!ok) continue
-            val u = resolveUrl(base, href)
-            if (u.isBlank() || !seen.add(u)) continue
-            all.add(Episode(episodeName(a).ifBlank { "第${all.size + 1}集" }, u))
-        }
-        for (op in doc.select("option[value]")) {
-            val v = op.attr("value").trim()
-            val ok = if (strict) HtmlTemplates.isPlayLink(v) else HtmlTemplates.isEpisodeLink(v)
-            if (!ok) continue
-            val u = resolveUrl(base, v)
-            if (u.isBlank() || !seen.add(u)) continue
-            all.add(Episode(optionName(op).ifBlank { "第${all.size + 1}集" }, u))
-        }
-        return all
-    }
-
-    private fun collectEpisodes(container: Element, base: String): List<Episode> {
-        val eps = ArrayList<Episode>()
-        val seen = HashSet<String>()
-        for (a in container.select("a[href]")) {
-            val href = a.attr("href").trim()
-            if (!HtmlTemplates.isEpisodeLink(href)) continue
-            val u = resolveUrl(base, href)
-            if (u.isBlank() || !seen.add(u)) continue
-            eps.add(Episode(episodeName(a).ifBlank { "第${eps.size + 1}集" }, u))
-        }
-        // 下拉式选集：<select><option value="/play/x-1-1.html">第1集</option>
-        for (op in container.select("option[value]")) {
-            val v = op.attr("value").trim()
-            if (!HtmlTemplates.isEpisodeLink(v)) continue
-            val u = resolveUrl(base, v)
-            if (u.isBlank() || !seen.add(u)) continue
-            eps.add(Episode(optionName(op).ifBlank { "第${eps.size + 1}集" }, u))
-        }
-        return eps
-    }
-
-    /**
-     * 拆出来的一条「线路」：分集 + 它所在的块节点（取名用，按地址拆时没有）。
-     */
-    private class LineBlock(val episodes: List<Episode>, val node: Element?)
-
-    /**
-     * 同一容器里几条源各占一块 ⇒ 拆成多条线路。
-     *
-     * 形状一（骚火电影）：`<ul class="play_list"><li>源1 的 26 个 <a></li><li>源2 的 26 个</li></ul>`
-     * —— 锚点的顶层祖先（容器直接子元素）正好两块。
-     *
-     * 形状二（zqkhmy 实测，v1.0.28 修）：块外面还裹了一层
-     * ```
-     * <div class="anthology">
-     *   <div class="anthology-tab">…6 个线路标签…</div>
-     *   <div class="anthology-list">
-     *     <div class="anthology-list-box none"><div><ul class="anthology-list-play">181 集</ul></div></div>
-     *     <div class="anthology-list-box none">… 180 集 …</div>   ← 共 6 块
-     * ```
-     * 全部锚点的「直接子层祖先」都是同一个 `.anthology-list` ⇒ 只归到 1 堆，
-     * 老实现直接放弃拆分，6 条源被缝成「1 条线路 924 集」（924 = 181+180+21+181+181+180）。
-     * 所以这里**逐层下探**：第 1 层不行就看第 2 层，最多到 [MAX_SUB_BLOCK_DEPTH] 层。
-     *
-     * 判据（任一层命中即拆）：锚点按该层祖先归堆后 **≥2 堆、且每堆 ≥2 个锚点**。
-     * 反面形状是正常主题的「每集一个 li」——每堆只有 1 个锚点，绝不拆；
-     * 平铺列表（`<div class="playlist"><a/><a/>…`）的祖先就是容器本身，也不算一「层」。
-     */
-    private fun splitSubBlocks(c: Element, base: String): List<LineBlock>? {
-        val items = anchorEpisodes(c, base)
-        if (items.size < 4) return null
-        for (level in 1..MAX_SUB_BLOCK_DEPTH) {
-            val piles = LinkedHashMap<Element, MutableList<Episode>>()
-            var aligned = true
-            for ((a, ep) in items) {
-                val top = ancestorAt(a, c, level)
-                if (top == null) {
-                    aligned = false
-                    break
-                }
-                piles.getOrPut(top) { ArrayList() }.add(ep)
-            }
-            if (!aligned) continue
-            if (piles.size < 2 || piles.values.any { it.size < 2 }) continue
-            // 每堆内部的「无名分集」按堆内序号补名，与老行为一致
-            return piles.map { (node, list) ->
-                LineBlock(
-                    list.mapIndexed { i, e -> if (e.name.isBlank()) e.copy(name = "第${i + 1}集") else e },
-                    node
-                )
-            }
-        }
-        return null
-    }
-
-    /** 最多往下找几层「分块层」。2 层够 zqkhmy（`.anthology` → `.anthology-list`）；再多只是徒增误拆面。 */
-    private const val MAX_SUB_BLOCK_DEPTH = 3
-
-    /**
-     * `a` 往上第 `level` 层的祖先。
-     * 中途撞到容器 `c`（说明锚点本身就在这一层或更浅）或走到顶 ⇒ 返回 null，这一层不算数。
-     */
-    private fun ancestorAt(a: Element, c: Element, level: Int): Element? {
-        var n: Element = a
-        for (i in 1..level) {
-            val p = n.parent() ?: return null
-            if (p === c) return null
-            n = p
-        }
-        return n
-    }
-
-    /** 容器里所有分集锚点（按 URL 去重、保持文档顺序），带原始 `<a>` 以便回溯祖先 */
-    private fun anchorEpisodes(c: Element, base: String): List<Pair<Element, Episode>> {
-        val out = ArrayList<Pair<Element, Episode>>()
-        val seen = HashSet<String>()
-        for (a in c.select("a[href]")) {
-            val href = a.attr("href").trim()
-            if (!HtmlTemplates.isEpisodeLink(href)) continue
-            val u = resolveUrl(base, href)
-            if (u.isBlank() || !seen.add(u)) continue
-            out.add(a to Episode(episodeName(a), u))
-        }
-        return out
-    }
-
-    /**
-     * 按**播放地址里的线路段**拆线（DOM 分不开时的兜底）。
-     *
-     * maccms 的播放页地址是 `/{目录}/{影片id}-{线路id}-{集id}.html`，
-     * **同一条分集列表里的线路段必然相同**。所以「一组里出现 ≥2 个线路段」= 至少两条源被缝在一起。
-     * 这是与 DOM 结构完全无关的独立证据：页面把几条源平铺在同一层、整块由 JS 拼出来，
-     * DOM 分层都会失手，地址不会。
-     *
-     * 保守到什么程度：
-     * 1. **只要有一条地址不是这个形状就整体放弃**（返回 null）；
-     * 2. 线路段在第 3 段还是第 4 段，由「**分出来的堆更少**」自己定 —— 线路数（个位数）
-     *    天然远少于集数，段序被换过的站也能自动对齐；平局按 maccms 标准取第 3 段；
-     * 3. 每堆必须 ≥2 集：只有一集的「线路」一定是判据看错了（或某站把线段含义反过来用），
-     *    这种情况整体放弃，绝不拆出一堆单集线路。
-     */
-    private fun splitByUrlShape(eps: List<Episode>): List<LineBlock>? {
-        if (eps.size < 4) return null
-        val parts = eps.map { PLAY_URL_PARTS.find(it.url)?.groupValues ?: return null }
-        val byThird = pileByUrl(eps, parts) { it[3] }
-        val byFourth = pileByUrl(eps, parts) { it[4] }
-        val pick = when {
-            byThird == null -> byFourth
-            byFourth == null -> byThird
-            byFourth.size < byThird.size -> byFourth
-            else -> byThird
-        } ?: return null
-        return pick.map { (_, list) -> LineBlock(fillBlankNames(list), null) }
-    }
-
-    /** 按 `key(分组)` 归堆；堆数 <2 或存在只有 1 集的堆 ⇒ 这不成一条判据，返回 null */
-    private fun pileByUrl(
-        eps: List<Episode>,
-        parts: List<List<String>>,
-        key: (List<String>) -> String
-    ): LinkedHashMap<String, MutableList<Episode>>? {
-        val piles = LinkedHashMap<String, MutableList<Episode>>()
-        for (i in eps.indices) piles.getOrPut(key(parts[i])) { ArrayList() }.add(eps[i])
-        if (piles.size < 2 || piles.values.any { it.size < 2 }) return null
-        return piles
-    }
-
-    /** 没取到名字的分集按堆内序号补名（与 [collectEpisodes] 的兜底一致） */
-    private fun fillBlankNames(list: List<Episode>): List<Episode> =
-        list.mapIndexed { i, e -> if (e.name.isBlank()) e.copy(name = "第${i + 1}集") else e }
-
-    /** `/{目录}/{影片id}-{线路id}-{集id}.html` → 分组 1=目录 2=影片 3=线路 4=集 */
-    private val PLAY_URL_PARTS = Regex("/([A-Za-z][\\w_\\-]*)/(\\d+)-(\\d+)-(\\d+)(?:\\.html?)?")
-
-    /**
-     * 容器**内部**的线路标签栏（与 [lineLabelsFor] 互补：那个找容器前面的，这个找里面的）。
-     *
-     * zqkhmy 实测形状：
-     * ```
-     * <div class="anthology-tab"><div class="swiper-wrapper">
-     *   <a class="swiper-slide"><i class="fa…"></i>&nbsp;蓝光2k<span class="badge">181</span></a>
-     *   … 共 6 个，顺序与下面 6 个分集块一一对应
-     * ```
-     * 只认**没有真链接**的锚点（无 `href` / `#` / `javascript:`）—— 带真链接的是导航。
-     * 名字取 `ownText()`：数量徽标在子 `<span>` 里，不会被混进名字（得到「蓝光2k」而不是「蓝光2k181」）。
-     * 条数必须恰好等于分块数，多一个少一个都认输返回 null。
-     */
-    private fun tabLabelsIn(c: Element, n: Int): List<String>? {
-        if (n < 2) return null
-        val byParent = LinkedHashMap<Element, MutableList<Element>>()
-        for (a in c.select("a")) {
-            val href = a.attr("href").trim()
-            if (href.startsWith("http") || href.startsWith("/") || href.startsWith("mailto")) continue
-            val p = a.parent() ?: continue
-            byParent.getOrPut(p) { ArrayList() }.add(a)
-        }
-        for ((_, kids) in byParent) {
-            if (kids.size != n) continue
-            val labels = kids.map { tabLabelText(it) }
-            if (labels.all { it.isNotBlank() }) return labels
-        }
-        return null
-    }
-
-    /** tab 标签取文：优先 ownText（徽标在子节点里），退到整段文本；太长/太空当没取到 */
-    private fun tabLabelText(a: Element): String {
-        val own = a.ownText().replace(SPACES, " ").trim()
-        val t = if (own.isNotBlank()) own else a.text().replace(SPACES, " ").trim()
-        return if (t.length in 1..16) t else ""
-    }
-
-    /** 空白归一化。`&nbsp;`(\u00A0) 与全角空格 `\u3000` 不在 Java 正则的 `\s` 里，必须显式列出 —
-     *  zqkhmy 的 tab 就是 `<i…></i>&nbsp;蓝光2k`，漏掉它名字会带一个前导空白。 */
-    private val SPACES = Regex("[\\s\\u00A0\\u3000]+")
-
-    /**
-     * 找容器**前面**的「线路标签栏」，给按子块拆出的线路命名。
-     * 骚火电影的 `div.play_from` 里摆着 `<li>线路1</li><li>线路2</li>`，
-     * 条数正好等于子块数 ⇒ 按顺序对号入座，组名与站点自己的叫法一致。
-     * 只认「全是线路/清晰度词汇、条数恰好等于块数、互不重复」的栏，认不出返回 null。
-     */
-    private fun lineLabelsFor(c: Element, n: Int): List<String>? {
-        var p: Element? = c
-        var depth = 0
-        while (p != null && depth < 3) {
-            var sib: Element? = p.previousElementSibling()
-            var hops = 0
-            while (sib != null && hops < 2) {
-                val texts = sib.select("li, option, a").toList()
-                    .map { it.text().replace(Regex("\\s+"), " ").trim() }
-                    .filter { it.isNotEmpty() }
-                val labels = texts.filter { isLineLabel(it) }
-                if (labels.size == n && texts.size == labels.size &&
-                    labels.toSet().size == labels.size
-                ) return labels
-                sib = sib.previousElementSibling()
-                hops++
-            }
-            p = p.parent()
-            depth++
-        }
-        return null
-    }
-
-    private fun optionName(op: Element): String {
-        val t = op.text().replace(Regex("\\s+"), " ").trim()
-        if (t.isBlank() || t.length > 20) return ""
-        if (t.startsWith("选择") || t.startsWith("请选择")) return ""
-        return t
-    }
-
-    /**
-     * 分集名。
-     *
-     * 同一个分集链接在 HTML 里往往有**两个**名字：
-     * - 可见文本 `a.text()`：通常就是集名本身（`第01集`）
-     * - `title` 属性：常常是「剧名 + 集名」拼成的一整串（`兰香如故第01集`），
-     *   但有时又比文本更精确（文本只有 `1`、`HD`，甚至是个图标）
-     *
-     * 旧实现无条件优先 `title`，于是详情页整列都成了「兰香如故第01集」这种带剧名的长名字
-     * （金牌影视实测）。这里的判据：**title 比文本长且以文本结尾时，说明 title 只是给文本
-     * 加了个前缀（多半就是剧名），此时取更短、更精确的文本**；其余情况仍以 title 为准。
-     */
-    private fun episodeName(a: Element): String {
-        val txt = a.text().replace(Regex("\\s+"), " ").trim()
-        val ttl = a.attr("title").replace(Regex("\\s+"), " ").trim()
-        val c = when {
-            txt.isBlank() -> ttl
-            ttl.isBlank() -> txt
-            ttl.length > txt.length && ttl.endsWith(txt) && txt.length >= 2 -> txt
-            else -> ttl
-        }
-        return if (c.isBlank() || c.length > 20) "" else c
-    }
-
     /**
      * 削掉分集名里重复的**剧名**前缀。
      *
@@ -779,43 +334,6 @@ object HtmlExtractor {
             if (!all) return@map g
             g.copy(episodes = eps.map { it.copy(name = it.name.removePrefix(t).trim()) })
         }
-    }
-
-    private fun nearestTitle(node: Element): String {
-        var p: Element? = node
-        var depth = 0
-        while (p != null && depth < 4) {
-            for (sel in GROUP_TITLE_SELECTORS.split(", ")) {
-                val el = p.selectFirst(sel) ?: continue
-                val t = titleText(el)
-                if (t.isNotBlank() && t.length <= 16 && !TAB_BAR_TEXT.matches(t)) return t
-            }
-            val prev = p.previousElementSibling()
-            if (prev != null) {
-                val el = prev.selectFirst("h3, .title") ?: prev
-                val t = titleText(el)
-                if (t.isNotBlank() && t.length <= 16 && !TAB_BAR_TEXT.matches(t)) return t
-            }
-            p = p.parent()
-            depth++
-        }
-        return ""
-    }
-
-    /**
-     * 标题节点的取文。推荐板块标题的常见形状是「剧名 + 尾注」拼合：
-     * `<h3 class="title"><a href="/movie/…">交锋</a>同类型影片</h3>`
-     * —— `.text()` 得到「交锋同类型影片」，当线路名又怪又容易撞车。
-     * 判据：**锚点有字、锚点外面的直接文本也有字** ⇒ 取锚点文本（剧名）；
-     * 其余（纯文本标题、锚点自己就是标题）照旧取整段。
-     */
-    private fun titleText(el: Element): String {
-        val own = el.ownText().replace(Regex("\\s+"), " ").trim()
-        if (own.isNotEmpty()) {
-            val a = el.selectFirst("a")?.text()?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
-            if (a.isNotEmpty()) return a
-        }
-        return el.text().trim()
     }
 
     // ------------------------------------------------------------------ 详情元信息

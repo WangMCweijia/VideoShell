@@ -23,16 +23,16 @@ import java.net.URLEncoder
  */
 class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
 
-    private var listTpl: String? = null
-    private var detailTpl: String? = null
+    internal var listTpl: String? = null
+    internal var detailTpl: String? = null
     private var searchTpl: String? = null
-    private var playTpl: String? = null
+    internal var playTpl: String? = null
 
     /**
      * 本站是否走「独立详情页 + 独立播放页」结构（决定 `/vod/{id}.html` 是分类还是详情）
      */
     @Volatile
-    private var vodIsCategory = false
+    internal var vodIsCategory = false
 
     /** 分类解析结果缓存 */
     private var cachedCats: List<Category> = emptyList()
@@ -41,7 +41,7 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
      * 从列表页学到的详情页模板（`/movie/{id}.html` 之类）。
      * 比穷举 [HtmlTemplates.detailCandidates] 可靠得多，优先级也更高。
      */
-    private var learnedDetailTpl: String? = null
+    internal var learnedDetailTpl: String? = null
 
     /**
      * ## 从**形状普查**学到的分类形状（v1.0.34 提出 → v1.0.35 固化）
@@ -63,7 +63,7 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
     private var censusDiag: String = ""
 
     /** 已回到首页现学过一次（避免每次详情失败都重抓首页） */
-    private var homeLearned = false
+    internal var homeLearned = false
 
     /**
      * 最近一次成功抓到的详情页 DOM。
@@ -71,7 +71,7 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
      * 留着它是为了让「播放页兜底」不必再猜 URL：详情页的分集按钮里就摆着真实的播放页链接
      * （自研站 `/drama/video/{id}/` 这种站点私有目录名，穷举模板永远猜不到）。
      */
-    private var lastDetailDoc: Document? = null
+    internal var lastDetailDoc: Document? = null
 
     /**
      * 详情页 HTML 里拿到的封面。
@@ -82,7 +82,7 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
      * 详情页抓到时就先把封面存下来，播放页兜底构造 VideoDetail 时接着用 ——
      * 零额外请求，也不必回头再抓一次详情页。
      */
-    private var detailPicHint: String = ""
+    internal var detailPicHint: String = ""
 
     /** 校准固化的分类页 URL 形状（`/bspvt/{slug}.html`） */
     @Volatile
@@ -119,7 +119,7 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
      *
      * 见 [substituteHome]：首页是 JS 渲染的站，SSR 里根本没有剧集数据。
      */
-    private var homeCat: String? = null
+    internal var homeCat: String? = null
 
     /**
      * 站点配方：跨 Activity / 跨启动复用。
@@ -154,7 +154,7 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
     }
 
     /** 分类为空时把原因带出去，让 UI 能显示出来（不然只能靠猜） */
-    private var diag: String = ""
+    internal var diag: String = ""
 
     /**
      * 详情解析的「试过什么」记录（v1.0.15）。
@@ -168,7 +168,7 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
 
     private val traceBuf = ArrayList<String>()
 
-    private fun tr(s: String) {
+    internal fun tr(s: String) {
         if (traceBuf.size < 24) traceBuf += s
     }
 
@@ -220,13 +220,13 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
     override val calibApplied: Boolean get() = calibAppliedFlag
 
     /** 最近一次抓取失败的具体原因（异常文本），分类为空时并进 [diag] 一起展示 */
-    private var lastFetchErr: String = ""
+    internal var lastFetchErr: String = ""
 
     /** 当前浏览目标的已见影片 id，用于分页去重 */
-    private val seenIds = HashSet<String>()
-    private var seenKey = ""
+    internal val seenIds = HashSet<String>()
+    internal var seenKey = ""
 
-    private val root: String get() = site.baseUrl.trimEnd('/')
+    internal val root: String get() = site.baseUrl.trimEnd('/')
 
     // ------------------------------------------------------------------ 分类
 
@@ -236,7 +236,7 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
         ".navbar a", ".nav_bar a", ".menu a", "#nav a", ".header-nav a", "header .nav a", "header a"
     )
 
-    private val catBlacklist = setOf(
+    internal val catBlacklist = setOf(
         "首页", "全部", "更多", "排行", "排行榜", "登录", "注册", "求片", "留言",
         "历史", "专题", "关于", "反馈", "APP", "手机版", "换一换", "最近更新",
         // 站点功能页的**完整标题**（精确匹配，不会误伤名字里恰好含这些字的内容分类）。
@@ -258,7 +258,7 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
      * 一旦它凑够 2 条就**提前返回**，把真分类整批挡在门外 ——
      * 这正是 v1.0.15 自检报告里「分类 5 个全是页脚功能页」的直接成因。
      */
-    private val funcSlug = setOf(
+    internal val funcSlug = setOf(
         "about", "contact", "contactus", "contact-us", "search", "question", "questions",
         "faq", "faqs", "protocol", "privacy", "terms", "term", "agreement", "help",
         "support", "feedback", "login", "logout", "register", "signup", "signin",
@@ -270,7 +270,7 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
     )
 
     /** 名称里带这些字的一律不算分类（公告/求片/备用站点之类的功能页） */
-    private val catBadWords = listOf(
+    internal val catBadWords = listOf(
         "公告", "须知", "关于", "求片", "留言", "备用", "加入", "Telegram",
         "客服", "声明", "版权", "筛选"
     )
@@ -283,7 +283,7 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
      * 分类会分散在里面 —— 厂长资源的「日剧」就只存在于 `ul.submenu_mi` 这套里，
      * 所以下面这些容器要**全部**扫一遍，不能命中一个就收工。
      */
-    private val slugNavContainers = listOf(
+    internal val slugNavContainers = listOf(
         ".navlist", ".navtop", ".nav-list", ".navlist-content", ".nav_menu", ".nav-menu",
         ".navbar", ".nav_bar", ".nav-bar", ".top-nav", ".head-nav", ".header-nav",
         ".submenu_mi", ".v-sort-nav", ".sort-nav", ".cate-nav", ".category-nav",
@@ -299,7 +299,7 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
      * 而且「在分集容器里」这件事本身就是最强的语义信号。
      * 实测野果短剧：`episode-list` 容器里就是 `/drama/video/{id}/`。
      */
-    private val episodeContainers = listOf(
+    internal val episodeContainers = listOf(
         "[class*=episode]", "[class*=Episode]", "[class*=playlist]", "[class*=play-list]",
         "[class*=paly_list]", "[class*=play_list]", "[id*=episode]", "[id*=playlist]",
         "[class*=选集]", "[class*=剧集]"
@@ -381,7 +381,7 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
      * [Http.get] 内部已带重试与退避（手机网络下"新域名首次请求"很容易抖一下），
      * 这里只负责把失败原因留下来 —— 分类为空时提示条要能说清是**哪个地址、什么错**。
      */
-    private suspend fun fetch(url: String): String? {
+    internal suspend fun fetch(url: String): String? {
         val r = runCatching { Http.get(url, referer = site.baseUrl) }
         r.getOrNull()?.let { return it }
         lastFetchErr = r.exceptionOrNull()?.let { e ->
@@ -581,188 +581,6 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
         }.getOrDefault(-1)
     }
 
-    /**
-     * 目录式分类（`/meijutt`、`/riju`…）：只在导航容器内认，避免收进 `/gbook` 这类功能页。
-     *
-     * [only] 非空时只扫这些容器 —— 「调试校准模式」固化的选择器就走这条路。
-     */
-    private fun collectSlugCategories(
-        doc: Document,
-        out: LinkedHashMap<String, Category>,
-        only: List<String>? = null
-    ) {
-        val host = hostOf(site.baseUrl)
-        // 遍历**全部**导航容器：同一个站的分类会分散在主导航/顶部栏/底部导航里，只取第一个必然漏
-        for (sel in (only ?: slugNavContainers)) {
-            for (box in doc.select(sel)) {
-                for (a in box.select("a[href]")) {
-                    if (a.selectFirst("img") != null) continue
-                    val href = a.attr("href").trim()
-                    // 两种写法都认：`/riju`（无后缀）与 `/bspvt/dianying.html`（带 .html）。
-                    // maccms 后台的「分类别名」两种写法都常见，只认一种就会整站没有分类。
-                    if (!HtmlTemplates.isSlugCategory(href) && !HtmlTemplates.isSlugDirCategory(href)) continue
-                    if (isFuncSlug(href)) continue
-
-                    val name = a.text().replace(Regex("\\s+"), " ").trim()
-                    if (name.isBlank() || name.length > 10) continue
-                    if (name in catBlacklist) continue
-                    if (catBadWords.any { name.contains(it) }) continue
-                    // 同名去重：同一个分类常同时出现在主菜单、二级面板与底部导航里，
-                    // URL 可能各不相同（`/bspvt/dianshiju.html` vs `/bspvs/dianshiju-----.html`），
-                    // 只按 URL 去重会在分类栏里出现一串重复标签。
-                    if (out.values.any { it.name == name }) continue
-
-                    val url = abs(href)
-                    if (host.isNotBlank() && !hostOf(url).equals(host, true)) continue
-                    if (out.containsKey(url)) continue
-                    out[url] = Category(url, name, "0")
-                }
-            }
-        }
-    }
-
-    /**
-     * URL 的最后一段是不是「站点功能页」词汇（`/contact/`、`/search.html`、`/privacy`…）。
-     * 见 [funcSlug] 的说明：功能页词汇是封闭集合，写词表是可靠的。
-     */
-    private fun isFuncSlug(href: String): Boolean {
-        val p = href.trim().substringBefore('?').substringBefore('#').trimEnd('/')
-        if (p.isBlank()) return false
-        val seg = p.substringAfterLast('/').substringBeforeLast('.').lowercase()
-        return seg.isNotBlank() && seg in funcSlug
-    }
-
-    /**
-     * 「尾斜杠目录式分类」：`/tag/AI%E7%9F%AD%E5%89%A7/`、`/drama/rec-hot-drama/`。
-     *
-     * ## 为什么必须全文档扫
-     *
-     * 实测野果短剧（Nuxt3 SSR 站）首页 `<nav>` 里只有 4 条链接
-     * （推荐 / 探索分类 / 排行榜 / 回家的路），而真分类是 `/tag/` 下的 30+ 个标签 ——
-     * 它们散落在页面的各个推荐区块里。靠容器收集只能拿到 4 条功能页，
-     * 这正是 v1.0.12 那条教训的又一次重演（认形状 > 认容器）。
-     *
-     * ## 为什么必须聚类
-     *
-     * 全文档扫会顺带收进 `/rank/drama/`、`/explore/drama/` 这类**功能页** ——
-     * 它们的 URL 形状和分类一模一样（都是 `/{目录}/{别名}/`），
-     * 靠白名单（`rank`/`explore`/`search`…）永远追不上站点改版。
-     *
-     * 真正的分界线是**数量**：分类目录下面会有很多个**不同的别名**
-     * （实测 `/tag/` 有 30+ 个不同 slug），功能页只有一个（`/rank/drama/`、`/explore/drama/`
-     * 的别名都是 `drama`）。所以：**同一目录下不同别名 ≥ 2 且不同名称 ≥ 2** 才算分类目录。
-     *
-     * 名称那一半同样必要：`/drama/rec-hot-drama/` 这类栏目页链接在首页上文字全是
-     * 「查看更多」，名字去重后只剩 1 个 —— 按名字判它就不是分类，自然被排除，
-     * 不会在分类栏里摆出 6 个一模一样的「查看更多」。
-     *
-     * [expectDir] 非空 = 用户在校准模式亲手点过这个目录，此时只认它、且不再要求聚类
-     * （用户的主权高于启发式，这是 v1.0.14 定下的分工）。
-     */
-    private fun collectSlashDirCategories(
-        doc: Document,
-        out: LinkedHashMap<String, Category>,
-        expectDir: String? = null
-    ) {
-        val host = hostOf(site.baseUrl)
-
-        // dir -> (slug -> (name, url))，LinkedHashMap 保证分类栏顺序与页面出现顺序一致
-        val byDir = LinkedHashMap<String, LinkedHashMap<String, Pair<String, String>>>()
-
-        for (a in doc.select("a[href]")) {
-            val href = a.attr("href").trim()
-            val ds = HtmlTemplates.slashDirOf(href) ?: continue
-            // 分集/播放按钮同样长这样（`/drama/video/3381/`），别名是纯数字已被判据挡掉，
-            // 但保险起见：带图片的锚点一律不是分类
-            if (a.selectFirst("img") != null) continue
-            if (isFuncSlug(href)) continue
-            // 目录名本身是功能页词汇的（`/search/xxx/`）也排除
-            if (ds.first.lowercase() in funcSlug) continue
-            // 分页段（`/tag/x/page/2/` 是三段，不会走到这里；防 `/tag/page/` 这类）
-            if (ds.second.equals("page", true)) continue
-
-            val name = a.text().replace(Regex("\\s+"), " ").trim()
-            if (name.isBlank() || name.length > 10) continue
-            if (name in catBlacklist) continue
-            if (catBadWords.any { name.contains(it) }) continue
-
-            val url = abs(href)
-            if (host.isNotBlank() && !hostOf(url).equals(host, true)) continue
-
-            val dir = ds.first
-            if (expectDir != null && !dir.equals(expectDir, true)) continue
-            byDir.getOrPut(dir) { LinkedHashMap() }.putIfAbsent(ds.second, name to url)
-        }
-
-        for (slugs in byDir.values) {
-            if (expectDir == null) {
-                // 聚类判据：同一目录下至少 2 个不同别名、且至少 2 个不同名字
-                if (slugs.size < 2) continue
-                if (slugs.values.map { it.first }.distinct().size < 2) continue
-            }
-            for (nv in slugs.values) {
-                val (name, url) = nv
-                if (out.values.any { it.name == name }) continue   // 同名去重（同一分类常多处出现）
-                if (out.containsKey(url)) continue
-                out[url] = Category(url, name, "0")
-            }
-        }
-    }
-
-    /**
-     * 按「校准固化的分类形状」扫全文档。
-     *
-     * 这是**唯一**允许全文档认分类的地方 —— 因为目录名是站点自己配的（金牌影视 `/bspvt/`），
-     * 比"任意目录"精确得多，不会像 [collectSlugCategories] 那样必须靠容器白名单兜着，
-     * 也就不会把 `/gbook`、`/label` 这类功能页收进来。
-     */
-    private fun collectByCatTpl(
-        doc: Document,
-        out: LinkedHashMap<String, Category>,
-        tpl: String
-    ) {
-        val host = hostOf(site.baseUrl)
-        for (a in doc.select("a[href]")) {
-            if (a.selectFirst("img") != null) continue
-            val href = a.attr("href").trim()
-            if (!HtmlTemplates.matchesCatTpl(href, tpl)) continue
-
-            val name = a.text().replace(Regex("\\s+"), " ").trim()
-            if (name.isBlank() || name.length > 10) continue
-            if (name in catBlacklist) continue
-            if (catBadWords.any { name.contains(it) }) continue
-            // 同一分类常在多处出现且 URL 各不相同，按名字去重（同 collectSlugCategories）
-            if (out.values.any { it.name == name }) continue
-
-            val url = abs(href)
-            if (host.isNotBlank() && !hostOf(url).equals(host, true)) continue
-            if (out.containsKey(url)) continue
-            out[url] = Category(url, name, "0")
-        }
-    }
-
-    private fun collectCategories(
-        anchors: Elements,
-        out: LinkedHashMap<String, Category>,
-        forceCategory: Boolean = false
-    ) {
-        for (a in anchors) {
-            if (a.selectFirst("img") != null) continue
-            val href = a.attr("href").trim()
-            if (href.isEmpty()) continue
-            if (href.startsWith("javascript") || href.startsWith("#") || href.startsWith("mailto")) continue
-            if (!HtmlTemplates.isCategoryHref(href, vodIsCategory || forceCategory)) continue
-
-            val name = a.text().replace(Regex("\\s+"), " ").trim()
-            if (name.isBlank() || name.length > 10) continue
-            if (name in catBlacklist) continue
-            if (name.endsWith(":") || name.endsWith("：")) continue
-
-            val url = abs(href)
-            if (out.containsKey(url)) continue
-            out[url] = Category(url, name, "0")
-        }
-    }
 
     // ------------------------------------------------------------------ 浏览
 
@@ -879,83 +697,6 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
         return HtmlTemplates.detailCandidates(root).firstOrNull()?.let { build(it, id = id) }
     }
 
-    private suspend fun browseCat(cat: String, page: Int): List<VideoItem> {
-        val k = "browse|$cat"
-        if (k != seenKey) {
-            seenKey = k
-            seenIds.clear()
-        }
-        return fetchList(browseUrls(cat, page), page)
-    }
-
-    /**
-     * 「最新」tab 的兜底：**首页列表一条封面都没有**时，改用探到的真分类页。
-     *
-     * 为什么要做这件事（v1.0.18，野果短剧线上实测）：
-     *
-     * | | App 默认入口 `browse("")`（首页） | 真分类页 |
-     * |---|---|---|
-     * | 条数 | 53 | 30 |
-     * | 有封面 | **0** | **30** |
-     * | 名字 | 全是「查看剧集」 | 正常剧名 |
-     * | HTML 里的图床地址 | **0 个** | 31 个 |
-     *
-     * 原因不是"解析没写好"，而是**首页的数据根本不在 SSR 里**：`__NUXT_DATA__` 只有 SEO 配置
-     * （`cover` 值为空、页面上 56 张图全是 `data:` 占位 GIF），剧集列表由客户端 JS 再拉一次接口
-     * 才填上。**这类页面无论怎么改选择器都抠不出封面**，只能换数据源。
-     *
-     * 保守起见必须**探到"分类页确实有封面"才替换**：只试 1~3 个分类，都没有就原样返回首页结果，
-     * 不做任何"猜"的替换。探到之后固化进配方（[SiteRecipe.homeCat]），此后只探一次。
-     */
-    private suspend fun substituteHome(home: List<VideoItem>): List<VideoItem>? {
-        if (home.isEmpty() || home.any { it.pic.isNotBlank() }) return null
-        val cat = probeCoveredCategory()
-        if (cat == null) {
-            // v1.0.20：替换失败要留痕。用户反馈「仍然无封面」时，自检报告 / 诊断
-            // 必须能区分「探到了但没替换」与「分类都探了但全没封面」。
-            val n = runCatching { categories() }.getOrDefault(emptyList()).size
-            diag = "首页无封面（客户端渲染），已试探 $n 个分类页均未探到封面 —— " +
-                    "若分类 tab 里有封面，请把站点自检报告发出来"
-            return null
-        }
-        homeCat = cat
-        RecipeStore.update(site.baseUrl) { it.copy(homeCat = cat) }
-        diag = "首页无封面数据（客户端渲染），已改用分类页 $cat"
-        return browseCat(cat, 1)
-    }
-
-    /** 探前 6 个真分类页，返回**确实带封面**的那一个；都没有则 null（不替换） */
-    private suspend fun probeCoveredCategory(): String? {
-        val cands = runCatching { categories() }.getOrDefault(emptyList())
-            .map { abs(it.id) }
-            .filter { it.startsWith("http") }
-            .distinct()
-            .take(6)
-        for (c in cands) {
-            if (fetchList(listOf(c), 1).any { it.pic.isNotBlank() }) return c
-        }
-        return null
-    }
-
-    private fun browseUrls(ref: String, page: Int): List<String> {
-        if (ref.startsWith("http") || ref.startsWith("/")) {
-            val u = abs(ref)
-            if (page <= 1) return listOf(u)
-            // 分页：先试模板（能从 URL 里抠出分类 id 时），再试 ?page=N，最后回落原页（靠去重收尾）
-            val id = HtmlTemplates.typeIdOf(u, vodIsCategory)
-            val tpls = if (id == null) emptyList()
-            else ordered(listTpl, HtmlTemplates.listCandidates(root)).map { build(it, id = id, page = page) }
-            // 目录式分类（/meijutt）没有数字 id，WordPress 系的分页是 /page/N
-            val slugPage = if (id == null) listOf("$u/page/$page", "$u/page/$page/") else emptyList()
-            return tpls + slugPage + listOf(withQueryPage(u, page), u)
-        }
-        if (ref.isBlank()) {
-            // 空 id = 首页"最新"，站点首页没有分页
-            return if (page <= 1) listOf(site.baseUrl) else emptyList()
-        }
-        return ordered(listTpl, HtmlTemplates.listCandidates(root))
-            .map { build(it, id = ref, page = page) }
-    }
 
     // ------------------------------------------------------------------ 搜索
 
@@ -1089,296 +830,6 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
         )
     }
 
-    /** 用一条模板真抓详情页并解析分集；成功就把模板固化进配方 */
-    private suspend fun hitDetail(tpl: String, id: String): VideoDetail? {
-        val url = build(tpl, id = id)
-        val html = fetch(url)
-        if (html == null) {
-            tr("✗ $url → " + lastFetchErr.ifBlank { "请求失败" })
-            return null
-        }
-        val doc = Jsoup.parse(html, site.baseUrl)
-        lastDetailDoc = doc
-        rememberShape(doc)
-        // 封面与「分集解析成功与否」**无关**：先把详情页这张真海报存下来，
-        // 供后面「分集只能去播放页拿」的路径使用（播放页的 og:image 常是默认图）
-        resolveUrl(site.baseUrl, HtmlExtractor.parsePic(doc))
-            .takeIf { it.isNotBlank() }?.let { detailPicHint = it }
-        // 播放页模板在详情页上就能学到（分集按钮的 href），**与分集解析成功与否无关** ——
-        // 所以放在 groups 判断之前，失败路径上也能积累这次学习成果
-        learnPlayTpl(doc)
-        var groups = HtmlExtractor.parseGroups(doc, site.baseUrl)
-        if (groups.isEmpty()) {
-            // 自研 SSR 站（Nuxt/Vue）的分集不在 DOM 里 —— 锚点是前端路由，服务端只渲染出
-            // 一个"当前集"的链接（甚至全是同一个 href）。真数据在页面内嵌 JSON 里，去那儿取。
-            groups = SsrPayload.groups(html)
-            if (groups.isNotEmpty()) {
-                tr("· $url → DOM 无分集锚点，改从页面内嵌 JSON 取到 " +
-                        "${groups.sumOf { it.episodes.size }} 集")
-            }
-        }
-        if (groups.isEmpty()) {
-            tr("✗ $url → 页面 ${html.length} 字，但一个分集锚点都没认出来")
-            return null
-        }
-        tr("✓ $url → ${groups.sumOf { it.episodes.size }} 集")
-        if (detailTpl != tpl) {
-            detailTpl = tpl
-            RecipeStore.update(site.baseUrl) { it.copy(detailTpl = tpl) }
-        }
-        return buildDetail(id, doc, groups)
-    }
 
-    /** 回首页抓一次，从卡片链接现学详情页模板（整个 Adapter 生命周期内只做一次） */
-    private suspend fun learnFromHome(): Boolean {
-        if (homeLearned) return learnedDetailTpl != null
-        homeLearned = true
-        val html = Http.getOrNull(root, referer = root)
-        if (html == null) {
-            tr("✗ 回首页现学：首页抓不到（$root）")
-            return false
-        }
-        val doc = Jsoup.parse(html, root)
-        rememberShape(doc)
-        learnDetailTpl(doc)
-        val t = learnedDetailTpl
-        if (t == null) tr("✗ 回首页现学：首页 ${html.length} 字，但没找到可学的详情链接")
-        else tr("· 回首页现学：学到详情模板 $t")
-        return t != null
-    }
 
-    private fun buildDetail(id: String, doc: Document, groups: List<PlayGroup>): VideoDetail {
-        val title = HtmlExtractor.parseTitle(doc)
-        return VideoDetail(
-            id = id,
-            name = title,
-            // 播放页兜底时 og:image 常是站点默认图（已被 parsePic 挡掉）⇒ 回落到详情页那张
-            pic = resolveUrl(site.baseUrl, HtmlExtractor.parsePic(doc)).ifBlank { detailPicHint },
-            summary = HtmlExtractor.parseSummary(doc),
-            // 分集名里若带着剧名前缀（`兰香如故第01集`），按剧名削掉 —— 一屏几十集都重复剧名
-            // 既挤又难扫，用户看到的就是「兰香如故 第01集」重复十几遍
-            groups = HtmlExtractor.stripTitlePrefix(groups, title)
-        )
-    }
-
-    private suspend fun detailFromPlayPage(id: String): VideoDetail? {
-        if (playTpl.isNullOrBlank()) tr("· 播放页兜底：没有播放模板，只能盲试通用候选")
-        // 顺序有讲究：**先从详情页 DOM 里真的找到的播放页链接**，再退到猜模板。
-        // 自研站（Nuxt）的播放页目录名是站点私有的（`/drama/video/{id}/`），
-        // 穷举 `playCandidates` 一条也匹配不上；而详情页的分集按钮里就摆着真链接，
-        // 直接抓它一次，比盲试 8 个候选地址靠谱得多 —— 也快得多。
-        val urls = domPlayUrls() + orderPlay(HtmlTemplates.playCandidates(root)).map { build(it, id = id) }
-        for (url in urls.distinct()) {
-            val html = fetch(url)
-            if (html == null) {
-                tr("✗ $url → " + lastFetchErr.ifBlank { "请求失败" })
-                continue
-            }
-            val doc = Jsoup.parse(html, site.baseUrl)
-            var groups = HtmlExtractor.parseGroups(doc, site.baseUrl)
-            if (groups.isEmpty()) {
-                // 播放页才是真数据源：SSR 把整条 `episodeAll`（每集自带播放地址）塞在页内 JSON 里
-                groups = SsrPayload.groups(html)
-                if (groups.isNotEmpty()) {
-                    tr("· $url（播放页）→ DOM 无分集，改从页内 JSON 取到 " +
-                            "${groups.sumOf { it.episodes.size }} 集")
-                }
-            }
-            if (groups.isEmpty()) {
-                tr("✗ $url → 页面 ${html.length} 字，但一个分集锚点都没认出来")
-                continue
-            }
-            tr("✓ $url（播放页兜底）→ ${groups.sumOf { it.episodes.size }} 集")
-            learnPlayTpl(doc)
-            return buildDetail(id, doc, groups)
-        }
-        return null
-    }
-
-    /**
-     * 详情页 DOM 里指向播放页的链接（分集按钮）。
-     *
-     * 只在**分集容器内部**取 —— 这是安全边界：容器名（episode / playlist）全球通用，
-     * 而"在分集容器里"本身就说明它是分集链接，不需要再猜 URL 形状。
-     * 拿到的链接直接可用，因此自研站也不必先学会播放页模板。
-     */
-    private fun domPlayUrls(): List<String> {
-        val doc = lastDetailDoc ?: return emptyList()
-        val out = LinkedHashSet<String>()
-        for (sel in episodeContainers) {
-            for (a in doc.select("$sel a[href]")) {
-                val href = a.attr("href").trim()
-                if (href.isEmpty() || href.startsWith("javascript") || href.startsWith("#")) continue
-                val abs = abs(href)
-                if (!abs.startsWith("http")) continue
-                if (hostOf(abs) != hostOf(site.baseUrl) && !hostOf(abs).endsWith("." + hostOf(site.baseUrl))) {
-                    continue
-                }
-                out.add(abs)
-            }
-            if (out.isNotEmpty()) break
-        }
-        return out.toList()
-    }
-
-    private fun orderPlay(all: List<String>): List<String> =
-        if (playTpl.isNullOrBlank()) all else listOf(playTpl!!) + all.filter { it != playTpl }
-
-    // ------------------------------------------------------------------ 内部
-
-    /**
-     * 过滤分页结果：
-     * - 返回 null 表示"这个 URL 不适合当前页"，去试下一个候选；
-     * - 返回空列表表示"没有新内容了"，前端据此收尾。
-     */
-    private fun accept(items: List<VideoItem>, page: Int): List<VideoItem>? {
-        if (items.size < 2) return null
-        if (page <= 1) {
-            seenIds.clear()
-            seenIds.addAll(items.map { it.id })
-            return items
-        }
-        val fresh = items.filter { it.id !in seenIds }
-        if (fresh.isEmpty()) return emptyList()
-        seenIds.addAll(fresh.map { it.id })
-        return fresh
-    }
-
-    private suspend fun fetchList(urls: List<String>, page: Int): List<VideoItem> {
-        for (u in urls) {
-            val html = Http.getOrNull(u, referer = site.baseUrl) ?: continue
-            val doc = Jsoup.parse(html, site.baseUrl)
-            rememberShape(doc)
-            val fresh = accept(HtmlExtractor.parseList(doc, site.baseUrl, vodIsCategory, html), page)
-            if (fresh == null) continue
-            learnDetailTpl(doc)
-            if (fresh.isEmpty()) return emptyList()
-            if (urls.size > 1 && u == urls.first()) {
-                val g = guessTpl(u, page)
-                if (g != null && g != listTpl) {
-                    listTpl = g
-                    RecipeStore.update(site.baseUrl) { it.copy(listTpl = g) }
-                }
-            }
-            return fresh
-        }
-        return emptyList()
-    }
-
-    /** 从列表页学一条详情页模板（只学一次），学到就写进配方 */
-    private fun learnDetailTpl(doc: Document) {
-        if (learnedDetailTpl != null) return
-        val tpl = HtmlExtractor.detailTplHint(doc, site.baseUrl, vodIsCategory) ?: return
-        if (!sameHost(tpl)) return
-        learnedDetailTpl = tpl
-        RecipeStore.update(site.baseUrl) { it.copy(detailTpl = it.detailTpl ?: tpl) }
-    }
-
-    /**
-     * 从详情页学一条**播放页**模板：`/bspvp/548165-1-1.html` -> `/bspvp/{id}-1-1.html`；
-     * 自研站则学 `/drama/video/3381/` -> `/drama/video/{id}/`。
-     *
-     * 播放页的目录名同样是站点自己起的（金牌影视 `bspvp`、厂长 `/v_play/`、野果 `/drama/video/`），
-     * 穷举 [HtmlTemplates.playCandidates] 举不全。用于「详情页不给分集、只有播放页有」的兜底。
-     *
-     * 学习顺序：
-     * 1. **分集容器内**的锚点最可信 —— 容器名（episode / playlist）是通用语义，
-     *    不需要猜 URL 形状，自研站也能学到；
-     * 2. 整页 [HtmlTemplates.isPlayLink] 命中的锚点（覆盖 maccms 系）。
-     */
-    private fun learnPlayTpl(doc: Document) {
-        if (!playTpl.isNullOrBlank()) return
-
-        // 1) 分集容器优先：里面的锚点必然是「去播放」的链接
-        for (sel in episodeContainers) {
-            for (a in doc.select("$sel a[href]")) {
-                val href = a.attr("href").trim()
-                if (href.isEmpty() || href.startsWith("javascript") || href.startsWith("#")) continue
-                val t = HtmlTemplates.tplFromNumericSegment(abs(href)) ?: continue
-                if (!sameHost(t)) continue
-                // 学到的必须是**播放页**：详情页自己的模板不该从这条路上回来
-                if (t == detailTpl || t == learnedDetailTpl) continue
-                playTpl = t
-                RecipeStore.update(site.baseUrl) { it.copy(playTpl = t) }
-                return
-            }
-        }
-
-        // 2) 整页找：maccms 系的播放页链接
-        for (a in doc.select("a[href]")) {
-            val href = a.attr("href").trim()
-            if (!HtmlTemplates.isPlayLink(href)) continue
-            val t = HtmlTemplates.playTplFrom(abs(href)) ?: continue
-            if (!sameHost(t)) continue
-            playTpl = t
-            RecipeStore.update(site.baseUrl) { it.copy(playTpl = t) }
-            return
-        }
-    }
-
-    /** 学到的模板必须属于本站：列表页里混进广告 / 外链时会学到别家的模板 */
-    private fun sameHost(tpl: String): Boolean {
-        val a = hostIn(tpl)
-        val b = hostIn(root)
-        if (a.isBlank() || b.isBlank()) return false
-        return a == b || a.endsWith(".$b") || b.endsWith(".$a")
-    }
-
-    private fun hostIn(url: String): String =
-        Regex("^https?://([^/]+)", RegexOption.IGNORE_CASE)
-            .find(url)?.groupValues?.get(1)?.lowercase().orEmpty()
-
-    /** 首页/列表页第一次解析时确定站点形态，之后沿用；学到就写进配方 */
-    private fun rememberShape(doc: Document) {
-        if (vodIsCategory) return
-        if (!detectVodShape(doc)) return
-        vodIsCategory = true
-        RecipeStore.update(site.baseUrl) { it.copy(vodIsCategory = true) }
-    }
-
-    private fun detectVodShape(doc: Document): Boolean {
-        for (a in doc.select("a[href]")) {
-            if (HtmlTemplates.isDetailSignal(a.attr("href"))) return true
-        }
-        return false
-    }
-
-    /** 值不大，够用：命中过就记住，避免每页重复试错 */
-    private fun guessTpl(url: String, page: Int): String? {
-        val id = HtmlTemplates.typeIdOf(url, vodIsCategory) ?: return null
-        for (tpl in HtmlTemplates.listCandidates(root)) {
-            if (build(tpl, id = id, page = page) == url) return tpl
-        }
-        return null
-    }
-
-    private fun abs(url: String): String {
-        val u = url.trim()
-        if (u.isEmpty()) return root
-        if (u.startsWith("http")) return u
-        if (u.startsWith("//")) return "https:$u"
-        return "$root/${u.trimStart('/')}"
-    }
-
-    private fun hostOf(url: String): String =
-        Regex("^https?://([^/]+)", RegexOption.IGNORE_CASE).find(url)?.groupValues?.get(1).orEmpty()
-
-    private fun withQueryPage(url: String, page: Int): String =
-        url + (if (url.contains("?")) "&" else "?") + "page=$page"
-
-    private fun enc(s: String): String = URLEncoder.encode(s, "UTF-8").replace("+", "%20")
-
-    private fun build(tpl: String, id: String = "", page: Int = 1, kw: String = ""): String {
-        val hasPageToken = tpl.contains("{page}")
-        var u = tpl
-            .replace("{id}", id)
-            .replace("{page}", "$page")
-            .replace("{kw}", enc(kw))
-        if (!u.startsWith("http")) u = "$root/${u.trimStart('/')}"
-        if (page > 1 && !hasPageToken) u = withQueryPage(u, page)
-        return u
-    }
-
-    private fun ordered(pref: String?, all: List<String>): List<String> =
-        if (pref.isNullOrBlank()) all else listOf(pref) + all.filter { it != pref }
 }

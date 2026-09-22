@@ -44,8 +44,18 @@ def rd(*parts):
 
 
 def rs(*parts):
-    with io.open(os.path.join(SRC, *parts), encoding="utf-8") as f:
-        return f.read()
+    # 主文件 + 同主名的拆分子文件一起拼（见 _cp.kt）：守卫锁**代码文本**，不锁文件布局。
+    return _cp.kt(os.path.join(SRC, *parts))
+
+
+def unqual(text, owner="SiteBrowser"):
+    """剥掉拆分带来的 `SiteBrowser.` 限定名再比字符串。
+
+    companion 成员在类外**必须**写 `SiteBrowser.MODE_SEARCH`（语法要求：不能裸写、不能 import），
+    所以「把 god file 拆成扩展文件」这种纯搬运会把这些裸名变成带限定名的样子 ——
+    那是**位置**变了，不是行为变了。见 docs/PITFALLS.md §4.41。
+    """
+    return text.replace(owner + ".", "")
 
 
 def num(text, pattern, default=None):
@@ -123,6 +133,12 @@ rail_kt = rs("ui", "adapter", "SearchRailAdapter.kt")
 
 print("== A. 边缘折射：叠一层，不是换掉原材质 ==")
 ok("GlassEdgeDrawable 带两条构造入口 forNav / of",
+# ⚠️ 源码判据**不带 `private ` 前缀**（v1.0.54 统一改过）。
+#    原来写的是 "private fun xxx("，那是把「可见性修饰符」也钉进了判据 ——
+#    而 god file 拆分时被搬到扩展文件里的函数一律变 "internal fun Owner.xxx("
+#    （扩展函数访问不了 private），于是"功能一行没改、只是搬了家"也会判红。
+#    判据要表达的是「这个签名的声明存在 / 这个函数体在这里」，可见性不是它要说的东西。
+#    见 docs/PITFALLS.md §4.24 与 §4.41。
    "fun forNav(" in edge_kt and "fun of(" in edge_kt)
 ok("★ 折射是叠在 bg_glass_nav 之上（LayerDrawable 两层，后画的在上）",
    "LayerDrawable(arrayOf(base, GlassEdgeDrawable.forNav(this)))" in main_kt)
@@ -202,8 +218,8 @@ ok("★ 二级站源页标题栏的返回也先退搜索（界面上有返回、
    "if (!browser.exitSearch()) finish()" in site_kt)
 
 print("== F. 分类行回归：异步尾巴不许覆盖搜索态 ==")
-ok("★ 有代次守卫 catSeq", "private var catSeq = 0" in browser_kt)
-load_body = body_of(code(browser_kt), "private fun loadCategories()")
+ok("★ 有代次守卫 catSeq", "var catSeq = 0" in browser_kt)
+load_body = body_of(code(browser_kt), "fun loadCategories()")
 ok("★ 重试每一轮开始前都查代次", load_body.count("if (seq != catSeq) return@launch") >= 3)
 # 位置判据（与上面那条**不是**同一件事）：光有"三个检查点"不够，
 # 关键是其中至少有一个落在 delay **之后** —— 退避 1.5s / 3s 正是用户切站或去搜索的窗口，
@@ -216,7 +232,7 @@ ok("★ 收尾时按「搜索发起过」决定要不要 onCategory(0)",
 ok("★ 判据是 mode==SEARCH 或关键词非空，不是只看搜索区可见",
    "mode == MODE_SEARCH || keyword.isNotBlank()" in browser_kt)
 ok("★ 分类条可见性只有一份出口 applyCatVisibility",
-   "private fun applyCatVisibility()" in browser_kt)
+   "fun applyCatVisibility()" in browser_kt)
 rev = body_of(code(browser_kt), "fun reload()")
 ok("reload() 调 applyCatVisibility（不再自带第二份判据）",
    "applyCatVisibility()" in rev and "b.rvCats.visibility" not in rev)
@@ -267,9 +283,9 @@ ok("点击用 bindingAdapterPosition 并挡 NO_POSITION",
 
 print("== J. 接线：首页与二级站源页都把搜索交给二级页 ==")
 ok("★ SiteBrowser 有 openSearch 回调",
-   "private val openSearch: ((keyword: String, aggregate: Boolean) -> Unit)? = null" in browser_kt)
+   "val openSearch: ((keyword: String, aggregate: Boolean) -> Unit)? = null" in browser_kt)
 bc = code(browser_kt)
-ds = body_of(bc, "private fun doSearch()")
+ds = body_of(bc, "fun doSearch()")
 # ⚠️ 判据必须落在 doSearch **内部**：`val page = openSearch` 在 setScope 里也有一份，
 # 在整份源码里比下标会把 setScope 的位置当成 doSearch 的，断言就永远绿（vacuous）。
 ok("★ WEB 范围不被 openSearch 截走（全网仍要开网页）",
@@ -277,7 +293,7 @@ ok("★ WEB 范围不被 openSearch 截走（全网仍要开网页）",
    and ds.index("openWebSearch(kw)") < ds.index("val page = openSearch"))
 ok("doSearch 里确实用 openSearch 分流", "page(kw, scope == SearchScope.ALL)" in browser_kt)
 ok("★ openSearch 为 null 时保留旧的「本页搜索」兜底（别的宿主不被打断）",
-   "mode = MODE_SEARCH" in bc)
+   "mode = MODE_SEARCH" in unqual(ds))
 ok("MainActivity 传了 openSearch", "openSearch = { kw, agg ->" in main_kt)
 ok("SiteActivity 传了 openSearch", "openSearch = { kw, agg ->" in site_kt)
 ok("换搜索范围会重开那一页（否则改成全站了没反应）",
@@ -290,7 +306,7 @@ ok("★ doSearch 里记一笔搜索历史（Store.addSearchHistory 以前全工�
    "Store.addSearchHistory(act, kw)" in browser_kt)
 
 print("== L. 状态位复用必须摘监听（看不见但能点是最忌讳的 bug） ==")
-st = body_of(code(search_kt), "private fun showState(")
+st = body_of(code(search_kt), "fun showState(")
 ok("★ showState 先无条件摘掉监听", "binding.tvState.setOnClickListener(null)" in st)
 ok("★ 只有存在失败清单时才重新挂上", "failures.isNotEmpty()" in st)
 ok("★ 换站不再误报别的站的错（失败清单跟着栏走，不由 selectRail 兜底清空）",
@@ -300,8 +316,8 @@ ok("★ 换站不再误报别的站的错（失败清单跟着栏走，不由 se
    # v1.0.52 又把这段挪进了 commitChrome（流式那条路的收尾不能整表重铺，只能走它）。
    # 所以断言跟着机制走，而不是把代码改回去（同 PITFALLS 4.24 那条教训）——
    # 顺手加上"只此一处"，比原来那条位置判据更强。
-   "failures = emptyList()" not in body_of(code(search_kt), "private fun selectRail(") and
-   "failures = st.failures" in body_of(code(search_kt), "private fun commitChrome(") and
+   "failures = emptyList()" not in body_of(code(search_kt), "fun selectRail(") and
+   "failures = st.failures" in body_of(code(search_kt), "fun commitChrome(") and
    search_kt.count("failures = st.failures") == 1)
 ok("结果页支持单站翻页", "load(page + 1, true)" in search_kt)
 ok("★ 聚合不翻页（每站已限 24 条，重复铺分组标题反而更难读）",

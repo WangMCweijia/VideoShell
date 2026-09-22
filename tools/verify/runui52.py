@@ -44,8 +44,8 @@ def ok(name, cond):
 
 
 def rd(p):
-    with io.open(p, encoding="utf-8") as f:
-        return f.read()
+    # 主文件 + 同主名的拆分子文件一起拼（见 _cp.kt）：守卫锁**代码文本**，不锁文件布局。
+    return _cp.kt(p)
 
 
 def rs(*parts):
@@ -87,12 +87,18 @@ ST = rs("data", "Store.kt")
 WR = rs("ui", "WebRender.kt")
 AGG = rs("data", "site", "AggSearch.kt")
 
-B_STREAM = body_of(SA, "private suspend fun streamAggregate(")
-B_ARRIVED = body_of(SA, "private fun commitArrived(")
-B_PARTIAL = body_of(SA, "private fun partialRail(")
-B_FILL = body_of(SA, "private fun fillRailCount(")
-B_LOAD = body_of(SA, "private fun load(")
-B_SELECT = body_of(SA, "private fun selectRail(")
+B_STREAM = body_of(SA, "suspend fun streamAggregate(")
+# ⚠️ 源码判据**不带 `private ` 前缀**（v1.0.54 统一改过）。
+#    原来写的是 "private fun xxx("，那是把「可见性修饰符」也钉进了判据 ——
+#    而 god file 拆分时被搬到扩展文件里的函数一律变 "internal fun Owner.xxx("
+#    （扩展函数访问不了 private），于是"功能一行没改、只是搬了家"也会判红。
+#    判据要表达的是「这个签名的声明存在 / 这个函数体在这里」，可见性不是它要说的东西。
+#    见 docs/PITFALLS.md §4.24 与 §4.41。
+B_ARRIVED = body_of(SA, "fun commitArrived(")
+B_PARTIAL = body_of(SA, "fun partialRail(")
+B_FILL = body_of(SA, "fun fillRailCount(")
+B_LOAD = body_of(SA, "fun load(")
+B_SELECT = body_of(SA, "fun selectRail(")
 
 print("== A. 需求1：聚合第 1 页走流式（先出结果的先显示）==")
 ok("streamAggregate() 取到了函数体", len(B_STREAM) > 200)
@@ -138,8 +144,8 @@ ok("★ 流式铺块前自己设搜索态（不指望 paintAll —— 第一屏�
 
 print()
 print("== C. 流式必须和 v1.0.51 的缓存/归属机制接上，不许回退 ==")
-ok("★ 有界面归属变量 paintSeq", "private var paintSeq = 0" in SA)
-ok("★ 有「这一栏还在跑」的表 inflight", "private val inflight = HashMap<String, Int>()" in SA)
+ok("★ 有界面归属变量 paintSeq", "var paintSeq = 0" in SA)
+ok("★ 有「这一栏还在跑」的表 inflight", "val inflight = HashMap<String, Int>()" in SA)
 ok("★ 发起时两样都认领（paintSeq = seq 与 inflight[key] = seq）",
    "paintSeq = seq" in B_LOAD and "inflight[key] = seq" in B_LOAD)
 ok("★ 切回一栏时**认领**而不是重发（paintSeq = run）", "paintSeq = run" in B_SELECT)
@@ -169,7 +175,7 @@ ok("★ 媒体安全阀排在广告判据之前（漏拦一个广告 vs 误拦�
 ok("★ 复用 Media.looksLikeMedia（媒体判据只有一份，不另抄一个扩展名表）",
    "Media.looksLikeMedia(url)" in AB)
 ok("★ 主机标签级与路径段级是**两个**集合（共用一定会有一边是错的）",
-   "private val AD_LABELS" in AB and "private val AD_SEG" in AB)
+   "val AD_LABELS" in AB and "val AD_SEG" in AB)
 ok("★ 代码里没有广谱 CSS 选择器（注释里提到不算）", '"[class*=' not in AB)
 ok("hideCss 的选择器由 AD_HOSTS 生成（判据与产出同源）",
    'AD_HOSTS.forEach { sel += "iframe[src*=' in AB or "AD_HOSTS.forEach" in AB)
@@ -218,8 +224,8 @@ ok("★ 开关默认开（getBoolean(KEY_ADBLOCK, true)）", "getBoolean(KEY_ADB
 ok("★ 开关能关（setAdBlock 写 SharedPreferences）",
    "fun setAdBlock(ctx: Context, on: Boolean)" in ST)
 ok("★ 嗅探页切换开关后重载（只改判据不重载 = '关掉了广告还在'这种中间态）",
-   "binding.webView.reload()" in body_of(SN, "private fun toggleAdBlock("))
-ok("★ 校准页切换开关后也重载", "binding.webView.reload()" in body_of(CA, "private fun toggleAdBlock("))
+   "binding.webView.reload()" in body_of(SN, "fun toggleAdBlock("))
+ok("★ 校准页切换开关后也重载", "binding.webView.reload()" in body_of(CA, "fun toggleAdBlock("))
 ok("两处开关都写回 Store", SN.count("WebAdBlock.setOn(this, adBlockOn)") == 1 and
    CA.count("WebAdBlock.setOn(this, adBlockOn)") == 1)
 ok("嗅探报告里带一行去广告统计（拦了多少条，可粘贴）",

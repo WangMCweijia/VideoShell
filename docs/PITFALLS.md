@@ -1195,3 +1195,74 @@ if os.path.isdir(alt): return alt
 本机环境技能 `win-gitbash-build-env-pitfalls` 里记了这一条）。**不要循环 `os.remove`**，而是
 **先把待删件搬进一个暂存目录，再对暂存目录做一次 `Directory.Delete(dir, recursive)`** ——
 一次原生调用，不触发按文件计数的保护；搬移是改名，本身不算删除。
+### 4.41 ★ 拆 god file（纯搬运）之所以能"与守卫无关"，靠的是**两层**机制（v1.0.54）
+
+把 1700 行的 god file 按职责拆成几个文件，本身一行逻辑都不改 —— 但守卫是**读源码文本**做
+`contains` / `body_of` / `count()==N` 的，路径和函数签名一变就会满地假红。让"搬运"对守卫不可见的
+是两层机制，缺一层都会红一片：
+
+**第一层：聚合读取（`<主名>.kt` + `<主名>_*.kt`）**。把「某个类的全部源码」定义成
+「主文件 + 同主名的拆分子文件」，守卫的路径就不再绑死文件布局。见 `tools/verify/_cp.py` 的 `kt()`
+与 8 个 Java 守卫里的 `agg()`（两份实现必须**同时**改，只改一边的症状是"Java 套件红、Python 套件绿"）。
+纪律：拼接**不复制内容** ⇒ `count(x) == 1` 这类"只此一处"的计数断言语义不变。
+
+**第二层：恒等还原（`unwrap`）**。子文件里被搬走的函数一律是
+`internal fun Owner.xxx(`（扩展函数访问不了 `private`），而判据写的是 `private fun xxx(`。
+`unwrap` 按行做 1:1 改写把签名还原成类成员写法，让聚合文本与拆分前**逐行等价**。
+1:1 替换不复制不删除 ⇒ 真被删掉的代码不会因为改写而"看起来还在"。
+
+**同一个坑踩了四次，全是"名字对得上、正则认不出"**（表现为"每轮都放宽 0 处，错误却一直在"）：
+
+| 次数 | 声明形态 | 正则缺什么 | 症状 |
+|---|---|---|---|
+| 1 | `private var` / `private lateinit var` | 只写了 `private val` | 每轮 0 处 |
+| 2 | `private suspend fun` | 漏 `suspend ` | 每轮 0 处 |
+| 3 | `private data class Card`（**嵌套类型**） | 认不出 `class` | 每轮 0 处 |
+| 4 | `private inner class Bridge` | 漏 `inner ` | 每轮 0 处 |
+
+⇒ 写这类"自动修"脚本时，**必须**同时具备"声明形态全覆盖"与"零改动就停下喊"两条。
+只报"处理了 0 处"而不停，看起来在干活、实际一个字没改 —— 与 §4.34 的"绿是假的"同型。
+
+**编译器报错的四种措辞都要认**（同一件事：谁看得见谁）：
+1. `Cannot access 'x': it is private in 'Owner'`（成员 private）；
+2. `Cannot access 'x': it is private in file`（**顶层** private，报错里**不带**所有者类名 ⇒ 只能按声明名反查文件）；
+3. `'internal' function exposes its 'private-in-class' return type Card`（不是"访问不到"，是**泄露**）；
+   ——注意备选顺序必须长的在前：`return type argument` 写在 `return type` 后面时，
+   会被 `return type` 先命中，剩下的 ` argument X` 被当成名字捕获成 `argument`。
+4. 同一函数被搬到子文件后，`owner` 类名在报错里仍是**所有者类名而不是文件名** ⇒ 找声明要去
+   `Owner.kt` **和** `Owner_*.kt` 两处（`LineBlock` / `Card` 就住在子文件里）。
+
+### 4.42 ★ 纯搬运拆分的五条硬约束（每条都踩过，且两条是**静默**的）（v1.0.54）
+
+**① `override fun` 一个都不能搬**。扩展函数不能覆盖成员 —— 搬走等于把生命周期回调整个删掉。
+区间上下界就是照着 `onCreate` / `onBackPressed` / `onStop` / `onDestroy` / `finish` 切的
+（CalibrateActivity 的 Web 组止于 427、下一段起于 433，中间夹的正是 `onBackPressed`）。
+
+**② `this@Owner` 在扩展函数里不成立 —— 而且 `this` 也不能拿来顶替。**
+隐式接收者的标签是**函数名**：`this@Owner` ⇒ 必须改写成 `this@函数名`。
+不要图省事换成 `this`：SniffActivity.recognizeAndAdd 里那 3 处全在
+`lifecycleScope.launch { … }` 内，那里的 `this` 已经是协程作用域了。
+（PlayerActivity 当初是加 `val self = this` 绕过去的，两种写法都对；关键是**不能不管**。）
+
+**③ 静默的一类：private 字段的名字撞上**继承自父类的属性** ⇒ 编译器不报"访问不到"，改用父类那个。**
+SniffActivity 的 `private var title: String` 撞 `Activity.getTitle(): CharSequence!`：
+类内子类字段遮蔽父类属性 ⇒ 取到 `String`；搬到扩展函数后 private 字段看不见了，
+Kotlin **不报错**，改用父类的 `title`（`CharSequence`）。表现是
+`Type mismatch: inferred type is CharSequence! but String was expected` —— 这还算幸运的。
+**更坏的情况**：那一处本来就收 `CharSequence`，于是静默变成"Activity 的标题"，行为已经变了而编译全绿。
+
+⇒ 结论：**只靠编译错误驱动的自动修可见性，看不见这一类**。必须在编译**之前**做一遍
+**按引用静态放宽**：凡是拆分子文件里出现过的标识符，只要主文件里是 private 类级声明，就先放宽。
+（`_fixvis.py` 的 `static_widen()`。放宽可见性不改行为，多放宽几个只是难看。）
+判据：**"编译绿"只证明没有硬冲突，不证明名字解析没换对象**。
+
+**④ 嵌套类型不会自动进入别的文件的作用域**：`Pick` / `NavPick` / `Card` / `LineBlock` 被写进
+扩展函数的签名后，顶层作用域解析不到 ⇒ `Unresolved reference: Pick`。
+两条出路：`_spec` 头部手写 `import <包>.<Owner>.<类型>`，或让收尾脚本
+（`_fixvis.py` 的 `nested_types()` 分支）自动补 —— 后者更可靠，因为**不依赖人记住**。
+另外 `companion object` 的成员**不能**用 import 解决：类外必须写 `Owner.MODE_XXX`（语法要求），
+所以由收尾脚本在调用点补限定名。
+
+**⑤ 顺带一条判据纪律**：上面 ④ 的限定名会让守卫里写的裸名（`mode == MODE_SEARCH`）失配 ——
+那是**位置**变了、不是行为变了，处理方式与"判据不带 `private ` 前缀"（§4.24）完全一样：
+在比较前把 `Owner.` 剥掉（`runui40.py` / `runui50.py` 里的 `unqual()`），**不要**把代码改回去。

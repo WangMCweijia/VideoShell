@@ -32,3 +32,11 @@ _bs/
 _samples/
 # 本地导出的 APK 目录（约 18 MB，不是源码；CI 出的包在 Actions artifact / Releases 里）
 videoshell-apk/
+
+# 签名密钥：**绝不入库**（仓库是 public）。
+# 本地一份在仓库外（keystore.properties 指向 ../releases/.keys/videoshell.jks），
+# CI 一份从 GitHub Secrets 解到 $RUNNER_TEMP/sign/（见 .github/workflows/android.yml）。
+# 为什么必须这样：私钥一旦公开，任何人都能签一个 versionCode 更大的同名包，
+# 而 Android 只认签名 —— 装了假的就等于把"更新"交到别人手里。见 docs/PITFALLS.md §4.43。
+keystore.properties
+keystore/*.jks

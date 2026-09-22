@@ -1,12 +1,28 @@
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 
-// 签名配置：优先读 keystore.properties（仓库内已含，便于 CI/本地直接构建 release）
-def keystorePropsFile = rootProject.file("keystore.properties")
+// 签名配置：**优先环境变量**（CI 从 GitHub Secrets 注入），其次本地 `keystore.properties`。
+//
+// ⚠️ 为什么不把 keystore.properties / *.jks 放进仓库（v1.0.54 改）：
+// 仓库转 public 后，签名私钥就是**公开**的 —— 任何人都能签一个 versionCode 更大的
+// 同名包，而 Android 只认签名：装了它，就等于把"更新"交到别人手里。
+// 所以密钥走 GitHub Secrets，本地留一份（已在 .gitignore 里），两边都能出**真签名**包。
+//
+// 为什么 debug 也用 release 钥匙：默认 debug 走 Android 调试密钥，于是 debug 包与
+// release 包**互相覆盖安装会失败**（「应用未安装：签名冲突」），用户以为装了新版、
+// 其实还停在旧版 —— 现象是「我明明装了，怎么还是老样子」，任何代码排查都解释不通。
 def keystoreProps = new Properties()
-if (keystorePropsFile.exists()) {
-    keystoreProps.load(new FileInputStream(keystorePropsFile))
+def localPropsFile = rootProject.file("keystore.properties")
+if (localPropsFile.exists()) {
+    localPropsFile.withInputStream { keystoreProps.load(it) }
 }
+
+def envStoreFile = System.getenv("VS_KEYSTORE_FILE")
+def envStorePwd  = System.getenv("VS_STORE_PASSWORD")
+def envAlias     = System.getenv("VS_KEY_ALIAS")
+def envKeyPwd    = System.getenv("VS_KEY_PASSWORD")
+def hasEnvKeys   = envStoreFile && envStorePwd && envAlias && envKeyPwd
+def hasSigning   = hasEnvKeys || localPropsFile.exists()
 
 android {
     namespace 'com.videoshell'
@@ -16,15 +32,20 @@ android {
         applicationId "com.videoshell"
         minSdk 21
         targetSdk 34
-        versionCode 53
-        versionName "1.0.53"
+        versionCode 54
+        versionName "1.0.54"
         vectorDrawables.useSupportLibrary = true
         resConfigs "zh", "en"
     }
 
     signingConfigs {
         release {
-            if (keystorePropsFile.exists()) {
+            if (hasEnvKeys) {
+                storeFile file(envStoreFile)
+                storePassword envStorePwd
+                keyAlias envAlias
+                keyPassword envKeyPwd
+            } else if (localPropsFile.exists()) {
                 storeFile rootProject.file(keystoreProps['storeFile'])
                 storePassword keystoreProps['storePassword']
                 keyAlias keystoreProps['keyAlias']
@@ -34,13 +55,8 @@ android {
     }
 
     buildTypes {
-        // ⚠️ debug 必须与 release 用**同一把钥匙**签名。
-        // 默认 debug 走 Android 的调试密钥，于是 debug 包与 release 包**互相覆盖安装会失败**
-        // （「应用未安装：签名冲突」）。用户以为装了新版，实际还停在旧版 —— 现象是
-        // 「我明明装了，怎么还是老样子」，而任何代码排查都解释不通。
-        // 密钥本来就在库里，这里直接复用，彻底消掉这一类假故障。
         debug {
-            if (keystorePropsFile.exists()) {
+            if (hasSigning) {
                 signingConfig signingConfigs.release
             }
         }
@@ -48,7 +64,7 @@ android {
             minifyEnabled false
             shrinkResources false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            if (keystorePropsFile.exists()) {
+            if (hasSigning) {
                 signingConfig signingConfigs.release
             }
         }

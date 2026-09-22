@@ -9,6 +9,11 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
+    <!-- 应用内自更新需要拉起系统安装器。注意：声明这个权限**不等于**能装 ——
+         Android 8.0 起还要求用户在「安装未知应用」里对本应用单独授权，
+         没授权时 Installer 会直接拒绝，所以 UpdateDownloader 里要能识别并引导过去。 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <application
         android:name=".App"
         android:allowBackup="true"
@@ -85,6 +90,19 @@
             android:name=".player.MediaNotificationService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <!-- 自更新把 APK 交给系统安装器时，必须走 content:// ——
+             Android 7.0 起用 file:// 外泄会直接抛 FileUriExposedException。
+             authority 带包名，避免与其它应用撞名（多设备并存时确实会撞）。 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

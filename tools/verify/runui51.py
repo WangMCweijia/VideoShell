@@ -43,8 +43,8 @@ def ok(name, cond):
 
 
 def rd(p):
-    with io.open(p, encoding="utf-8") as f:
-        return f.read()
+    # 主文件 + 同主名的拆分子文件一起拼（见 _cp.kt）：守卫锁**代码文本**，不锁文件布局。
+    return _cp.kt(p)
 
 
 def rs(*parts):
@@ -93,19 +93,25 @@ SA = rs("ui", "SearchActivity.kt")
 AGG = rs("data", "site", "AggSearch.kt")
 
 # 反复要用的正文，取一次
-B_SELECT = body_of(SA, "private fun selectRail(")
-B_LOAD = body_of(SA, "private fun load(")
-B_RENDER = body_of(SA, "private fun render(")
-B_PREFILL = body_of(SA, "private fun prefill(")
-B_RAILKEY = expr_of(SA, "private fun railKey(")
+# ⚠️ 源码判据**不带 `private ` 前缀**（v1.0.54 统一改过）。
+#    原来写的是 "private fun xxx("，那是把「可见性修饰符」也钉进了判据 ——
+#    而 god file 拆分时被搬到扩展文件里的函数一律变 "internal fun Owner.xxx("
+#    （扩展函数访问不了 private），于是"功能一行没改、只是搬了家"也会判红。
+#    判据要表达的是「这个签名的声明存在 / 这个函数体在这里」，可见性不是它要说的东西。
+#    见 docs/PITFALLS.md §4.24 与 §4.41。
+B_SELECT = body_of(SA, "fun selectRail(")
+B_LOAD = body_of(SA, "fun load(")
+B_RENDER = body_of(SA, "fun render(")
+B_PREFILL = body_of(SA, "fun prefill(")
+B_RAILKEY = expr_of(SA, "fun railKey(")
 B_COMPLETE = expr_of(AGG, "fun complete(")
 B_RAILSTATE = expr_of(SA, "private class RailState(")
 # v1.0.52 抽出来的三个：流式那一趟（streamAggregate）、它的到达动作（commitArrived）、
 # 周边文字的收口（commitChrome）。下面几条位置判据跟着它们走 —— 不是把判据放宽，
 # 而是 v1.0.51 那几条钉的"某个函数里恰好长什么样"本来就该钉在**收口点**上。
-B_STREAM51 = body_of(SA, "private suspend fun streamAggregate(")
-B_CHROME = body_of(SA, "private fun commitChrome(")
-B_FILL51 = body_of(SA, "private fun fillRailCount(")
+B_STREAM51 = body_of(SA, "suspend fun streamAggregate(")
+B_CHROME = body_of(SA, "fun commitChrome(")
+B_FILL51 = body_of(SA, "fun fillRailCount(")
 
 print("== A. 换栏路径上不许有网络请求（用户抱怨的就是这件事）==")
 ok("selectRail() 取到了函数体", len(B_SELECT) > 40)
@@ -130,7 +136,7 @@ ok("cache[key] = st 出现且仅出现一次", SA.count("cache[key] = st") == 1)
 ok("prefill 写缓存的形态唯一（cache[h.key] = RailState(）",
    SA.count("cache[h.key] = RailState(") == 1)
 ok("★ 缓存字段存在（railKey → RailState）",
-   "private val cache = HashMap<String, RailState>()" in SA)
+   "val cache = HashMap<String, RailState>()" in SA)
 
 print()
 print("== C. 迟到的结果：只许写缓存，不许改界面 ==")

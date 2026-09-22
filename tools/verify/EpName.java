@@ -72,13 +72,72 @@ public class EpName {
     }
 
     static String read(String p) {
+        String text;
         try {
             Path q = Paths.get(p);
-            return Files.exists(q) ? new String(Files.readAllBytes(q), "UTF-8") : null;
+            if (!Files.exists(q)) return null;
+            text = new String(Files.readAllBytes(q), "UTF-8");
         } catch (Exception e) {
             return null;
         }
+        return agg(p, text);
     }
+
+    /** 源码的"有效文本" = 主文件 + 同主名的拆分子文件（`<主名>_*.kt`），
+     *  子文件里的顶层 internal 声明经 unwrap() 还原成类成员写法。
+     *
+     * 守卫锁的是**代码文本**，不该锁**文件布局**：把 god file 按职责拆成几个文件是纯搬运
+     * （逻辑一行没改）。为什么需要还原、以及为什么这样做不会掩盖真改动，见 unwrap 的注释。
+     */
+    static String agg(String p, String text) {
+        String name = new java.io.File(p).getName();
+        if (!name.endsWith(".kt")) return text;
+        String owner = name.substring(0, name.length() - 3);
+        java.io.File dir = new java.io.File(p).getParentFile();
+        String[] ns = dir == null ? null : dir.list();
+        if (ns == null) return text;
+        Arrays.sort(ns);
+        String pre = owner + "_";
+        StringBuilder sb = new StringBuilder(text);
+        for (String n : ns) {
+            if (!n.startsWith(pre) || !n.endsWith(".kt")) continue;
+            String sub;
+            try {
+                sub = new String(
+                        Files.readAllBytes(new java.io.File(dir, n).toPath()), "UTF-8");
+            } catch (Exception e) {
+                continue;
+            }
+            sb.append('\n');
+            for (String line : sub.split("\n", -1)) sb.append(unwrap(line, owner)).append('\n');
+        }
+        return sb.toString();
+    }
+
+    /** 把拆出去的子文件里的顶层 internal 声明**还原成类成员的写法**。
+     *
+     * 拆分后子文件里是 `internal fun Owner.xxx(` / `internal val xxx = …`
+     * （扩展函数访问不了 private，被它读到的字段也要放宽），而守卫的判据写的是
+     * 拆分前的样子 `private fun xxx(`。两者是**一一对应的同一段代码**，差别只在
+     * 可见性修饰符与接收者前缀 —— 那是"搬到哪、谁能看见"，不是"代码做了什么"。
+     *
+     * 所以读取时按行做恒等改写，让聚合出来的文本与拆分前**逐行等价**，
+     * 守卫从此不必知道文件被拆过（见 PITFALLS 4.41）。
+     * 只在**子文件**上做；1:1 行替换，不复制、不删除 ⇒ 计数断言语义不变，
+     * 真被删掉的代码也不会因为改写而"看起来还在"。
+     */
+    static String unwrap(String line, String owner) {
+        if (!line.startsWith("internal ")) return line;
+        String rest = line.substring("internal ".length());
+        String p = "fun " + owner + ".";
+        if (rest.startsWith(p)) return "private fun " + rest.substring(p.length());
+        p = "suspend fun " + owner + ".";
+        if (rest.startsWith(p)) return "private suspend fun " + rest.substring(p.length());
+        if (rest.startsWith("val ")) return "private val " + rest.substring(4);
+        if (rest.startsWith("var ")) return "private var " + rest.substring(4);
+        return line;
+    }
+
 
     static String names(List<Episode> l) {
         List<String> n = new ArrayList<>();
@@ -258,15 +317,21 @@ public class EpName {
         //    "原来这里有一份 TITLE_NO，已删除"正是为了记下这次合并的原因，必须留着。
         //    所以只认"活的声明 / 活的调用"（这条正是本项目"守卫绑死写法"老坑的反面教材）。
         ok("E1 SsrPayload 不再自持一份集号判据（TITLE_NO 的声明与调用都已删；注释留名是为了记教训）",
-                ssr != null && !ssr.contains("private val TITLE_NO")
+    // ⚠️ 源码判据**不带 `private ` 前缀**（v1.0.54 统一改过）。
+    //    原来写的是 `"private fun xxx("`，那是把「可见性修饰符」也钉进了判据 ——
+    //    而 god file 拆分时被搬到扩展文件里的函数一律变 `internal fun Owner.xxx(`
+    //    （扩展函数访问不了 private），于是"功能一行没改、只是搬了家"也会判红。
+    //    判据要表达的是「这个签名的声明存在 / 这个函数体在这里」，可见性不是它要说的东西。
+    //    见 docs/PITFALLS.md §4.24 与 §4.41。
+                ssr != null && !ssr.contains("val TITLE_NO")
                         && !ssr.contains("TITLE_NO.find"), "又加回来了");
         ok("E2 SsrPayload 走共用判据 EpisodeOrder.noInTitle",
                 ssr != null && ssr.contains("EpisodeOrder.noInTitle"), "没接上");
         ok("E3 YeguoMap 走共用判据（自己不再写一份正则）",
                 ya != null && ya.contains("EpisodeOrder.noInTitle")
-                        && !ya.contains("private val EP_MARKER"), "又抄了一份");
+                        && !ya.contains("val EP_MARKER"), "又抄了一份");
         ok("E4 全项目只有一处 EP_MARKER",
-                eo != null && eo.contains("private val EP_MARKER")
+                eo != null && eo.contains("val EP_MARKER")
                         && !(ya != null && ya.contains("EP_MARKER")), "判据不止一份");
         ok("E5 分集名不再直接透传站点标题（episode_title 只当作集号来源）",
                 ya != null && !ya.contains("out += Episode(title,"), "又透传了");

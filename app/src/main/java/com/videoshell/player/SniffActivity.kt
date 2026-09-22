@@ -75,13 +75,13 @@ class SniffActivity : AppCompatActivity() {
         private const val EXTRA_BROWSE = "browse"
 
         /** 首个候选出现后先等一会儿再动手：让页面把该发的请求都发出来，免得"先到的广告"被当成唯一选项 */
-        private const val SETTLE_MS = 2_500L
+        internal const val SETTLE_MS = 2_500L
 
         /** 最多真正探测几个候选的 playlist（每次探测一个网络请求，不宜贪多） */
-        private const val MAX_PROBE = 4
+        internal const val MAX_PROBE = 4
 
         /** 最多重新探测两轮（页面可能陆续吐出更多候选） */
-        private const val MAX_PROBE_ROUNDS = 2
+        internal const val MAX_PROBE_ROUNDS = 2
 
         private const val MAX_TICKS = 240
 
@@ -92,7 +92,7 @@ class SniffActivity : AppCompatActivity() {
          * 一次微小拖动 ⇒ 收起功能永远触发不了，而用户只会觉得"这按钮没反应"。
          * 写成 dp 而不是 px：3x 屏上 8px 只有 2.7dp，抖一下就过线了。
          */
-        private const val SLOP_DP = 6f
+        internal const val SLOP_DP = 6f
 
         fun intent(
             context: Context,
@@ -112,16 +112,16 @@ class SniffActivity : AppCompatActivity() {
             }
     }
 
-    private lateinit var binding: ActivitySniffBinding
-    private lateinit var pageUrl: String
-    private var title: String = ""
-    private var pageHeaders: Map<String, String> = emptyMap()
+    internal lateinit var binding: ActivitySniffBinding
+    internal lateinit var pageUrl: String
+    internal var title: String = ""
+    internal var pageHeaders: Map<String, String> = emptyMap()
 
     /** 浏览模式：不自动播、不自动探测，只把网页当网页用（见 [EXTRA_BROWSE] 说明） */
-    private var browse = false
+    internal var browse = false
 
     /** 「识别并添加」正在进行中：防连点（每次识别都要真发几个请求） */
-    private var grabbing = false
+    internal var grabbing = false
 
     /**
      * 去广告（v1.0.52）：**默认开**，浮窗上可关。
@@ -134,38 +134,38 @@ class SniffActivity : AppCompatActivity() {
      * 的，而域名轮换的站在点击后确实可能无手势地跳到别的域名 —— 推断就会错，
      * 错了必须让人关得掉（关不掉的过滤器比没有过滤器更危险）。
      */
-    private var adBlockOn = true
+    internal var adBlockOn = true
 
     /** 「已拦截广告跳转」每页只提示一次（弹窗会反复重试，不节流会连弹十几个 toast） */
-    private var navBlockNotified = false
+    internal var navBlockNotified = false
 
     /** 播放页地址里的视频 id —— 候选地址含它时是很强的正面信号 */
-    private var videoId: String = ""
+    internal var videoId: String = ""
 
-    private val candidates = LinkedHashMap<String, SniffCandidate>()
+    internal val candidates = LinkedHashMap<String, SniffCandidate>()
 
     /** 每个目录下观测到的 .ts 分片请求数：正片目录会被打几百次，广告目录只有十几次 */
-    private val tsHits = HashMap<String, Int>()
+    internal val tsHits = HashMap<String, Int>()
 
-    private val candidateAdapter = CandidateAdapter { c -> startPlayer(c) }
+    internal val candidateAdapter = CandidateAdapter { c -> startPlayer(c) }
 
-    private val handler = Handler(Looper.getMainLooper())
-    private var polling = false
-    private var autoPlayed = false
-    private var firstSeenAt = 0L
-    private var webVisible = true
-    private var ticks = 0
+    internal val handler = Handler(Looper.getMainLooper())
+    internal var polling = false
+    internal var autoPlayed = false
+    internal var firstSeenAt = 0L
+    internal var webVisible = true
+    internal var ticks = 0
 
     /** 主文档加载失败的原因；有值时状态栏直接显示，不再让用户对着空白页猜 */
-    private var pageError = ""
+    internal var pageError = ""
 
     /** 页面要求登录（这类站根本不会下发播放地址，嗅探必然扑空） */
-    private var loginWall = false
-    private var loginWords = ""
+    internal var loginWall = false
+    internal var loginWords = ""
 
-    private var probeRounds = 0
-    private var probing = false
-    private var textProbed = false
+    internal var probeRounds = 0
+    internal var probing = false
+    internal var textProbed = false
 
     /**
      * 浮窗是否收起（v1.0.38）。
@@ -177,15 +177,15 @@ class SniffActivity : AppCompatActivity() {
      * 位置（[panelTx]/[panelTy]）同理不落盘 —— 挪开它是为了避开**当前这一页**的按钮，
      * 记到下一站反而是拿上一站的布局去挡这一站的。
      */
-    private var panelCollapsed = false
+    internal var panelCollapsed = false
 
     /** ③ jx 解析接口只试一次 */
     private var jxTried = false
 
     /** 「没抓到候选」的原因只记一次，别把播放记录刷满 */
-    private var loggedOneShot = false
+    internal var loggedOneShot = false
 
-    private val pollTask = object : Runnable {
+    internal val pollTask = object : Runnable {
         override fun run() {
             if (!polling) return
             ticks++
@@ -316,7 +316,7 @@ class SniffActivity : AppCompatActivity() {
      * 所以拦下时不能静默：状态栏那句提示就是用户判断"是不是它挡了我"的依据，
      * 而浮窗上的开关是他能立刻自救的手段（PITFALLS：静默失败最贵）。
      */
-    private fun guardNav(to: String, request: WebResourceRequest?): Boolean {
+    internal fun guardNav(to: String, request: WebResourceRequest?): Boolean {
         if (!adBlockOn || to.isBlank()) return false
         val from = binding.webView.url.orEmpty()
         if (!WebAdBlock.navBlocked(from, to, request)) return false
@@ -327,377 +327,12 @@ class SniffActivity : AppCompatActivity() {
         return true
     }
 
-    // ------------------------------------------------------------------ 浮窗：收起 / 拖动
-
-    private fun togglePanel() {
-        panelCollapsed = !panelCollapsed
-        renderPanel()
-    }
-
-    /**
-     * 收起 = 只留手柄那一行。
-     *
-     * 收起后**必须补一次夹取**：面板矮了，它的 bottom 变小、可下移的范围变大，
-     * 之前拖到贴底的位置会变成"浮在半空" —— 用户会以为拖动坏了。
-     */
-    private fun renderPanel() {
-        binding.panelBody.visibility = if (panelCollapsed) View.GONE else View.VISIBLE
-        binding.tvPanelBrief.visibility = if (panelCollapsed) View.VISIBLE else View.GONE
-        binding.panelGrip.visibility = if (panelCollapsed) View.VISIBLE else View.GONE
-        binding.btnPanelToggle.setText(
-            if (panelCollapsed) R.string.sniff_panel_expand else R.string.sniff_panel_collapse
-        )
-        refreshPanelBrief()
-        binding.bottomPanel.post { clampPanel() }
-    }
-
-    private fun refreshPanelBrief() {
-        if (!panelCollapsed) return
-        binding.tvPanelBrief.text = getString(R.string.sniff_panel_collapsed, candidates.size)
-    }
-
-    /**
-     * 拖动手柄：整行都能拖，**没拖动时按一下 = 收起/展开**。
-     *
-     * 用 `rawX/rawY` 而不是 `x/y`：后者相对当前被按的 View，手指移出手柄后数值就乱了。
-     * 判定"这是拖动还是点击"用 8dp 的位移阈值 —— 手指按下去总会抖一两像素，
-     * 没有阈值的话每一次"想点一下"都会被当成微小拖动，收起功能就永远触发不了。
-     */
-    @SuppressLint("ClickableViewAccessibility")
-    private fun setupPanelDrag() {
-        val panel = binding.bottomPanel
-        val slop = SLOP_DP * resources.displayMetrics.density
-        var downX = 0f
-        var downY = 0f
-        var baseTx = 0f
-        var baseTy = 0f
-        var moved = false
-        binding.panelHandle.setOnTouchListener { _, e ->
-            when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    downX = e.rawX
-                    downY = e.rawY
-                    baseTx = panel.translationX
-                    baseTy = panel.translationY
-                    moved = false
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val dx = e.rawX - downX
-                    val dy = e.rawY - downY
-                    if (!moved && (kotlin.math.abs(dx) > slop || kotlin.math.abs(dy) > slop)) {
-                        moved = true
-                    }
-                    if (moved) {
-                        panel.translationX = baseTx + dx
-                        panel.translationY = baseTy + dy
-                        clampPanel()
-                    }
-                    true
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    if (!moved) togglePanel()
-                    true
-                }
-                else -> false
-            }
-        }
-    }
-
-    /** 把浮窗夹在父容器里：能挪开，但不能挪出屏幕外找不回来 */
-    private fun clampPanel() {
-        val panel = binding.bottomPanel
-        val parent = panel.parent as? View ?: return
-        if (parent.width == 0 || parent.height == 0) return
-        panel.translationX = panel.translationX
-            .coerceIn(-panel.left.toFloat(), (parent.width - panel.right).toFloat())
-        panel.translationY = panel.translationY
-            .coerceIn(-panel.top.toFloat(), (parent.height - panel.bottom).toFloat())
-    }
-
-    /**
-     * 浏览模式下的「返回」= **网页后退**。
-     *
-     * 用户从搜索结果点进一个站，想回结果页继续挑下一个 —— 这里若直接关掉整个页面，
-     * 他得重新搜一次。退无可退才真正退出（这一点与 [CalibrateActivity] 的处理一致）。
-     */
-    private fun backInWeb() {
-        if (binding.webView.canGoBack()) binding.webView.goBack() else finish()
-    }
-
     override fun onBackPressed() {
         if (browse && binding.webView.canGoBack()) binding.webView.goBack()
         else super.onBackPressed()
     }
 
-    @SuppressLint("SetJavaScriptEnabled")
-    private fun setupWebView() {
-        binding.webView.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            databaseEnabled = true
-            loadsImagesAutomatically = true
-            mediaPlaybackRequiresUserGesture = false
-            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-            useWideViewPort = true
-            loadWithOverviewMode = true
-            cacheMode = WebSettings.LOAD_DEFAULT
-            userAgentString = Http.UA
-        }
-        binding.webView.setBackgroundColor(0xFF0E1013.toInt())
-        binding.webView.webChromeClient = WebChromeClient()
-        binding.webView.webViewClient = object : WebViewClient() {
-            override fun shouldInterceptRequest(
-                view: WebView?,
-                request: WebResourceRequest?
-            ): WebResourceResponse? {
-                val u = request?.url?.toString()
-                // ★ 去广告（v1.0.52）：命中就**不发出去**（回一个空响应）。
-                //   效果不是"少显示一张图"，而是**广告播放器根本没被创建** ——
-                //   于是它那条 m3u8 请求压根不会出现，候选清单从源头就干净了
-                //   （[SniffRank] 只能事后给广告减分，拦在门口省事得多）。
-                //   ⚠️ 媒体地址一律不拦（判据在 [AdBlock.blockedResource] 里）：
-                //   漏拦一个广告只是少省一次请求，误拦一个分片就是播放挂掉。
-                if (adBlockOn) WebAdBlock.intercept(u)?.let { return it }
-                u?.let { offer(it) }
-                return null
-            }
-
-            override fun shouldOverrideUrlLoading(
-                view: WebView?,
-                request: WebResourceRequest?
-            ): Boolean = guardNav(request?.url?.toString().orEmpty(), request)
-
-            /**
-             * API 21~23 走的是这个老签名（带手势信息的新签名 24 才有）。
-             * 那边拿不到"有没有用户手势" ⇒ 只拦"目标本身就是广告 / 跳 App"，
-             * 不拦推断出来的弹窗 —— 老设备上少拦一次弹窗，比多拦一次正常跳转划算。
-             */
-            @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
-            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean =
-                guardNav(url.orEmpty(), null)
-
-            override fun onLoadResource(view: WebView?, url: String?) {
-                // 被拦下的资源在 onLoadResource 里**仍会被通知一次** ⇒ 这里要再挡一道，
-                // 否则"广告不进候选清单"只做了一半：另一条路又把它捡回来了
-                if (adBlockOn && url != null && AdBlock.blockedResource(url)) return
-                url?.let { offer(it) }
-            }
-
-            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                pageError = ""
-                navBlockNotified = false
-                injectHook()
-                injectAdBlockCss()
-            }
-
-            override fun onReceivedError(
-                view: WebView?,
-                request: WebResourceRequest?,
-                error: WebResourceError?
-            ) {
-                if (request?.isForMainFrame == true) {
-                    pageError = "${error?.errorCode}: ${error?.description}"
-                    updateStatus()
-                }
-            }
-
-            override fun onReceivedHttpError(
-                view: WebView?,
-                request: WebResourceRequest?,
-                errorResponse: WebResourceResponse?
-            ) {
-                if (request?.isForMainFrame == true) {
-                    pageError = "HTTP ${errorResponse?.statusCode}"
-                    updateStatus()
-                }
-            }
-
-            override fun onPageFinished(view: WebView?, url: String?) {
-                injectHook()
-                binding.webView.alpha = if (webVisible) 1f else 0f
-                refreshUrlLine()
-                // 会话记忆：把'这个站该带什么 Referer'留下，播放/解析复用（换集、从历史进来都受益）
-                SniffSession.remember(pageUrl, pageUrl, Http.UA)
-            }
-        }
-    }
-
-    private fun loadPage() {
-        val extra = HashMap<String, String>()
-        pageHeaders.forEach { (k, v) ->
-            if (k.equals("Referer", true) || k.equals("User-Agent", true)) extra[k] = v
-        }
-        binding.webView.loadUrl(pageUrl, extra)
-    }
-
-    private fun restart() {
-        candidates.clear()
-        tsHits.clear()
-        candidateAdapter.submit(emptyList())
-        SniffQueue.clear()
-        autoPlayed = false
-        firstSeenAt = 0L
-        ticks = 0
-        probeRounds = 0
-        probing = false
-        textProbed = false
-        loginWall = false
-        loginWords = ""
-        pageError = ""
-        loggedOneShot = false
-        navBlockNotified = false
-        WebAdBlock.reset()
-        binding.tvStatus.text = getString(
-            if (browse) R.string.sniffer_browse else R.string.sniffer_running
-        )
-        binding.rvCandidates.visibility = View.GONE
-        binding.pb.visibility = View.VISIBLE
-        binding.webView.reload()
-        startPolling()
-    }
-
-    private fun startPolling() {
-        if (polling) return
-        polling = true
-        handler.removeCallbacks(pollTask)
-        handler.postDelayed(pollTask, 800)
-    }
-
-    private fun injectHook() {
-        runCatching { binding.webView.evaluateJavascript(HOOK_JS, null) }
-    }
-
-    /**
-     * 隐藏广告容器的样式要**反复补**：站点自己的脚本会在页面加载完之后再插浮层
-     * （那些脚本不在我们的黑名单里，拦不掉），只在 onPageStarted 注入一次会漏掉它们。
-     * 注入是幂等的（脚本里 `window.__vsAdCss` 挡了一道），所以挂在轮询上很便宜。
-     */
-    private fun injectAdBlockCss() {
-        if (!adBlockOn) return
-        WebAdBlock.injectCss(binding.webView)
-    }
-
-    private fun collectJs() {
-        runCatching {
-            binding.webView.evaluateJavascript(COLLECT_JS) { value ->
-                for (item in parseJs(value)) {
-                    val p = item.lastIndexOf('|')
-                    if (p <= 0) offer(item) else offer(item.substring(0, p))
-                }
-            }
-        }
-        // ② 嗅探增强：资源时间线 + 内联脚本里的地址（很多站把 m3u8 写在 <script> 的配置对象里，
-        // 既不 fetch 也不进 video 标签，以前抓不到）
-        if (ticks % 3 == 0) {
-            runCatching {
-                binding.webView.evaluateJavascript(PERF_JS) { value ->
-                    for (item in parseJs(value)) offer(item)
-                }
-            }
-            // 隐藏样式跟着这一趟一起补：站点自己插的浮层是在加载完之后才出现的（见函数注释）
-            injectAdBlockCss()
-        }
-    }
-
-    private fun parseJs(value: String?): List<String> {
-        if (value.isNullOrBlank() || value == "null" || value == "\"\"") return emptyList()
-        return runCatching {
-            when (val o = JSONTokener(value).nextValue()) {
-                is JSONArray -> (0 until o.length()).map { o.optString(it) }
-                is String -> {
-                    if (o.isBlank()) emptyList()
-                    else (JSONTokener(o).nextValue() as? JSONArray)?.let { a ->
-                        (0 until a.length()).map { a.optString(it) }
-                    } ?: emptyList()
-                }
-                else -> emptyList()
-            }
-        }.getOrDefault(emptyList())
-    }
-
-    /** 收到一个网络请求地址，判断是不是媒体 */
-    private fun offer(raw: String) {
-        if (raw.isBlank() || raw.startsWith("blob:") || raw.startsWith("data:")) return
-        if (!raw.startsWith("http")) return
-        val type = SniffRank.classify(raw) ?: return
-        runOnUiThread {
-            if (type == "TS") {
-                // 分片本身不是播放入口（真点了也只会播 2 秒），但它证明"这个目录确实在被播放"，
-                // 而这个证据正好可以用来给同目录下的 m3u8 加分 —— 比凭关键词猜可靠得多。
-                val d = SniffRank.dirOf(raw)
-                if (d.isNotBlank()) tsHits[d] = (tsHits[d] ?: 0) + 1
-            } else {
-                val c = candidates[raw]
-                if (c == null) {
-                    candidates[raw] = SniffCandidate(
-                        raw, type, 1, suspect = SniffRank.isSuspect(raw)
-                    )
-                    if (firstSeenAt == 0L) firstSeenAt = System.currentTimeMillis()
-                } else {
-                    c.hits++
-                }
-                updateStatus()
-            }
-        }
-    }
-
-    // ------------------------------------------------------------------ 排序 / 探测 / 自动播放
-
-    private fun ranked(): List<SniffCandidate> =
-        SniffRank.rank(candidates.values, videoId, tsHits)
-
-    private fun maybeProbeAndAutoPlay() {
-        // 浏览模式：一个请求都不替用户发，也绝不自动跳播放器。
-        // 这不是"少做一点"—— 用嗅探页当浏览器时，用户点的每一个链接都是他自己的意图，
-        // 我们替他挑一个源并跳走，等于把他的浏览打断在自己不知道的地方。
-        if (browse) return
-        if (autoPlayed) return
-        if (candidates.isEmpty()) {
-            maybeDetectLoginWall()
-            maybeFollowJx()
-            return
-        }
-        if (firstSeenAt == 0L) return
-        if (System.currentTimeMillis() - firstSeenAt < SETTLE_MS) return
-        if (probing || probeRounds >= MAX_PROBE_ROUNDS) return
-        probing = true
-        probeRounds++
-        lifecycleScope.launch {
-            runCatching { probeTopCandidates() }
-            probing = false
-            updateStatus()
-            tryAutoPlay()
-        }
-    }
-
-    /**
-     * 真的把候选的 playlist 拉下来看它是什么 —— 这是整轮排序里唯一**不靠猜**的一步。
-     * 正片几百上千个分片（几十分钟），广告十几个（几十秒），`SniffRank.verdict()` 就是据此刻的。
-     */
-    private suspend fun probeTopCandidates() {
-        val referer = pageHeaders.entries
-            .firstOrNull { it.key.equals("Referer", true) }?.value ?: pageUrl
-        var n = 0
-        for (c in ranked()) {
-            if (n >= MAX_PROBE) break
-            if (c.type != "HLS" && c.type != "DASH") continue
-            if (c.suspect) continue                  // 已知广告嫌疑，不值得再花一个请求
-            n++
-            val text = Http.getPlaylistOnce(c.url, referer) ?: continue
-            c.content = SniffRank.verdict(text)
-            c.note = SniffRank.describe(text)
-        }
-    }
-
-    private fun tryAutoPlay() {
-        if (autoPlayed) return
-        val pick = SniffRank.autoPick(ranked(), probed = probeRounds > 0) ?: return
-        autoPlayed = true
-        startPlayer(pick)
-    }
-
-    private fun updateStatus() {
+    internal fun updateStatus() {
         val n = candidates.size
         // 收起时那一行也要跟着更新：它是收起来之后**唯一**还能看见的信息，
         // 停在旧数字上就等于这块浮窗不收也不对、收起来也不对
@@ -744,89 +379,22 @@ class SniffActivity : AppCompatActivity() {
     // ------------------------------------------------------------------ 浏览模式：识别并添加 / 手动校准
 
     /** 当前真实所在页。`webView.url` 是唯一跟得上站内跳转（pushState / AJAX）的来源 */
-    private fun currentWebUrl(): String =
+    internal fun currentWebUrl(): String =
         binding.webView.url.orEmpty().trim().ifBlank { pageUrl }
 
-    private fun refreshUrlLine() {
+    internal fun refreshUrlLine() {
         val u = currentWebUrl()
         binding.tvCurUrl.text = if (u.isBlank()) getString(R.string.sniffer_url_loading)
         else getString(R.string.sniffer_url_line, u)
     }
 
-    /**
-     * 一键「识别并添加」：把当前这一页当成一个视频站，走一遍完整识别并入库。
-     *
-     * 判据与出口全部在 [WebSiteKit] —— 与「手动校准」共用同一套匹配逻辑，
-     * 不会出现"识别说已添加、校准又说找不到"的矛盾。
-     */
-    private fun recognizeAndAdd() {
-        if (grabbing) return
-        val url = currentWebUrl()
-        if (url.isBlank()) {
-            toast(getString(R.string.sniffer_no_url))
-            return
-        }
-        grabbing = true
-        binding.btnGrab.isEnabled = false
-        binding.tvStatus.text = getString(R.string.sniffer_grab_running)
-        lifecycleScope.launch {
-            val r = runCatching { WebSiteKit.recognizeAndAdd(this@SniffActivity, url) }.getOrNull()
-            grabbing = false
-            binding.btnGrab.isEnabled = true
-            updateStatus()
-            if (r == null) {
-                toast("识别失败：网络异常")
-                return@launch
-            }
-            if (!r.ok || r.site == null) {
-                // 失败也必须说清楚原因（"还在结果页上"和"这站不是视频站"是两件事）
-                toast(r.message)
-                return@launch
-            }
-            PlayLog.record("网页浏览识别成功：${r.site.name}  host=${Store.hostOf(r.site.baseUrl)}")
-            AlertDialog.Builder(this@SniffActivity)
-                .setTitle(R.string.sniffer_grab_ok_title)
-                .setMessage(getString(R.string.sniffer_grab_ok_msg, r.message))
-                .setPositiveButton(R.string.sniffer_grab_open) { _, _ ->
-                    startActivity(SiteActivity.intent(this@SniffActivity, r.site.key))
-                }
-                .setNegativeButton(R.string.sniffer_grab_stay, null)
-                .show()
-        }
-    }
-
-    /**
-     * 手动校准：先确保本站**在库里有配置**，再进四步校准。
-     *
-     * 不先 [WebSiteKit.ensureSite] 的话，`CalibrateActivity` 第一件事 `Store.find(key)`
-     * 就会拿到 null 并 `finish()` —— 用户从网页里点「手动校准」会被无声弹回，
-     * 表现就是"点了没反应"。这类"静默 exit"是本项目踩过最多次的一类。
-     */
-    private fun manualCalibrate() {
-        val url = currentWebUrl()
-        if (url.isBlank()) {
-            toast(getString(R.string.sniffer_no_url))
-            return
-        }
-        // ⚠️ 站点名要取**网页自己的标题**，不能取 [title]（那是我们带进来的 intent 标题：
-        //    从「全网搜索」进来时它是关键词，拿它当站名会把站叫成"庆余年"）。
-        val e = WebSiteKit.ensureSite(this, url, binding.webView.title.orEmpty())
-        if (e == null) {
-            toast(getString(R.string.sniffer_no_url))
-            return
-        }
-        // 刚建的那一条要解释一句：用户会奇怪"我没添加过啊，怎么列表里多了个站"
-        if (e.created) toast(getString(R.string.sniffer_calib_added, e.site.name))
-        startActivity(CalibrateActivity.intent(this, e.site.key))
-    }
-
-    private val LOGIN_WORDS = listOf(
+    internal val LOGIN_WORDS = listOf(
         "登录后即可观看", "登录后播放", "请先登录", "请登录", "立即登录",
         "开通会员", "购买后", "会员专享"
     )
 
     /** 长时间一个候选都没有：看看页面是不是在要求登录 —— 这类站嗅探必然扑空，得如实告诉用户 */
-    private fun maybeDetectLoginWall() {
+    internal fun maybeDetectLoginWall() {
         if (textProbed || ticks < 8) return
         textProbed = true
         runCatching {
@@ -842,7 +410,7 @@ class SniffActivity : AppCompatActivity() {
         }
     }
 
-    private fun jsonString(v: String?): String {
+    internal fun jsonString(v: String?): String {
         if (v.isNullOrBlank() || v == "null") return ""
         return runCatching { (JSONTokener(v).nextValue() as? String).orEmpty() }.getOrDefault("")
     }
@@ -851,7 +419,7 @@ class SniffActivity : AppCompatActivity() {
      * ③ 解析接口（jx）跟随：页面里只有 iframe 指向解析接口时，
      * 直接把接口地址扒出来 GET 一次，很多时候一次就拿到 m3u8，不必等页面把流跑起来。
      */
-    private fun maybeFollowJx() {
+    internal fun maybeFollowJx() {
         if (jxTried || ticks < 6) return
         jxTried = true
         runCatching {
@@ -871,71 +439,6 @@ class SniffActivity : AppCompatActivity() {
             }
         }
     }
-
-    private fun copyReport() {
-        val sb = StringBuilder()
-        sb.appendLine("===== 嗅探报告 =====")
-        sb.appendLine("版本：v${appVersion()}")
-        sb.appendLine("标题：$title")
-        sb.appendLine("播放页：$pageUrl")
-        sb.appendLine("视频 id：${videoId.ifBlank { "(未识别)" }}")
-        sb.appendLine("页面错误：${pageError.ifBlank { "无" }}")
-        sb.appendLine("登录墙：${if (loginWall) loginWords else "未检测到"}")
-        // 去广告拦了什么必须跟着报告一起走：否则"网页里少了个东西"事后分不清是站点的
-        // 问题还是我们的问题（被拦的地址本身也已经进了 NetLog 的底下那段）
-        sb.appendLine(WebAdBlock.reportLine(adBlockOn))
-        sb.appendLine("候选 ${candidates.size} 个（含排序依据）：")
-        ranked().forEachIndexed { i, c ->
-            sb.appendLine("  [${i + 1}] ${c.display()}   分数=${c.score}")
-            sb.appendLine("      ${c.url}")
-        }
-        if (candidates.isEmpty()) sb.appendLine("  （无）")
-        sb.appendLine("分片命中目录 " + tsHits.size + " 个（正片目录会被打很多次）：")
-        tsHits.entries.sortedByDescending { it.value }.take(5)
-            .forEach { sb.appendLine("  ${it.value} 次  ${it.key}") }
-        sb.appendLine()
-        sb.appendLine("---------- HTTP 记录 ----------")
-        sb.appendLine(NetLog.report())
-        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cm.setPrimaryClip(ClipData.newPlainText("嗅探报告", sb.toString()))
-        toast(getString(R.string.sniffer_copied))
-    }
-
-    private fun appVersion(): String = runCatching {
-        packageManager.getPackageInfo(packageName, 0).versionName.orEmpty()
-    }.getOrDefault("")
-
-    private fun startPlayer(c: SniffCandidate) {
-        if (isFinishing) return
-        // 无论自动还是手点，一旦交棒给播放器就置位 —— 否则用户从播放器返回时
-        // 轮询会再次"自动挑一个"把人跳走，非常突然。
-        autoPlayed = true
-        val list = ranked()
-        val at = list.indexOfFirst { it.url == c.url }.coerceAtLeast(0)
-        // 把整份候选清单交出去：播放器那边播不出来会自动换下一个，不用回来重新嗅探
-        SniffQueue.set(list, at)
-        PlayLog.record(
-            "嗅探候选 ${list.size} 个，选第 ${at + 1}：${c.display()}  " +
-                PlayLog.shortenPublic(c.url)
-        )
-
-        val h = HashMap<String, String>()
-        h.putAll(SniffSession.enrich(c.url, pageHeaders))
-        if (h.keys.none { it.equals("Referer", true) } && pageUrl.isNotBlank()) h["Referer"] = pageUrl
-        SniffSession.remember(pageUrl, h["Referer"] ?: pageUrl, h["User-Agent"] ?: Http.UA)
-
-        startActivity(
-            PlayerActivity.intent(
-                this, c.url, title.ifBlank { "播放" }, h,
-                pageUrl = pageUrl, fromSniff = true
-            )
-        )
-        // 刻意**不** finish()：候选清单留在返回栈里，播不出来时返回就能换一个源。
-        // 同时停掉轮询，别在后台继续往网页里灌脚本。
-        polling = false
-        handler.removeCallbacks(pollTask)
-    }
-
     // ------------------------------------------------------------------ 生命周期
 
     override fun onStart() {
@@ -970,7 +473,7 @@ class SniffActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    private val HOOK_JS = """
+    internal val HOOK_JS = """
         (function(){
           if (window.__vsHooked) return; window.__vsHooked = true;
           window.__vsFound = window.__vsFound || [];
@@ -1029,7 +532,7 @@ class SniffActivity : AppCompatActivity() {
         })();
     """.trimIndent()
 
-    private val COLLECT_JS =
+    internal val COLLECT_JS =
         "(function(){var a=window.__vsFound||[];window.__vsFound=[];return JSON.stringify(a);})()"
 
     /**
@@ -1038,7 +541,7 @@ class SniffActivity : AppCompatActivity() {
      *    比我们挂钩子更全（含 hook 之前就发出的请求）；
      * 2. 页面内联网脚本文本里的媒体地址（`<script>` 配置对象、内联 JSON）。
      */
-    private val PERF_JS = """
+    internal val PERF_JS = """
         (function(){
           var out = [];
           try {

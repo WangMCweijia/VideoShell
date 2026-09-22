@@ -43,8 +43,8 @@ def rd(*parts):
 
 
 def rs(*parts):
-    with io.open(os.path.join(SRC, *parts), encoding="utf-8") as f:
-        return f.read()
+    # 主文件 + 同主名的拆分子文件一起拼（见 _cp.kt）：守卫锁**代码文本**，不锁文件布局。
+    return _cp.kt(os.path.join(SRC, *parts))
 
 
 def num(text, pattern, default=None):

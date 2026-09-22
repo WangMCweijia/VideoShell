@@ -45,8 +45,52 @@ public class YgCalib {
         System.out.println("\n== " + s);
     }
 
+    /** 把拆出去的子文件里的顶层 internal 声明**还原成类成员的写法**。
+     *
+     * 拆分后子文件里是 `internal fun Owner.xxx(` / `internal val xxx = …`
+     * （扩展函数访问不了 private，被它读到的字段也要放宽），而守卫的判据写的是
+     * 拆分前的样子 `private fun xxx(`。两者是**一一对应的同一段代码**，差别只在
+     * 可见性修饰符与接收者前缀 —— 那是"搬到哪、谁能看见"，不是"代码做了什么"。
+     *
+     * 所以读取时按行做恒等改写，让聚合出来的文本与拆分前**逐行等价**，
+     * 守卫从此不必知道文件被拆过（见 PITFALLS 4.41）。
+     * 只在**子文件**上做；1:1 行替换，不复制、不删除 ⇒ 计数断言语义不变，
+     * 真被删掉的代码也不会因为改写而"看起来还在"。
+     */
+    static String unwrap(String line, String owner) {
+        if (!line.startsWith("internal ")) return line;
+        String rest = line.substring("internal ".length());
+        String p = "fun " + owner + ".";
+        if (rest.startsWith(p)) return "private fun " + rest.substring(p.length());
+        p = "suspend fun " + owner + ".";
+        if (rest.startsWith(p)) return "private suspend fun " + rest.substring(p.length());
+        if (rest.startsWith("val ")) return "private val " + rest.substring(4);
+        if (rest.startsWith("var ")) return "private var " + rest.substring(4);
+        return line;
+    }
+
     static String read(String p) throws IOException {
-        return new String(Files.readAllBytes(new File(p).toPath()), StandardCharsets.UTF_8);
+        String text = new String(Files.readAllBytes(new File(p).toPath()), StandardCharsets.UTF_8);
+        String name = new File(p).getName();
+        if (!name.endsWith(".kt")) return text;
+        File dir = new File(p).getParentFile();
+        String[] ns = dir == null ? null : dir.list();
+        if (ns == null) return text;
+        java.util.Arrays.sort(ns);
+        String pre = name.substring(0, name.length() - 3) + "_";
+        StringBuilder sb = new StringBuilder(text);
+        for (String n : ns) {
+            if (n.startsWith(pre) && n.endsWith(".kt")) {
+                try {
+                    String sub = new String(
+                            Files.readAllBytes(new File(dir, n).toPath()), StandardCharsets.UTF_8);
+                    for (String sl : sub.split("\n", -1)) {
+                        sb.append(unwrap(sl, pre.substring(0, pre.length() - 1))).append('\n');
+                    }
+                } catch (Exception ignore) { }
+            }
+        }
+        return sb.toString();
     }
 
     static String src(String root, String rel) throws IOException {

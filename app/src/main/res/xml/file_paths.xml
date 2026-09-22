@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider 的可暴露路径清单（自更新安装 APK 用）。
+
+  ⚠️ 只开一个目录、且是**应用外部私有目录**（/Android/data/<pkg>/files/update）：
+  - 不用 requestLegacyExternalStorage，也不需要任何存储权限；
+  - 卸载 App 时随应用一起被系统清掉，不会在用户存储里留包；
+  - 反过来：千万别写成 <external-path path="." /> —— 那等于把整个外部存储
+    暴露给任何拿到 URI 的应用，安装器之外的东西也能读。
+-->
+<paths>
+    <external-files-path
+        name="update"
+        path="update/" />
+</paths>

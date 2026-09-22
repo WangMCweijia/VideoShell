@@ -66,8 +66,52 @@ public class YgImage {
         return b;
     }
 
+    /** 把拆出去的子文件里的顶层 internal 声明**还原成类成员的写法**。
+     *
+     * 拆分后子文件里是 `internal fun Owner.xxx(` / `internal val xxx = …`
+     * （扩展函数访问不了 private，被它读到的字段也要放宽），而守卫的判据写的是
+     * 拆分前的样子 `private fun xxx(`。两者是**一一对应的同一段代码**，差别只在
+     * 可见性修饰符与接收者前缀 —— 那是"搬到哪、谁能看见"，不是"代码做了什么"。
+     *
+     * 所以读取时按行做恒等改写，让聚合出来的文本与拆分前**逐行等价**，
+     * 守卫从此不必知道文件被拆过（见 PITFALLS 4.41）。
+     * 只在**子文件**上做；1:1 行替换，不复制、不删除 ⇒ 计数断言语义不变，
+     * 真被删掉的代码也不会因为改写而"看起来还在"。
+     */
+    static String unwrap(String line, String owner) {
+        if (!line.startsWith("internal ")) return line;
+        String rest = line.substring("internal ".length());
+        String p = "fun " + owner + ".";
+        if (rest.startsWith(p)) return "private fun " + rest.substring(p.length());
+        p = "suspend fun " + owner + ".";
+        if (rest.startsWith(p)) return "private suspend fun " + rest.substring(p.length());
+        if (rest.startsWith("val ")) return "private val " + rest.substring(4);
+        if (rest.startsWith("var ")) return "private var " + rest.substring(4);
+        return line;
+    }
+
     static String src(String root, String rel) throws IOException {
-        return new String(read(root + File.separator + rel), java.nio.charset.StandardCharsets.UTF_8);
+        String p = root + File.separator + rel;
+        String text = new String(read(p), java.nio.charset.StandardCharsets.UTF_8);
+        File f = new File(p);
+        String name = f.getName();
+        if (!name.endsWith(".kt")) return text;
+        File dir = f.getParentFile();
+        String[] ns = dir == null ? null : dir.list();
+        if (ns == null) return text;
+        java.util.Arrays.sort(ns);
+        String pre = name.substring(0, name.length() - 3) + "_";
+        StringBuilder sb = new StringBuilder(text);
+        for (String n : ns) {
+            if (n.startsWith(pre) && n.endsWith(".kt")) {
+                String sub = new String(
+                        read(new File(dir, n).getPath()), java.nio.charset.StandardCharsets.UTF_8);
+                for (String sl : sub.split("\n", -1)) {
+                    sb.append(unwrap(sl, pre.substring(0, pre.length() - 1))).append('\n');
+                }
+            }
+        }
+        return sb.toString();
     }
 
     public static void main(String[] a) throws Exception {
@@ -176,9 +220,15 @@ public class YgImage {
                 adap.contains("已静默退回默认逻辑") && adap.contains("calibAppliedFlag = true"), "");
         ok("E8 重新校准会清掉旧的分类形状/容器（不再越校越错）",
                 cal.contains("catTpl = null") && cal.contains("navSel = null")
-                        && cal.contains("private fun restart()"), "");
+    // ⚠️ 源码判据**不带 `private ` 前缀**（v1.0.54 统一改过）。
+    //    原来写的是 `"private fun xxx("`，那是把「可见性修饰符」也钉进了判据 ——
+    //    而 god file 拆分时被搬到扩展文件里的函数一律变 `internal fun Owner.xxx(`
+    //    （扩展函数访问不了 private），于是"功能一行没改、只是搬了家"也会判红。
+    //    判据要表达的是「这个签名的声明存在 / 这个函数体在这里」，可见性不是它要说的东西。
+    //    见 docs/PITFALLS.md §4.24 与 §4.41。
+                        && cal.contains("fun restart()"), "");
         ok("E9 试播失败时「取消」不再静默丢弃整场校准",
-                cal.contains("confirmDiscardCalib()") && cal.contains("private fun confirmDiscardCalib"), "");
+                cal.contains("confirmDiscardCalib()") && cal.contains("fun confirmDiscardCalib"), "");
         ok("E10 不在响应头里塞中文（HTTP 头只允许 ASCII —— 塞了每张封面都会抛异常）",
                 !imgc.contains("X-VideoShell-Image") && imgc.contains("header(\"Content-Type\", type)"), "");
 

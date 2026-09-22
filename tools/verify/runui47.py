@@ -25,8 +25,9 @@ def ok(name, cond):
     else:    fail_n += 1; print("  [FAIL] " + name)
 
 def read(p):
-    with io.open(os.path.join(SRC, p), encoding="utf-8") as f:
-        return f.read()
+    # 主文件 + 同主名的拆分子文件一起拼（见 _cp.kt）：守卫锁**代码文本**，不锁文件布局。
+    # 否则把 god file 按职责拆开这种纯搬运会把断言判红（规则没丢，只是搬了家）。
+    return _cp.kt(os.path.join(SRC, p))
 
 def read_res(p):
     with io.open(os.path.join(RES, p), encoding="utf-8") as f:
@@ -52,21 +53,27 @@ ok("hud_locked 仍然存在（没被删掉）", i >= 0)
 
 print("== B. 解锁键不再常驻：出现 → 停留 → 自动退场 ==")
 ok("unlockStayMs 常量存在（停留时长集中一处）", "unlockStayMs" in pa)
-j = pa.find("private val hideUnlock")
+# ⚠️ 源码判据**不带 `private ` 前缀**（v1.0.54 统一改过）。
+#    原来写的是 "private fun xxx("，那是把「可见性修饰符」也钉进了判据 ——
+#    而 god file 拆分时被搬到扩展文件里的函数一律变 "internal fun Owner.xxx("
+#    （扩展函数访问不了 private），于是"功能一行没改、只是搬了家"也会判红。
+#    判据要表达的是「这个签名的声明存在 / 这个函数体在这里」，可见性不是它要说的东西。
+#    见 docs/PITFALLS.md §4.24 与 §4.41。
+j = pa.find("val hideUnlock")
 body = pa[j:pa.find("\n", j)] if j >= 0 else ""
 ok("★ hideUnlock 只在 locked 时才收（解锁后不能被它误收）",
    "if (locked)" in body and "ivUnlock.visibility = View.GONE" in body)
-j = pa.find("private fun showUnlockBriefly()")
+j = pa.find("fun showUnlockBriefly()")
 b1 = pa[j:pa.find("\n    }\n", j)] if j >= 0 else ""
 ok("showUnlockBriefly() 存在", j >= 0)
 ok("★ 它先取消旧任务再排队（否则连点会把退场时间冲乱）",
    "handler.removeCallbacks(hideUnlock)" in b1 and "handler.postDelayed(hideUnlock" in b1)
-j = pa.find("private fun toggleUnlockBriefly()")
+j = pa.find("fun toggleUnlockBriefly()")
 b2 = pa[j:pa.find("\n    }\n", j)] if j >= 0 else ""
 ok("toggleUnlockBriefly() 存在且在场则收起 / 不在场则唤出",
    j >= 0 and "showUnlockBriefly()" in b2 and "View.GONE" in b2)
 
-j = pa.find("private fun setLocked(")
+j = pa.find("fun setLocked(")
 b3 = pa[j:pa.find("\n    }\n", j)] if j >= 0 else ""
 ok("★ setLocked(true) 走 showUnlockBriefly()，不再直接 VISIBLE 常驻",
    "showUnlockBriefly()" in b3)
