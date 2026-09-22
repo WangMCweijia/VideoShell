@@ -26,7 +26,9 @@
 **不在回归列表里的"工具"**（要参数、只编译不断言，放进 SUITES 只会得到一条假绿）：
 `runsurvey.py`（播放页媒体候选勘察，用法 `runsurvey.py <pageUrl>`）；
 `runcaliblive.py`（校准矩阵端到端重放，用法 `runcaliblive.py [-v]`，站点用 `-Dvs.base=` 换）；
-`runadbprobe.py`（去广告覆盖勘察，用法 `runadbprobe.py <pageUrl>`）。
+`runadbprobe.py`（去广告覆盖勘察，用法 `runadbprobe.py <pageUrl>`）；
+`runupdlive.py`（应用内自更新端到端对照实验：裸链直打 vs 双通道 `check()`，
+**自带对照组** —— 只有"旧路不通、新路通"才能证明改的是必要的）。
 
 ⚠️ 登记这一节不是形式主义：这三个都是**排查工具**而不是断言套件，它们不进 SUITES 是对的
 （零断言会被标 WEAK），但**不登记就会被误以为"跑过了"** —— 本项目已经栽过一次同型的
@@ -39,6 +41,10 @@
 
 **判据纪律：零断言不算过。** rc=0 但一条 PASS/FAIL 都没有的套件标 `WEAK`
 并以退出码 1 结束 —— 否则「夹具没入仓 ⇒ 全部跳过」会伪装成全绿。
+
+**新增套件要写在这里。** `runupd`（v1.0.55）锁的是应用内自更新的**可达性**：
+清单有两通道，而 `github.com` 会被单独阻断 ⇒ 只剩一条通道就是单点故障，症状是
+"检查更新失败"（不崩溃、不报错，只是用户永远拿不到新版）。见 PITFALLS §4.48。
 """
 import os, re, subprocess, sys
 
@@ -68,6 +74,8 @@ SUITES = [
     'runui51',
     'runui52',
     'runseed',
+    # v1.0.55：⑤⑥（配方导入导出 / 应用自更新）落仓时是**零断言**，这里补上。
+    'runupd',
 ]
 # 需要真实网络的；**默认不跑**（见文件头）。
 # runbs3 是 v1.0.53 从 SUITES 挪过来的：它跑的是 `https://www.bolyship.com`，

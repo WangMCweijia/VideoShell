@@ -8,6 +8,7 @@ import android.provider.Settings
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -65,27 +66,26 @@ object UpdateDownloader {
             }
             val target = File(dir, "videoshell-${info.versionName}.apk")
 
-            val req = okhttp3.Request.Builder().url(info.apkUrl).build()
-            dlClient.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
-                val body = resp.body ?: throw IOException("响应体为空")
-                val total = body.contentLength().takeIf { it > 0 } ?: info.size
-                body.byteStream().use { input ->
-                    FileOutputStream(target).use { out ->
-                        val buf = ByteArray(64 * 1024)
-                        var done = 0L
-                        while (true) {
-                            val n = input.read(buf)
-                            if (n <= 0) break
-                            out.write(buf, 0, n)
-                            done += n
-                            onProgress(
-                                if (total > 0) ((done * 100) / total).toInt() else -1, done
-                            )
-                        }
-                    }
+            // 候选地址：**api.github.com 的资产地址在前**。
+            // 这不是"更官方"，而是实测：`github.com` 在部分地区/时段连不上，而
+            // `api.github.com` 与它重定向到的 `release-assets.githubusercontent.com` 都通
+            // （对照数据见 [UpdateChecker] 的类注释）。清单里那条裸链留作兜底。
+            val cands = listOfNotNull(info.apkApiUrl, info.apkUrl).distinct()
+            var lastErr: Exception? = null
+            var ok = false
+            for (u in cands) {
+                try {
+                    transfer(u, target, info, onProgress)
+                    ok = true
+                    break
+                } catch (e: Exception) {
+                    // 换下一条前**必须**清掉半截文件：留着它，第二条又失败时
+                    // 会拿第一条的残骸去过摘要，报出来的是"摘要校验失败"而不是真实原因。
+                    target.delete()
+                    lastErr = e
                 }
             }
+            if (!ok) throw lastErr ?: IOException("没有可用的下载地址")
 
             if (target.length() <= 0L) throw IOException("下载到 0 字节")
 
@@ -101,6 +101,42 @@ object UpdateDownloader {
                 }
             }
             target
+        }
+    }
+
+    /**
+     * 从一个地址把包拖到 `target`。
+     *
+     * ⚠️ `Accept: application/octet-stream` **不能省**：api 的资产地址不带它返回的是
+     * 那段资产的 JSON 元数据（几百字节），而不是包本身 —— 于是 sha256 校验会失败，
+     * 报出来的原因却是"摘要对不上"，排查方向直接跑偏。对裸链它无害（照样 302 到 CDN）。
+     */
+    private fun transfer(
+        url: String,
+        target: File,
+        info: UpdateChecker.UpdateInfo,
+        onProgress: (Int, Long) -> Unit
+    ) {
+        val req = Request.Builder().url(url)
+            .header("Accept", "application/octet-stream")
+            .build()
+        dlClient.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code} @ $url")
+            val body = resp.body ?: throw IOException("响应体为空")
+            val total = body.contentLength().takeIf { it > 0 } ?: info.size
+            body.byteStream().use { input ->
+                FileOutputStream(target).use { out ->
+                    val buf = ByteArray(64 * 1024)
+                    var done = 0L
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n <= 0) break
+                        out.write(buf, 0, n)
+                        done += n
+                        onProgress(if (total > 0) ((done * 100) / total).toInt() else -1, done)
+                    }
+                }
+            }
         }
     }
 
