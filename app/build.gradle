@@ -32,8 +32,8 @@ android {
         applicationId "com.videoshell"
         minSdk 21
         targetSdk 34
-        versionCode 56
-        versionName "1.0.56"
+        versionCode 57
+        versionName "1.0.57"
         vectorDrawables.useSupportLibrary = true
         resConfigs "zh", "en"
     }
@@ -61,8 +61,8 @@ android {
             }
         }
         release {
-            minifyEnabled false
-            shrinkResources false
+            minifyEnabled true
+            shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             if (hasSigning) {
                 signingConfig signingConfigs.release
@@ -86,7 +86,8 @@ android {
     packaging {
         resources {
             excludes += ['/META-INF/{AL2.0,LGPL2.1}', 'META-INF/DEPENDENCIES',
-                         'META-INF/LICENSE*', 'META-INF/NOTICE*', 'META-INF/*.kotlin_module']
+                         'META-INF/LICENSE*', 'META-INF/NOTICE*', 'META-INF/*.kotlin_module',
+                         'DebugProbesKt.bin']
         }
     }
 

@@ -299,8 +299,10 @@ internal fun SniffActivity.injectHook() {
  * 隐藏广告容器的样式要**反复补**：站点自己的脚本会在页面加载完之后再插浮层
  * （那些脚本不在我们的黑名单里，拦不掉），只在 onPageStarted 注入一次会漏掉它们。
  * 注入是幂等的（脚本里 `window.__vsAdCss` 挡了一道），所以挂在轮询上很便宜。
+ * v1.0.57 起同时注入 **DOM 清扫**（宽幅外链图幅 / 大浮层，见 AdBlock.sweepJs）。
  */
 internal fun SniffActivity.injectAdBlockCss() {
     if (!adBlockOn) return
     WebAdBlock.injectCss(binding.webView)
+    WebAdBlock.injectSweep(binding.webView)
 }

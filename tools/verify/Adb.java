@@ -151,6 +151,27 @@ public class Adb {
         ok("★ JS 里的样式字符串是合法双引号字面量（没漏转义）",
                 js.contains("s.textContent=\"ins.adsbygoogle"));
 
+        banner("G. DOM 清扫脚本（v1.0.57）：宽幅外链图幅 / 大浮层，★ 防误伤约束必须都在");
+        String sw = A.sweepJs();
+        ok("幂等标记 data-vs-ad（杀过的节点不许反复处理）", sw.contains("data-vs-ad"));
+        ok("图幅判据带**外链闸**（正片海报是同站链接，外链是第一道排除）",
+                sw.contains("CROSS(href)") && sw.contains("ROOT(h)!==ROOT(location.hostname)"));
+        ok("二级后缀表要当一层（com.cn 站内 ≠ 跨站）", sw.contains("'com.cn'"));
+        ok("图幅判据带**形状闸**：宽≥200 且宽高比≥2.5（海报是竖版，天然不过线）",
+                sw.contains("r.width<200") && sw.contains("r.width/r.height<2.5"));
+        ok("浮层判据：fixed/sticky + z≥90 + 盖半屏（返回顶部按钮是小面积，天然不过线）",
+                sw.contains("'fixed'") && sw.contains("z>=90") && sw.contains("innerWidth*0.5"));
+        ok("★ 含 <video> 的元素一律豁免（播控层不能被当浮层杀掉）",
+                sw.contains("querySelector('video')"));
+        ok("锚点 / javascript: 链接不参与（没有目标可判就别动）",
+                sw.contains("javascript:") && sw.contains("charAt(0)==='#'"));
+        ok("MutationObserver 兜住「广告比正文晚到」的路径", sw.contains("MutationObserver"));
+        ok("返回清扫计数（留痕用）", sw.contains("__vsN"));
+        ok("★ 不许按 class 广谱命中（和 hideCss 同一条红线）",
+                !sw.contains("querySelectorAll('[class"));
+        ok("整体包在 try/catch 里（清扫失败不能把页面带崩）",
+                sw.contains("try{") && sw.contains("catch(e)"));
+
         System.out.println();
         System.out.println("================ pass=" + pass + " fail=" + fail + " ================");
         if (fail > 0) System.exit(1);

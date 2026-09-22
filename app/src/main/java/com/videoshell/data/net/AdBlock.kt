@@ -260,6 +260,78 @@ object AdBlock {
             "window.__vsAdCss=1;return 'ok';" +
             "}catch(e){return 'err'}})()"
 
+    // ------------------------------------------------------------------ DOM 清扫（v1.0.57）
+
+    /**
+     * 隐藏**运行时注入**的广告节点（v1.0.57）。
+     *
+     * ## 为什么 CSS 拦不住它
+     *
+     * 2026-09-22 用户实测截图（金牌影视校准页）：页头/页底出现**宽幅图片广告**
+     * （"免费海量美女视频" / "深夜看片必备"）。事后用 PC 端 40 次抓样 + WebView 指纹
+     * UA 对照都**复现不出**这版 HTML —— 广告是运行时 JS 插进来的，且服务端按
+     * 请求特征（IP / 时段 / 频次）决定给不给。[hideCss] 只能藏"选择器写得出"的
+     * 容器，对"运行时才出现的任意节点"无能为力。
+     *
+     * ## 两条判据（刻意只收"正文不可能是这个形状"的）
+     *
+     * 1. **宽幅外链图幅**：`<a href=外站>` 里包着 `<img>`（或背景图），且容器
+     *    宽 ≥200px、宽高比 ≥2.5。正片海报是**同站链接 + 竖版**（宽高比 ≈0.7），
+     *    天然不会命中 —— 这就是"外链 + 横幅"两个条件各自都在排除一半误伤的原因。
+     * 2. **大面积悬浮层**：`position:fixed/sticky` + `z-index≥90` + 盖住半屏。
+     *    返回顶部按钮也是 fixed 但很小，播控层在 video 里且已豁免。
+     *
+     * ## 防误伤的硬约束
+     *
+     * - 含 `<video>` 的元素一律不动（那是播放器本体）；
+     * - 杀掉的节点都打 `data-vs-ad` 标记：幂等 + 可回查（"这节点为什么没了"）；
+     * - MutationObserver + 前几次定时清扫兜住"广告比正文晚到"的路径。
+     *
+     * 返回值是**本次清扫新杀掉的节点数**（供留痕），整体幂等可反复注入。
+     */
+    fun sweepJs(): String {
+        val TWO_LEVEL = "com.cn,net.cn,org.cn,gov.cn,edu.cn,ac.cn,com.hk,com.tw,com.mo,co.jp,co.kr,co.uk,com.au,com.sg"
+        return "(function(){try{" +
+            "window.__vsN=window.__vsN||0;" +
+            "function ROOT(h){var p=h.split('.');var L=p.slice(-2).join('.');" +
+            "if(${jsStringList(TWO_LEVEL)}.indexOf(L)>=0&&p.length>=3)L=p.slice(-3).join('.');return L;}" +
+            "function CROSS(u){try{var h=new URL(u,location.href).hostname;if(!h)return false;" +
+            "return ROOT(h)!==ROOT(location.hostname);}catch(e){return false;}}" +
+            "function KILL(el,why){if(el.getAttribute('data-vs-ad'))return;" +
+            "el.setAttribute('data-vs-ad',why);el.style.setProperty('display','none','important');window.__vsN++;}" +
+            "function SWEEP(){try{" +
+            "var as=document.querySelectorAll('a[href]');" +
+            "for(var i=0;i<as.length;i++){var a=as[i];if(a.getAttribute('data-vs-ad'))continue;" +
+            "var href=a.getAttribute('href')||'';" +
+            "if(href.charAt(0)==='#'||href.indexOf('javascript:')===0)continue;" +
+            "if(!CROSS(href))continue;" +
+            "var img=a.querySelector('img');var r=a.getBoundingClientRect();" +
+            "var hasBg=false;try{hasBg=getComputedStyle(a).backgroundImage.indexOf('url')>=0;}catch(e){}" +
+            "if(!img&&!hasBg)continue;" +
+            "if(r.width<200||r.height<40)continue;" +
+            "if(r.width/r.height<2.5)continue;" +
+            "KILL(a,'banner');}" +
+            "var els=document.querySelectorAll('body *');" +
+            "for(var j=0;j<els.length;j++){var el=els[j];if(el.getAttribute('data-vs-ad'))continue;" +
+            "var s;try{s=getComputedStyle(el);}catch(e){continue;}" +
+            "if(s.position!=='fixed'&&s.position!=='sticky')continue;" +
+            "var z=parseInt(s.zIndex,10);if(!(z>=90))continue;" +
+            "var r2=el.getBoundingClientRect();" +
+            "if(r2.width<innerWidth*0.5&&r2.height<innerHeight*0.25)continue;" +
+            "if(el.querySelector&&el.querySelector('video'))continue;" +
+            "KILL(el,'overlay');}" +
+            "}catch(e){}}" +
+            "if(!window.__vsSweep){window.__vsSweep=1;" +
+            "if(window.MutationObserver){new MutationObserver(function(){SWEEP();})" +
+            ".observe(document.documentElement,{childList:true,subtree:true});}" +
+            "var runs=0;var t=setInterval(function(){SWEEP();if(++runs>30)clearInterval(t);},700);}" +
+            "var before=window.__vsN;SWEEP();return window.__vsN-before;" +
+            "}catch(e){return 'err'}})()"
+    }
+
+    private fun jsStringList(csv: String): String =
+        csv.split(',').joinToString(",") { "'${it.trim()}'" }
+
     /** 把任意文本塞进 JS 双引号字符串（转义 `\` / `"` / 换行；中文原样保留） */
     private fun jsString(s: String): String {
         val sb = StringBuilder(s.length + 16)

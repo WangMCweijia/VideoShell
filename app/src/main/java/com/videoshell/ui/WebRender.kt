@@ -99,6 +99,9 @@ object WebRender {
                         if (Store.adBlock(act)) WebAdBlock.intercept(r?.url?.toString()) else null
 
                     override fun onPageFinished(v: WebView?, u: String?) {
+                        // DOM 清扫先跑一遍（v1.0.57）：宽幅外链图幅这类运行时广告节点
+                        // 别等它们进 DOM 再被交回解析器 —— 杀在取 HTML 之前。
+                        v?.let { w -> if (Store.adBlock(act)) WebAdBlock.injectSweep(w) }
                         handler.postDelayed({
                             runCatching {
                                 v?.evaluateJavascript(DOM_JS) { value ->

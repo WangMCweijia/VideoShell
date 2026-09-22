@@ -167,10 +167,13 @@ internal fun CalibrateActivity.guardNav(to: String, request: WebResourceRequest?
     return true
 }
 
-/** 反复注入隐藏样式：站点自己插的浮层在加载完之后才出现（幂等，见 AdBlock.hideJs） */
+/** 反复注入隐藏样式：站点自己插的浮层在加载完之后才出现（幂等，见 AdBlock.hideJs）。
+ *  v1.0.57 起带上 **DOM 清扫**（AdBlock.sweepJs）：宽幅外链图幅 / 大浮层是运行时
+ *  JS 插的，CSS 选择器够不着，只能扫。同样幂等，跟着轮询反复补。 */
 internal fun CalibrateActivity.injectAdBlockCss() {
     if (!adBlockOn) return
     WebAdBlock.injectCss(binding.webView)
+    WebAdBlock.injectSweep(binding.webView)
 }
 
 internal fun CalibrateActivity.injectPicker() {

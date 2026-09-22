@@ -31,6 +31,10 @@ object WebAdBlock {
     @Volatile
     private var navs = 0
 
+    /** DOM 清扫累计隐藏的节点数（v1.0.57） */
+    @Volatile
+    private var domKills = 0
+
     fun on(ctx: Context): Boolean = Store.adBlock(ctx)
 
     fun setOn(ctx: Context, on: Boolean) = Store.setAdBlock(ctx, on)
@@ -41,10 +45,14 @@ object WebAdBlock {
     /** 这一页拦下的顶层跳转数 */
     fun blockedNavs(): Int = navs
 
+    /** 这一页 DOM 清扫隐藏的广告节点数 */
+    fun domKilled(): Int = domKills
+
     /** 换页 / 重新嗅探时清零（报告里的数字要是"这一页"的） */
     fun reset() {
         resources = 0
         navs = 0
+        domKills = 0
     }
 
     /**
@@ -82,9 +90,27 @@ object WebAdBlock {
         runCatching { web.evaluateJavascript(AdBlock.hideJs(), null) }
     }
 
+    /**
+     * 注入 **DOM 清扫**（v1.0.57，[AdBlock.sweepJs]）：CSS 与资源拦截之外的第三层，
+     * 专收"运行时才插进来的宽幅图幅 / 大浮层"。回调里把新杀节点数留进
+     * [NetLog] —— 和资源拦截一样，"看不见的过滤"必须留痕。
+     */
+    fun injectSweep(web: WebView) {
+        runCatching {
+            web.evaluateJavascript(AdBlock.sweepJs()) { v ->
+                val n = v?.trim()?.removeSurrounding("\"")?.toIntOrNull() ?: 0
+                if (n > 0) {
+                    domKills += n
+                    NetLog.record("(页面内 DOM)", 0, 0, "已隐藏 $n 个广告节点（清扫）", TAG)
+                }
+            }
+        }
+    }
+
     /** 报告里那一行 */
     fun reportLine(on: Boolean): String =
-        "去广告：${if (on) "开" else "关"}：已拦 $resources 条资源 / $navs 次跳转"
+        "去广告：${if (on) "开" else "关"}：已拦 $resources 条资源 / $navs 次跳转" +
+                (if (domKills > 0) " / 隐藏 $domKills 个广告节点" else "")
 
     private val EMPTY: WebResourceResponse by lazy {
         WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
