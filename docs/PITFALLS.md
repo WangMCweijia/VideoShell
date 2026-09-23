@@ -2336,7 +2336,7 @@ OkHttp 的 `Dispatcher` 默认**每 host 最多 5 个在飞**。预取 4 条 + �
 
 ---
 
-## §4.62 发版链路上两个"看起来不可能是这里"的坑（v1.0.65，E42/E43）
+## §4.62 发版链路上三个"看起来不可能是这里"的坑（v1.0.65，E42/E43；v1.0.67 补第四节）
 
 v1.0.65 是**第一次把中文文件名提交进仓库**，也是**第一次按双编码验包**。
 两个坑都落在"过程全绿、结果不对"这一层 —— 同属 §4.34 那个母题。
@@ -2429,6 +2429,33 @@ MANIFEST UTF-16 里 videoshell: 18      ← UTF-16LE
 - 长链路（上传 → 组装 tree → 提交 → 打 ref）里，**每一步绿灯 ≠ 对象正确**；
   判据要落到**最终对象**上（commit sha 逐字节相同 / 树逐条目相同）。
 - 验包工具本身也要**带对照、双编码**才算数（E43）。
+
+### 四、v1.0.67 补：直连彻底不通时，用**本仓自带**的 `tools/ci/push_rest.py`
+
+v1.0.67 发版时三种走法**同时**失效：`git` 自配的 `127.0.0.1:7890`（进程不在）→
+`Failed to connect … over proxy`；清掉代理直连 → `Failed to connect to github.com:443
+after 21595 ms`；改用会话里的环境代理 `127.0.0.1:63488` → **`CONNECT tunnel failed,
+response 502`**。同一时刻连 `ls-remote`（读）也一样死 —— 唯一活着的是 `gh`（`api.github.com`）。
+
+脚本因此**进了本仓** `tools/ci/push_rest.py`（发版链路的固定一环，不再是一次性临时脚本）：
+
+| 要害 | 说明 |
+|---|---|
+| **服务端 commit sha 与本地逐位相同** | 把本地提交的 `tree`/`parents`/`author`/`committer`/`message` **原样**发给 `POST /git/commits`（message **含 Git 给的末尾换行，不要 `strip`**；日期用**带偏移**的 ISO 8601，别写 `Z`）⇒ 不需要事后对任何引用做"重建/对齐" |
+| **三个判据缺一不可** | `POST /git/trees` 的 sha == 本地 `HEAD^{tree}`；`POST /git/commits` 的 sha == 本地 `HEAD`；`PATCH` 后**重读**远端 ref。**"PATCH 成功"本身不是判据** |
+| **追踪引用要手写** | REST 推送**不会**更新 `.git/refs/remotes/origin/main`，而 `git update-ref` 在本机**返回 0 却建不出引用** ⇒ 直接写松散引用文件；改完 `git status -sb` 才是干净的 `## main...origin/main` |
+| **内容从 blob 取，不从工作区取** | `git cat-file blob <sha>` 拿的是**提交里的原始字节**；从文件系统读会把 CRLF 写进库（`autocrlf=true` 时）⇒ 用 `git diff` 逐行比会显示"整份文件都改了" |
+
+tag 用 **lightweight**（`POST /git/refs` + 本地 `git tag vX.Y.Z <commit>` **不加 `-a`**）：
+annotated tag 的 `tagger` 字段 GitHub 不接受、时间还用 UTC ⇒ 两端必然不一致。
+
+结果：v1.0.67 的两个提交（`a607526` 功能 + `2e0898f` 文档）sha 与本地**逐位相同**，
+tag 落在 `2e0898f`（发版当时 `main == tag`；此后记文档的提交会再往前走一格，属正常）。
+另附一条环境事实：**Release asset 的 CDN 是通的**（`releases/download/...` 302 到
+`release-assets.githubusercontent.com` 返回 200），所以**验包不必绕道 REST** —— 但它**慢**
+（3.2MB 实测一次 >280s 超时、一次约 130s 成功）⇒ 后台跑 + 大超时，下完**先比字节数**，
+否则会拿一个截断的包得出"包坏了"的假结论。要对比签名指纹时，`D:\TRAE\releases\` 里归档的
+上一版**就是 CI 那份**（体积/时间戳与 CI 记录对得上），不必重新下载。
 
 ---
 
