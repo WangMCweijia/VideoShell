@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+  更新进度弹层（v1.0.60 重做）。
+
+  旧版 = AlertDialog + 裸 ProgressBar，两个问题：
+  ① 百分比拼在 message 里、只在构造时写一次 —— 回调只喂 ProgressBar，
+     文字永远停在「正在下载 0%」（用户报的"进度条在走、百分比永远 0%"的根因）；
+  ② 材质是系统灰 dialog，和暗场 Spotlight 完全不搭。
+
+  新版四件套各自独立可更新：标题 / 大号百分比 / 琥珀进度条 / 字节明细。
+  检查中（无确数）时隐藏百分比与明细、进度条走 indeterminate。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_dialog"
+    android:orientation="vertical"
+    android:paddingStart="22dp"
+    android:paddingTop="20dp"
+    android:paddingEnd="22dp"
+    android:paddingBottom="20dp">
+
+    <TextView
+        android:id="@+id/tvUpdTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textColor="@color/text_primary"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/tvUpdPercent"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:fontFeatureSettings="tnum"
+        android:textColor="@color/text_primary"
+        android:textSize="30sp"
+        android:textStyle="bold" />
+
+    <ProgressBar
+        android:id="@+id/pbUpd"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:max="100"
+        android:progressBackgroundTint="@color/line"
+        android:progressTint="@color/amber_progress" />
+
+    <TextView
+        android:id="@+id/tvUpdDetail"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:fontFeatureSettings="tnum"
+        android:textColor="@color/text_hint"
+        android:textSize="12sp" />
+</LinearLayout>

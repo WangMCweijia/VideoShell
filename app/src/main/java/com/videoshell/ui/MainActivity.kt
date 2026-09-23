@@ -208,19 +208,32 @@ class MainActivity : AppCompatActivity() {
         touchHelper.attachToRecyclerView(binding.rvSites)
         siteAdapter.onStartDrag = { vh -> touchHelper.startDrag(vh) }
 
-        // ---- 站源：管理动作（FN-6）----
-        binding.btnImport.setOnClickListener {
-            importLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
-        }
-        binding.btnExport.setOnClickListener {
-            if (Store.sites(this).isEmpty()) {
-                toast(getString(R.string.site_empty_action))
-                return@setOnClickListener
+        // ---- 站源：管理动作（FN-6）—— 排版 2.0 收进「管理」菜单（v1.0.60）：
+        //      4 个并排 38dp 文字按钮热区不足、与主操作抢权重；菜单项与旧按钮
+        //      一一对应，行为不变。 ----
+        binding.btnManage.setOnClickListener { anchor ->
+            val pm = android.widget.PopupMenu(this, anchor)
+            pm.menu.add(0, 1, 0, R.string.site_import)
+            pm.menu.add(0, 2, 0, R.string.site_export)
+            pm.menu.add(0, 3, 0, R.string.site_dedup)
+            pm.menu.add(0, 4, 0, R.string.site_health)
+            pm.setOnMenuItemClickListener { mi ->
+                when (mi.itemId) {
+                    1 -> importLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                    2 -> {
+                        if (Store.sites(this).isEmpty()) {
+                            toast(getString(R.string.site_empty_action))
+                        } else {
+                            exportLauncher.launch("videoshell-sites.json")
+                        }
+                    }
+                    3 -> dedupSites()
+                    4 -> healthCheck()
+                }
+                true
             }
-            exportLauncher.launch("videoshell-sites.json")
+            pm.show()
         }
-        binding.btnDedup.setOnClickListener { dedupSites() }
-        binding.btnHealth.setOnClickListener { healthCheck() }
 
         // ---- 我的 ----
         binding.rowHistory.setOnClickListener { startActivity(Intent(this, HistoryActivity::class.java)) }

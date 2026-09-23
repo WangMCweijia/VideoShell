@@ -144,7 +144,8 @@ ok("★ 折射是叠在 bg_glass_nav 之上（LayerDrawable 两层，后画的�
    "LayerDrawable(arrayOf(base, GlassEdgeDrawable.forNav(this)))" in main_kt)
 ok("底基仍是 bg_glass_nav（填充/砂质/描边四层不能被顶掉）",
    "R.drawable.bg_glass_nav" in main_kt)
-ok("bg_glass_nav 仍带砂质层", "@drawable/glass_grain" in nav_xml)
+ok("bg_glass_nav 不再带砂质层（v1.0.60 实底材质退役颗粒）",
+   "@drawable/glass_grain" not in nav_xml)
 ok("bg_glass_nav 仍带描边", "glass_stroke" in nav_xml)
 
 print("== B. 折射配色（UI 2.0「暗场 Spotlight」起退役）：三支棱色双主题全透明 ==")

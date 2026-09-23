@@ -26,7 +26,6 @@
         </shape>
     </item>
 
-    <item android:drawable="@drawable/glass_grain" />
 
     <item>
         <shape android:shape="rectangle">

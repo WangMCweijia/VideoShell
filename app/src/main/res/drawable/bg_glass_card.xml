@@ -28,7 +28,6 @@
 
     <!-- 砂质层（v1.0.49）：必须长在玻璃片**自己**身上。只靠 bg_ambient 的颗粒是不够的
          —— 玻璃有 65% 不透明度，背景的颗粒透过来只剩三成，等于没有。 -->
-    <item android:drawable="@drawable/glass_grain" />
 
     <item>
         <shape android:shape="rectangle">

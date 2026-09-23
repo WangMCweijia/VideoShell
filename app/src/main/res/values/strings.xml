@@ -6,7 +6,7 @@
     <string name="hint_url">输入视频站网址，例如 https://www.example.com</string>
     <string name="btn_detect">识别并适配</string>
     <string name="btn_play_direct">直接播放该直链</string>
-    <string name="btn_sniff">用网页嗅探打开</string>
+    <string name="btn_sniff">网页嗅探</string>
     <string name="btn_add_manual">手动添加为网页站点</string>
     <string name="title_sites">已保存的站点</string>
     <string name="empty_sites">还没有站点。在上方输入一个视频站网址，点「识别并适配」试试。</string>
@@ -76,6 +76,12 @@
     <string name="update_need_permission_go">去设置</string>
     <string name="update_installing">正在唤起系统安装器…</string>
     <string name="update_install_failed">安装失败：%1$s</string>
+    <!-- v1.0.60 更新弹窗重做：标题 / 大号百分比 / 字节明细独立成控件，
+         旧版百分比拼在 message 里只在构造时写一次（恒 0% 的根因）。 -->
+    <string name="update_dl_title">正在下载更新</string>
+    <string name="update_dl_detail">已下载 %1$s MB</string>
+    <string name="update_dl_detail_total">已下载 %1$s / %2$s MB</string>
+    <string name="site_manage">管理</string>
 
     <string name="search_hint">搜索影片 / 剧集</string>
     <string name="cat_latest">最新</string>

@@ -59,57 +59,91 @@
                 android:orientation="vertical"
                 android:padding="@dimen/island_pad_h">
 
-                <EditText
-                    android:id="@+id/inputUrl"
+                <!-- 排版 2.0（v1.0.60）：输入框与主按钮**同一行**（省一行高度，视线
+                     "输入 → 确认"不打折）；次级动作（嗅探/浏览/管理）收成一行文字按钮；
+                     导入/导出/合并/体检收进「管理」菜单 —— 4 个并排 38dp 小按钮热区不足
+                     且与主操作抢视觉权重（设计稿 §5·站源页：1 主 + 3 次）。 -->
+                <LinearLayout
                     android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:importantForAutofill="no"
-                    android:background="@drawable/bg_input"
-                    android:hint="@string/hint_url"
-                    android:imeOptions="actionGo"
-                    android:inputType="textUri"
-                    android:maxLines="1"
-                    android:paddingStart="12dp"
-                    android:paddingEnd="12dp"
-                    android:textColor="@color/text_primary"
-                    android:textColorHint="@color/text_hint"
-                    android:textSize="14sp" />
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <EditText
+                        android:id="@+id/inputUrl"
+                        android:layout_width="0dp"
+                        android:layout_height="46dp"
+                        android:layout_weight="1"
+                        android:importantForAutofill="no"
+                        android:background="@drawable/bg_input"
+                        android:hint="@string/hint_url"
+                        android:imeOptions="actionGo"
+                        android:inputType="textUri"
+                        android:maxLines="1"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        android:textColor="@color/text_primary"
+                        android:textColorHint="@color/text_hint"
+                        android:textSize="14sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnDetect"
+                        android:layout_width="wrap_content"
+                        android:layout_height="46dp"
+                        android:layout_marginStart="10dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:minWidth="104dp"
+                        android:maxLines="1"
+                        android:text="@string/btn_detect"
+                        android:textSize="14sp"
+                        app:cornerRadius="12dp" />
+                </LinearLayout>
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
+                    android:layout_marginTop="6dp"
                     android:orientation="horizontal">
 
                     <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnDetect"
-                        android:layout_width="0dp"
-                        android:layout_height="44dp"
-                        android:layout_weight="1"
-                        android:insetTop="0dp"
-                        android:insetBottom="0dp"
-                        android:minWidth="0dp"
-                        android:maxLines="1"
-                        android:text="@string/btn_detect"
-                        android:textSize="14sp"
-                        app:cornerRadius="10dp" />
-
-                    <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnSniff"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        style="@style/Widget.MaterialComponents.Button.TextButton"
                         android:layout_width="0dp"
-                        android:layout_height="44dp"
-                        android:layout_marginStart="10dp"
+                        android:layout_height="40dp"
                         android:layout_weight="1"
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
-                        android:minWidth="0dp"
                         android:maxLines="1"
                         android:text="@string/btn_sniff"
-                        android:textColor="@color/text_primary"
-                        android:textSize="14sp"
-                        app:cornerRadius="10dp"
-                        app:strokeColor="@color/line" />
+                        android:textColor="@color/text_secondary"
+                        android:textSize="13sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnBrowseWeb"
+                        style="@style/Widget.MaterialComponents.Button.TextButton"
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_weight="1"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:maxLines="1"
+                        android:text="@string/btn_browse_web"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="13sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnManage"
+                        style="@style/Widget.MaterialComponents.Button.TextButton"
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_weight="1"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:maxLines="1"
+                        android:text="@string/site_manage"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="13sp" />
                 </LinearLayout>
 
                 <ProgressBar
@@ -137,20 +171,9 @@
                     android:layout_height="40dp"
                     android:layout_marginTop="4dp"
                     android:text="@string/btn_play_direct"
-                    android:textColor="@color/brand"
+                    android:textColor="@color/amber_text"
                     android:textSize="13sp"
                     android:visibility="gone" />
-
-                <!-- v1.0.37：网页浏览入口。不填网址 = 打开搜索引擎（全网），
-                     填了 = 直接打开那个网址 —— 浏览时能「识别并添加」/「手动校准」。 -->
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnBrowseWeb"
-                    style="@style/Widget.MaterialComponents.Button.TextButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="40dp"
-                    android:text="@string/btn_browse_web"
-                    android:textColor="@color/brand"
-                    android:textSize="13sp" />
             </LinearLayout>
 
             <TextView
@@ -162,67 +185,6 @@
                 android:text="@string/sites_tip"
                 android:textColor="@color/text_hint"
                 android:textSize="12sp" />
-
-            <!-- 站点管理（FN-6）：导入 / 导出 / 合并重复 / 体检 -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp">
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnImport"
-                    style="@style/Widget.MaterialComponents.Button.TextButton"
-                    android:layout_width="0dp"
-                    android:layout_height="38dp"
-                    android:layout_weight="1"
-                    android:minWidth="0dp"
-                    android:paddingStart="4dp"
-                    android:paddingEnd="4dp"
-                    android:text="@string/site_import"
-                    android:textColor="@color/brand"
-                    android:textSize="12sp" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnExport"
-                    style="@style/Widget.MaterialComponents.Button.TextButton"
-                    android:layout_width="0dp"
-                    android:layout_height="38dp"
-                    android:layout_weight="1"
-                    android:minWidth="0dp"
-                    android:paddingStart="4dp"
-                    android:paddingEnd="4dp"
-                    android:text="@string/site_export"
-                    android:textColor="@color/brand"
-                    android:textSize="12sp" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnDedup"
-                    style="@style/Widget.MaterialComponents.Button.TextButton"
-                    android:layout_width="0dp"
-                    android:layout_height="38dp"
-                    android:layout_weight="1"
-                    android:minWidth="0dp"
-                    android:paddingStart="4dp"
-                    android:paddingEnd="4dp"
-                    android:text="@string/site_dedup"
-                    android:textColor="@color/brand"
-                    android:textSize="12sp" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnHealth"
-                    style="@style/Widget.MaterialComponents.Button.TextButton"
-                    android:layout_width="0dp"
-                    android:layout_height="38dp"
-                    android:layout_weight="1"
-                    android:minWidth="0dp"
-                    android:paddingStart="4dp"
-                    android:paddingEnd="4dp"
-                    android:text="@string/site_health"
-                    android:textColor="@color/brand"
-                    android:textSize="12sp" />
-            </LinearLayout>
 
             <FrameLayout
                 android:layout_width="match_parent"

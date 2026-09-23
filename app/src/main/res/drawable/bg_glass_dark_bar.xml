@@ -38,7 +38,6 @@
 
     <!-- 砂质颗粒（v1.0.49）：压视频也很安全 —— 峰值 alpha 只有 4%，不影响时间码与
          按钮的可读性，但能让这块深色片显出"磨砂"而不是"半透明塑料板"。 -->
-    <item android:drawable="@drawable/glass_grain" />
 
     <item>
         <shape android:shape="rectangle">

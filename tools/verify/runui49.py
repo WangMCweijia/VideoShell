@@ -189,17 +189,13 @@ ok("★ 暗色 text_hint 达 AA（#7E8794 档）", val(dark, "text_hint") == "FF
 ok("主题主强调指向琥珀（colorPrimary=@color/amber）",
    'colorPrimary">@color/amber' in rd("values", "themes.xml"))
 
-print("== G. 砂质层：颗粒必须长在玻璃片自己身上 ==")
-grain = rd("drawable", "glass_grain.xml")
-ok("glass_grain 用 tileMode=repeat（默认会把 128px 拉伸成整屏，噪点被抹平）",
-   'tileModeX="repeat"' in grain and 'tileModeY="repeat"' in grain)
-ok("glass_grain 指向 glass_noise", "@drawable/glass_noise" in grain)
-noise_dir = os.path.join(RES, "drawable-nodpi")
-ok("颗粒图在 drawable-nodpi/（放到别的密度目录会被重新采样抹平）",
-   os.path.isdir(noise_dir) and os.path.exists(os.path.join(noise_dir, "glass_noise.png")))
+print("== G. 砂质层：UI 2.0 实底材质下退役（v1.0.60） ==")
+# 玻璃时代的"颗粒=材质"判据已随材质更换作废：实底下颗粒只会把面板糊脏（亮色尤甚）。
+# 守卫改为锁"退役"不变量：六块玻璃片一律不得再引用 grain。
 for f in ("bg_glass.xml", "bg_glass_card.xml", "bg_glass_nav.xml", "bg_surface.xml",
           "bg_glass_dark_bar.xml", "bg_glass_dark_panel.xml"):
-    ok("%s 带砂质层" % f, "@drawable/glass_grain" in rd("drawable", f))
+    ok("%s 不再带砂质层（实底下颗粒只会糊脏面板，亮色尤甚）" % f,
+       "@drawable/glass_grain" not in rd("drawable", f))
 
 print("== H. tab 切换动效 ==")
 ok("showPage 里有属性动画", ".animate()" in main_kt and "translationY" in main_kt)

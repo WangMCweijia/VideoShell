@@ -1,19 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-  磨砂玻璃浮岛 · 大面板（v1.0.48 起 · 方案 A 的默认材质）。
+  浮岛 · 大面板（v1.0.48 起）。
 
-  四层叠出来的，顺序不能反（后画的在上面）：
-    ① 主体      glass_fill → glass_fill_2（自上而下略微变淡 = 漫反射）
-    ② 顶部高光  glass_glow → 透明，centerY=0.18 ⇒ 只在顶部 ~1/5 高度内衰减完，
-                看起来就是玻璃上沿那道棱。这一层是人眼判断"这是一块凸起的玻璃
-                而不是一个浅色矩形"的**关键**，别省。
-    ③ 砂质颗粒  glass_grain（v1.0.49 新增）—— "磨砂"与"半透明灰玻璃"的唯一区别。
-                以前只有 bg_ambient 有颗粒，可玻璃有 65% 不透明度，背景那层颗粒
-                透过来只剩三成，等于没有。
-    ④ 1px 描边  glass_stroke（亮色取深、暗色取浅，见各自 colors.xml）
+  ⚠️ UI 2.0「暗场 Spotlight」（v1.0.59/60）起材质 = 实底分层 + 发丝线 + 投影：
+     glass_* 色名保留换值（见 values/colors.xml 头注），棱光/光斑/砂质颗粒
+     （glass_grain，v1.0.60 退役 —— 实底下颗粒只会把面板糊脏）全部退场。
+     层名沿用玻璃时代的历史叫法，读时按"实底面板"理解。
 
-  ⚠️ centerY 是 API 24+ 才认的属性；低版本按 0.5 处理 ⇒ 高光覆盖上半屏，
-     「顶亮 → 中透明 → 下透明」的观感依然成立，只是棱感弱一些。不会崩、不会发白。
-  ⚠️ 前四层必须写**同一个** corners，否则描边和填色会错位出双圆角。
+  现存层叠，顺序不能反（后画的在上面）：
+    ① 主体      glass_fill → glass_fill_2（实底面板，亮暗各一套值）
+    ② 顶部高光  glass_glow = 透明（退役，画出为空）
+    ③ 1px 描边  glass_stroke（发丝线）
+
+  ⚠️ centerY 是 API 24+ 才认的属性；低版本按 0.5 处理。不会崩、不会发白。
+  ⚠️ 各层必须写**同一个** corners，否则描边和填色会错位出双圆角。
 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -41,7 +40,6 @@
         </shape>
     </item>
 
-    <item android:drawable="@drawable/glass_grain" />
 
     <item>
         <shape android:shape="rectangle">

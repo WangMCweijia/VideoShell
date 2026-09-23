@@ -1,11 +1,17 @@
 package com.videoshell.ui
 
 import android.content.Context
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import android.view.LayoutInflater
+import android.view.View
 import android.widget.ProgressBar
+import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.pm.PackageInfoCompat
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.button.MaterialButton
 import com.videoshell.R
 import com.videoshell.data.net.UpdateChecker
 import com.videoshell.data.net.UpdateDownloader
@@ -55,7 +61,7 @@ object UpdateFlow {
      * @param onHint 把结果写到「检查更新」那一行右侧（见类注释第 3 条）
      */
     fun start(act: AppCompatActivity, onHint: (String) -> Unit = {}) {
-        val sheet = Sheet(act, act.getString(R.string.update_checking))
+        val sheet = Sheet.indeterminate(act, act.getString(R.string.update_checking))
         act.lifecycleScope.launch {
             val state = UpdateChecker.check(versionCodeOf(act))
             sheet.dismiss()
@@ -85,30 +91,50 @@ object UpdateFlow {
         }
     }
 
+    /**
+     * 「发现新版本」确认弹层（v1.0.60 重做）。
+     * 旧版是系统 AlertDialog —— 标题小、说明挤、主次按钮不分权重。
+     * 新版：标题放大、说明独立段、元信息（体积/线路）弱化、主按钮琥珀实底。
+     */
     private fun confirm(act: AppCompatActivity, info: UpdateChecker.UpdateInfo) {
-        val notes = info.notes.ifBlank { act.getString(R.string.update_no_notes) }
-        val size = if (info.size > 0) {
-            act.getString(R.string.update_size, info.size / 1024 / 1024)
-        } else ""
-        // 线路要可见：镜像线路意味着"清单出自两个镜像的一致答案"而非 GitHub 本尊（安全语义不同）
-        val via = if (info.via.isNotBlank()) {
-            "\n" + act.getString(R.string.update_via, info.via)
-        } else ""
-        AlertDialog.Builder(act)
-            .setTitle(act.getString(R.string.update_found_title, info.versionName))
-            .setMessage(notes + "\n\n" + size + via)
-            .setPositiveButton(R.string.update_download) { _, _ -> download(act, info) }
-            .setNegativeButton(R.string.update_later, null)
-            .show()
+        val v = LayoutInflater.from(act).inflate(R.layout.dialog_update_confirm, null)
+        v.findViewById<TextView>(R.id.tvUpdCfTitle).text =
+            act.getString(R.string.update_found_title, info.versionName)
+        v.findViewById<TextView>(R.id.tvUpdNotes).text =
+            info.notes.ifBlank { act.getString(R.string.update_no_notes) }
+        val meta = buildString {
+            if (info.size > 0) append(act.getString(R.string.update_size, info.size / 1024 / 1024))
+            // 线路要可见：镜像线路意味着"清单出自两个镜像的一致答案"而非 GitHub 本尊（安全语义不同）
+            if (info.via.isNotBlank()) {
+                if (isNotEmpty()) append("\n")
+                append(act.getString(R.string.update_via, info.via))
+            }
+        }
+        v.findViewById<TextView>(R.id.tvUpdMeta).apply {
+            text = meta
+            visibility = if (meta.isBlank()) View.GONE else View.VISIBLE
+        }
+        val dlg = AlertDialog.Builder(act).setView(v).create()
+        dlg.show()
+        roundedWindow(dlg)
+        v.findViewById<MaterialButton>(R.id.btnUpdGo).setOnClickListener {
+            runCatching { dlg.dismiss() }
+            download(act, info)
+        }
+        v.findViewById<MaterialButton>(R.id.btnUpdLater).setOnClickListener {
+            runCatching { dlg.dismiss() }
+        }
     }
 
     private fun download(act: AppCompatActivity, info: UpdateChecker.UpdateInfo) {
-        val sheet = Sheet(act, act.getString(R.string.update_downloading, 0))
+        val sheet = Sheet.determinate(act, act.getString(R.string.update_dl_title))
         act.lifecycleScope.launch {
-            val r = UpdateDownloader.download(act, info) { pct, _ ->
+            val r = UpdateDownloader.download(act, info) { pct, done ->
                 if (pct >= 0) act.runOnUiThread {
                     runCatching {
-                        sheet.progress(pct)
+                        // ★ 百分比与字节数都来自回调（旧版只喂 ProgressBar，
+                        //   message 里的"0%"是构造时拼死的 —— 用户报的 bug 根因）
+                        sheet.progress(pct, done, info.size)
                     }
                 }
             }
@@ -141,30 +167,69 @@ object UpdateFlow {
     }
 
     /**
-     * 进度弹窗。**不可取消** —— 见类注释第 2 条：
+     * 进度弹层（v1.0.60 重做）。**不可取消** —— 见类注释第 2 条：
      * 允许取消只会得到一个"关了但还在下"的界面，既没反馈也停不下来。
      *
-     * 不用 `ProgressDialog`：它在 API 26 就被标废弃了，而且（更实际的）它在部分 ROM 上
-     * 会走系统那套圆环样式，和本 App 的玻璃材质完全对不上。这里自己拿 AlertDialog
-     * + ProgressBar 拼一个，横向条在**下载**这种"有确数"的场景下也更有信息量。
+     * 不用 `ProgressDialog`：API 26 废弃，且部分 ROM 走系统圆环样式。
+     * 自定义布局四件套（标题/百分比/进度条/字节明细）各自独立更新；
+     * 窗口背景置透明 + 布局自带 bg_dialog（e1 实底 + 发丝线 + 圆角），
+     * 否则系统 window 背景会出现双层圆角。
      */
-    private class Sheet(act: AppCompatActivity, msg: String) {
-        private val bar = ProgressBar(act, null, android.R.attr.progressBarStyleHorizontal).apply {
-            isIndeterminate = true
-            max = 100
-        }
-        private val dlg: AlertDialog = AlertDialog.Builder(act)
-            .setMessage(msg)
-            .setView(bar)
-            .setCancelable(false)
-            .create()
-            .also { it.setCanceledOnTouchOutside(false); it.show() }
+    private class Sheet private constructor(
+        act: AppCompatActivity,
+        title: String,
+        indeterminate: Boolean
+    ) {
+        private val bar: ProgressBar
+        private val tvPercent: TextView
+        private val tvDetail: TextView
+        private val dlg: AlertDialog
 
-        /** 下载有确数，切成确定的横向进度；`pct` 越界一律夹住（乱填进度比不动更让人疑心） */
-        fun progress(pct: Int) {
+        /** 检查中：无确数 → 走 indeterminate，隐藏百分比与明细 */
+        constructor(act: AppCompatActivity, title: String) : this(act, title, true)
+
+        init {
+            val v = LayoutInflater.from(act).inflate(R.layout.dialog_update_progress, null)
+            v.findViewById<TextView>(R.id.tvUpdTitle).text = title
+            bar = v.findViewById(R.id.pbUpd)
+            tvPercent = v.findViewById(R.id.tvUpdPercent)
+            tvDetail = v.findViewById(R.id.tvUpdDetail)
+            bar.isIndeterminate = indeterminate
+            if (indeterminate) {
+                tvPercent.visibility = View.GONE
+                tvDetail.visibility = View.GONE
+            }
+            dlg = AlertDialog.Builder(act).setView(v).setCancelable(false).create()
+            dlg.setCanceledOnTouchOutside(false)
+            dlg.show()
+            roundedWindow(dlg)
+        }
+
+        companion object {
+            fun indeterminate(act: AppCompatActivity, title: String) = Sheet(act, title, true)
+            fun determinate(act: AppCompatActivity, title: String) = Sheet(act, title, false)
+        }
+
+        /**
+         * 下载有确数，切成确定的横向进度；`pct` 越界一律夹住（乱填进度比不动更让人疑心）。
+         * 百分比、进度条、字节数**三处一起更新** —— 旧版只更新进度条，文字停在 0%。
+         */
+        fun progress(pct: Int, doneBytes: Long, totalBytes: Long) {
             runCatching {
                 if (bar.isIndeterminate) bar.isIndeterminate = false
-                bar.progress = pct.coerceIn(0, 100)
+                val p = pct.coerceIn(0, 100)
+                bar.progress = p
+                tvPercent.text = "$p%"
+                tvDetail.text = detailText(doneBytes, totalBytes)
+            }
+        }
+
+        private fun detailText(done: Long, total: Long): String {
+            val mb = done / 1024.0 / 1024.0
+            return if (total > 0) {
+                String.format("%.1f / %.1f MB", mb, total / 1024.0 / 1024.0)
+            } else {
+                String.format("%.1f MB", mb)
             }
         }
 
@@ -173,6 +238,11 @@ object UpdateFlow {
 
     /** 权限判断的转发（供 Activity 外部调用，避免直接依赖 UpdateDownloader） */
     fun canInstall(ctx: Context): Boolean = UpdateDownloader.canInstall(ctx)
+
+    /** 弹层窗口背景置透明：布局自带 bg_dialog（e1 实底 + 发丝线 + 圆角），不置透明会双层圆角 */
+    private fun roundedWindow(dlg: AlertDialog) {
+        dlg.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+    }
 
     /** 供「我的」页初始化时给一个中性文案，避免那行右侧长期空白 */
     fun idleHint(ctx: Context): String =
