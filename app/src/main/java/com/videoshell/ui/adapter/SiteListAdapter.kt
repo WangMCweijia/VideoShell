@@ -83,7 +83,10 @@ class SiteListAdapter(
 
         @SuppressLint("ClickableViewAccessibility")
         fun bind(s: SiteConfig) {
-            b.tvName.text = s.name.ifBlank { s.baseUrl }
+            // 站名常带未解码的 HTML 实体（如「厂&#8211;长」——采集自网页 title），
+            // 在展示侧解码而不是存储侧：老数据不用迁移，新数据错了也还能救。
+            b.tvName.text = org.jsoup.parser.Parser.unescapeEntities(s.name, false)
+                .ifBlank { s.baseUrl }
             b.tvUrl.text = s.baseUrl
             b.tvMode.text = listOf(s.note, s.apiMode).filter { it.isNotBlank() }.joinToString(" · ")
             b.root.setOnClickListener { onClick(s) }

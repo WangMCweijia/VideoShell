@@ -47,13 +47,16 @@
     <color name="amber_progress">#FFC9830F</color>
     <!-- 底部导航选中态（亮 Dock 上用烫金，暗 Dock 上用亮琥珀） -->
     <color name="nav_active">#FFB87A10</color>
+    <!-- 导航选中胶囊底：琥珀 12% 面积色（amber 双主题同值 ⇒ 胶囊同值，无 night 变体） -->
+    <color name="amber_pill">#1FE8862C</color>
 
     <!-- 玻璃四层 → 实底材质的兼容映射（色名退役期，引用方不用改）：
          fill/fill_2 = 实白面板（底部留一丝暖差当"漫反射"残影），
-         stroke = 发丝线，glow/edge/ambient = 透明退役。 -->
+         stroke = 发丝线（v1.0.61 压深一档：#E2DFD8 在暖纸上几乎看不见，
+         Dock/面板的边界感全靠它）。 -->
     <color name="glass_fill">#FFFFFFFF</color>
     <color name="glass_fill_2">#FFF9F7F3</color>
-    <color name="glass_stroke">#FFE2DFD8</color>
+    <color name="glass_stroke">#FFD9D5CA</color>
     <color name="glass_glow">#00000000</color>
     <!-- 按下态 = e3 压暖（触感与暗色的"提亮"等价） -->
     <color name="glass_pressed">#FFF1EFE9</color>

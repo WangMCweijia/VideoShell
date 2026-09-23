@@ -102,7 +102,7 @@
     <string name="scope_agg_empty">全站都没有「%1$s」—— 可换「全网」用搜索引擎找</string>
     <string name="scope_fail_detail">查看失败的 %1$d 个站</string>
     <string name="scope_fail_title">这几个站没返回结果</string>
-    <string name="btn_browse_web">浏览网页（可搜全网 / 打开任意网址）</string>
+    <string name="btn_browse_web">浏览网页</string><!-- v1.0.60 的缩短 Edit 假成功过一次：旧长串进三按钮行必截断，改完必须复核到"等于"而不是"包含" -->
     <string name="web_browse_title">网页浏览</string>
 
     <!-- 搜索引擎（v1.0.38）。名字就是品牌名，不翻译；用户认的是这几个字 -->

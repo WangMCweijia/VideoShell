@@ -100,50 +100,66 @@
                         app:cornerRadius="12dp" />
                 </LinearLayout>
 
+                <!-- 次级动作 = 描边芯片（v1.0.61）：纯文字按钮看着像标签不像按钮，
+                     主次也不分 —— 统一描边小芯片与琥珀实底主按钮形成两级。 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
+                    android:layout_marginTop="8dp"
                     android:orientation="horizontal">
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnSniff"
-                        style="@style/Widget.MaterialComponents.Button.TextButton"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                         android:layout_width="0dp"
-                        android:layout_height="40dp"
+                        android:layout_height="36dp"
                         android:layout_weight="1"
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
                         android:maxLines="1"
                         android:text="@string/btn_sniff"
                         android:textColor="@color/text_secondary"
-                        android:textSize="13sp" />
+                        android:textSize="13sp"
+                        app:cornerRadius="10dp"
+                        app:rippleColor="@color/glass_pressed"
+                        app:strokeColor="@color/line"
+                        app:strokeWidth="1dp" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnBrowseWeb"
-                        style="@style/Widget.MaterialComponents.Button.TextButton"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                         android:layout_width="0dp"
-                        android:layout_height="40dp"
+                        android:layout_height="36dp"
+                        android:layout_marginStart="8dp"
                         android:layout_weight="1"
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
                         android:maxLines="1"
                         android:text="@string/btn_browse_web"
                         android:textColor="@color/text_secondary"
-                        android:textSize="13sp" />
+                        android:textSize="13sp"
+                        app:cornerRadius="10dp"
+                        app:rippleColor="@color/glass_pressed"
+                        app:strokeColor="@color/line"
+                        app:strokeWidth="1dp" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnManage"
-                        style="@style/Widget.MaterialComponents.Button.TextButton"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                         android:layout_width="0dp"
-                        android:layout_height="40dp"
+                        android:layout_height="36dp"
+                        android:layout_marginStart="8dp"
                         android:layout_weight="1"
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
                         android:maxLines="1"
                         android:text="@string/site_manage"
                         android:textColor="@color/text_secondary"
-                        android:textSize="13sp" />
+                        android:textSize="13sp"
+                        app:cornerRadius="10dp"
+                        app:rippleColor="@color/glass_pressed"
+                        app:strokeColor="@color/line"
+                        app:strokeWidth="1dp" />
                 </LinearLayout>
 
                 <ProgressBar
@@ -607,7 +623,8 @@
             android:layout_marginEnd="@dimen/island_gap"
             android:layout_marginBottom="@dimen/island_gap"
             android:background="@drawable/bg_glass_nav"
-            android:elevation="6dp"
+            android:elevation="8dp"
+            app:itemBackground="@drawable/bg_nav_item"
             app:itemIconTint="@color/nav_item"
             app:itemTextColor="@color/nav_item"
             app:labelVisibilityMode="labeled"

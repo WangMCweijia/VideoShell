@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+  底部导航条目背景（v1.0.61）：选中 = 琥珀 12% 圆角胶囊，未选中 = 透明。
+  v1.0.60 之前选中态只有"图标+文字变琥珀"，在实底 Dock 上几乎没有面积感
+  —— 这是"tab 栏质感不好"的另一半来源。胶囊用 <inset> 内缩，
+  否则会铺满整格变成"选中了一整格"而不是一枚药丸。
+  amber 双主题同值 ⇒ 胶囊也同值，无需 night 变体。
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true">
+        <inset
+            android:insetBottom="6dp"
+            android:insetLeft="14dp"
+            android:insetRight="14dp"
+            android:insetTop="6dp">
+            <shape android:shape="rectangle">
+                <corners android:radius="12dp" />
+                <solid android:color="@color/amber_pill" />
+            </shape>
+        </inset>
+    </item>
+    <item android:drawable="@android:color/transparent" />
+</selector>
