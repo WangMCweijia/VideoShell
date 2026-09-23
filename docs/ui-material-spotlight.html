@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>视频壳 UI 2.0 · 材质重设计「暗场 Spotlight」</title>
+<style>
+  :root{
+    --bg:#F6F5F2; --surface:#FFFFFF; --surface2:#EFEDE8; --line:#E2DFD8;
+    --ink:#1A1C20; --ink2:#4E5866; --hint:#6E7888;
+    --amber:#E8940F; --amber-hi:#FFC46B; --stage:#0A0C10;
+    --e1:#12161D; --e2:#191E27; --e3:#222834; --hair:rgba(255,255,255,.08);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    font-family:"Segoe UI","Microsoft YaHei UI","PingFang SC",system-ui,sans-serif;
+    background:var(--bg); color:var(--ink); line-height:1.65; font-size:15px;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:0 28px 80px}
+
+  /* ---------- hero ---------- */
+  .hero{padding:64px 0 40px;position:relative;overflow:hidden}
+  .hero::before{content:"";position:absolute;top:-140px;right:-80px;width:480px;height:480px;border-radius:50%;
+    background:radial-gradient(circle,rgba(232,148,15,.18),transparent 65%);pointer-events:none}
+  .hero .kicker{color:var(--amber);font-weight:700;letter-spacing:.16em;font-size:12px;text-transform:uppercase}
+  .hero h1{font-size:42px;line-height:1.22;font-weight:700;margin:12px 0 14px}
+  .hero h1 em{font-style:normal;color:var(--amber)}
+  .hero p.lead{color:var(--ink2);max-width:680px;font-size:16px}
+  .hero .meta{margin-top:22px;display:flex;gap:10px;flex-wrap:wrap}
+  .tag{background:var(--surface);border:1px solid var(--line);border-radius:999px;
+    padding:5px 14px;font-size:12px;color:var(--ink2)}
+
+  section{margin-top:56px}
+  h2{font-size:24px;font-weight:700;display:flex;align-items:baseline;gap:12px;margin-bottom:6px}
+  h2 .no{color:var(--amber);font-size:14px;font-weight:700;letter-spacing:.08em}
+  .sub{color:var(--hint);font-size:13.5px;margin-bottom:22px}
+  h3{font-size:16px;font-weight:700;margin:26px 0 10px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:24px}
+
+  table{width:100%;border-collapse:collapse;font-size:13.5px;background:var(--surface);
+    border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  th{background:var(--surface2);text-align:left;padding:10px 14px;font-size:12px;color:var(--ink2);letter-spacing:.05em;font-weight:600}
+  td{padding:10px 14px;border-top:1px solid var(--line);vertical-align:top}
+  td code,.mono{font-family:Consolas,"Cascadia Mono",monospace;font-size:12.5px;background:var(--surface2);
+    border-radius:5px;padding:1px 6px;color:#9A6406}
+  .pill{display:inline-block;border-radius:999px;padding:1px 10px;font-size:11.5px;font-weight:600}
+  .p-keep{background:#E4F4EB;color:#1E9E5A}
+  .p-cut{background:#FCEAEA;color:#D64545}
+  .p-new{background:#FDF1DC;color:#9A6406}
+  .p-p0{background:#1A1C20;color:#fff}
+  .p-p1{background:#E8D9B8;color:#7A5406}
+  .p-p2{background:var(--surface2);color:var(--ink2)}
+
+  /* ---------- candidates ---------- */
+  .cands{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .cand{border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--surface);position:relative}
+  .cand .viz{height:150px;position:relative;display:flex;align-items:center;justify-content:center;gap:8px}
+  .cand .body{padding:16px}
+  .cand b{font-size:15px}
+  .cand .t{font-size:12.5px;color:var(--ink2);margin-top:6px}
+  .cand .verdict{padding:10px 16px;font-size:12.5px;border-top:1px solid var(--line)}
+  .cand.pick{outline:2px solid var(--amber);outline-offset:-2px}
+  .cand .crown{position:absolute;top:10px;right:10px;background:var(--amber);color:#201405;
+    font-size:11px;font-weight:700;border-radius:999px;padding:2px 10px}
+  .blk{width:34px;height:52px;border-radius:8px}
+
+  /* ---------- tokens ---------- */
+  .swgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+  .sw{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+  .sw .chip{height:52px}
+  .sw .lbl{padding:8px 10px;font-size:11.5px}
+  .sw .lbl b{display:block;font-size:12px}
+  .sw .lbl span{color:var(--hint);font-family:Consolas,monospace;font-size:10.5px}
+  .dk-stage{background:#0A0C10;border-radius:16px;padding:14px;border:1px solid #1A1F28}
+  .dk-stage .sw{background:#12161D;border-color:#262B36}
+  .dk-stage .sw .lbl{color:#F2F4F7}
+  .dk-stage .sw .lbl span{color:#9AA3AF}
+  .dk-title{color:#F2F4F7;font-size:13px;margin:8px 0 10px;padding-left:4px}
+
+  /* elevation demo */
+  .elev{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .el{border-radius:14px;padding:18px 16px;position:relative}
+  .el b{font-size:13px;display:block}
+  .el span{font-size:11px;font-family:Consolas,monospace;opacity:.75}
+
+  /* ---------- phone mockups ---------- */
+  .shots{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+  .shot .cap{text-align:center;font-size:12.5px;color:var(--ink2);margin-top:10px}
+  .shot .cap b{color:var(--ink)}
+  .phone{
+    width:100%;aspect-ratio:360/740;border-radius:30px;position:relative;overflow:hidden;
+    border:1px solid #1A1F28;box-shadow:0 22px 50px -20px rgba(0,0,0,.55);
+    background:radial-gradient(300px 260px at 50% -40px,#12161F 0%,#0A0C10 60%);
+  }
+  .phone.light{background:#F6F5F2;border-color:#D8D4CA;box-shadow:0 18px 40px -18px rgba(26,28,32,.25)}
+  .status{display:flex;justify-content:space-between;padding:10px 16px 0;font-size:9px;font-weight:600;color:#C9D2DE}
+  .phone.light .status{color:#4E5866}
+  .dock{position:absolute;left:12px;right:12px;bottom:12px;height:54px;border-radius:17px;
+    background:#12161D;border:1px solid rgba(255,255,255,.09);
+    box-shadow:0 14px 30px -10px rgba(0,0,0,.65),inset 0 1px 0 rgba(255,255,255,.06);
+    display:flex;align-items:center;justify-content:space-around}
+  .phone.light .dock{background:#FFFFFF;border:1px solid #E2DFD8;box-shadow:0 10px 26px -12px rgba(26,28,32,.28)}
+  .ni{font-size:8.5px;color:#7E8794;display:flex;flex-direction:column;align-items:center;gap:2px}
+  .ni b{font-size:13px;font-weight:400}
+  .ni.on{color:#F2F4F7;font-weight:700}
+  .ni.on b{background:linear-gradient(180deg,#FFC46B,#E8862C);color:#201405;border-radius:999px;
+    width:40px;height:24px;display:flex;align-items:center;justify-content:center}
+  .phone.light .ni{color:#7C8797}
+  .phone.light .ni.on{color:#1A1C20}
+
+  /* 首页 */
+  .home-top{position:absolute;top:28px;left:16px;right:16px;display:flex;align-items:center;gap:8px}
+  .home-top .site{font-size:13px;font-weight:800;color:#F2F4F7}
+  .home-top .chip{font-size:8.5px;color:#FFC46B;border:1px solid rgba(255,196,107,.35);border-radius:999px;padding:2px 8px;font-weight:600}
+  .home-top .ic{margin-left:auto;font-size:13px;color:#A8B0BC}
+  .cats{position:absolute;top:56px;left:16px;right:16px;display:flex;gap:6px;overflow:hidden}
+  .cat{font-size:9px;padding:4px 10px;border-radius:999px;color:#A8B0BC;white-space:nowrap;border:1px solid rgba(255,255,255,.07)}
+  .cat.on{background:linear-gradient(180deg,#FFC46B,#E8862C);color:#201405;font-weight:700;border:none}
+  .grid3{position:absolute;top:94px;left:14px;right:14px;bottom:76px;
+    display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;align-content:start}
+  .pcard{border-radius:11px;position:relative}
+  .pcard .art{aspect-ratio:10/14;border-radius:11px;position:relative;z-index:1;border:1px solid rgba(255,255,255,.08)}
+  .pcard .glow{position:absolute;left:8%;right:8%;top:20%;bottom:-6px;border-radius:50%;
+    filter:blur(14px);opacity:.5}
+  .pcard .t{font-size:8.2px;line-height:1.3;padding:4px 2px 0;color:#E8ECF3;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pcard .prog{position:absolute;left:0;bottom:24px;height:2.5px;width:100%;background:rgba(255,255,255,.14);
+    border-radius:2px;z-index:2;overflow:hidden}
+  .pcard .prog i{display:block;height:100%;background:linear-gradient(90deg,#FFC46B,#E8862C)}
+  .g1{background:linear-gradient(160deg,#5A8CF0,#2F5FB8 60%,#223F7A)} .w1{background:#2F5FB8}
+  .g2{background:linear-gradient(160deg,#E8A17C,#B85C4A 60%,#6E2F3A)} .w2{background:#B85C4A}
+  .g3{background:linear-gradient(160deg,#57C9BB,#1E8F84 60%,#0F4F4A)} .w3{background:#1E8F84}
+  .g4{background:linear-gradient(160deg,#9B8CF2,#5E43C8 60%,#33246E)} .w4{background:#5E43C8}
+  .g5{background:linear-gradient(160deg,#E8C97C,#B8862C 60%,#6E5214)} .w5{background:#B8862C}
+  .g6{background:linear-gradient(160deg,#7FB5E8,#3A6FB0 60%,#1C3A66)} .w6{background:#3A6FB0}
+  .g7{background:linear-gradient(160deg,#E88CB0,#B04470 60%,#5E1F3C)} .w7{background:#B04470}
+  .g8{background:linear-gradient(160deg,#8FD08F,#3F9B4F 60%,#1E5528)} .w8{background:#3F9B4F}
+  .g9{background:linear-gradient(160deg,#B0B8C4,#6A7484 60%,#38404E)} .w9{background:#6A7484}
+
+  /* 站源 */
+  .add-panel{position:absolute;top:30px;left:12px;right:12px;border-radius:15px;padding:12px;
+    background:#12161D;border:1px solid rgba(255,255,255,.09);
+    box-shadow:0 14px 30px -12px rgba(0,0,0,.6)}
+  .add-panel .ttl{font-size:9px;color:#7E8794;letter-spacing:.12em;margin-bottom:8px}
+  .urlbox{height:36px;border-radius:10px;background:#0A0C10;border:1px solid rgba(255,255,255,.10);
+    display:flex;align-items:center;padding:0 10px;font-size:10px;color:#7E8794}
+  .btn-primary{margin-top:8px;height:36px;border-radius:10px;
+    background:linear-gradient(180deg,#FFC46B,#E8862C);color:#201405;
+    display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:800;
+    box-shadow:0 6px 16px -6px rgba(232,148,15,.5)}
+  .btn-row{margin-top:8px;display:flex;justify-content:space-between;font-size:9.5px;color:#A8B0BC}
+  .sites-head{position:absolute;top:172px;left:16px;right:16px;display:flex;justify-content:space-between;align-items:center}
+  .sites-head b{font-size:10px;color:#7E8794;letter-spacing:.08em}
+  .sites-head span{font-size:9px;color:#FFC46B;font-weight:700}
+  .site-list{position:absolute;top:192px;left:12px;right:12px;bottom:76px;display:flex;flex-direction:column;gap:7px}
+  .srow{border-radius:13px;background:#12161D;border:1px solid rgba(255,255,255,.08);padding:9px 11px;
+    display:flex;align-items:center;gap:9px}
+  .phone.light .srow{background:#FFFFFF;border:1px solid #E2DFD8}
+  .phone.light .srow .nm b{color:#1A1C20}
+  .phone.light .srow .nm span{color:#7C8797}
+  .phone.light .sites-head b{color:#7C8797}
+  .phone.light .sites-head span{color:#B87A10}
+  .phone.light .add-panel{background:#FFFFFF;border:1px solid #E2DFD8;box-shadow:0 10px 26px -12px rgba(26,28,32,.25)}
+  .phone.light .add-panel .ttl{color:#7C8797}
+  .phone.light .urlbox{background:#F6F5F2;border:1px solid #E2DFD8;color:#7C8797}
+  .phone.light .btn-row{color:#4E5866}
+  .srow .logo{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;
+    color:#fff;font-size:11px;font-weight:800;flex-shrink:0}
+  .srow .nm{flex:1;min-width:0}
+  .srow .nm b{display:block;font-size:10.5px;color:#F2F4F7}
+  .srow .nm span{font-size:8.5px;color:#7E8794;font-family:Consolas,monospace}
+  .srow .st{font-size:8.5px;font-weight:700}
+  .st.ok{color:#3DD68C}.st.bad{color:#FF6B6B}.st.wait{color:#7E8794}
+
+  /* 我的 */
+  .mine{position:absolute;top:34px;left:14px;right:14px;bottom:76px}
+  .mgroup{font-size:8.5px;color:#7E8794;letter-spacing:.12em;margin:12px 2px 5px}
+  .mcard{border-radius:13px;background:#12161D;border:1px solid rgba(255,255,255,.08);overflow:hidden}
+  .phone.light .mcard{background:#fff;border:1px solid #E2DFD8}
+  .mrow{display:flex;align-items:center;gap:9px;padding:10px 12px;font-size:10.5px;color:#F2F4F7;
+    border-bottom:1px solid rgba(255,255,255,.05)}
+  .phone.light .mrow{color:#1A1C20;border-bottom:1px solid #EFEEE9}
+  .mrow:last-child{border-bottom:none}
+  .mrow .mi{width:24px;height:24px;border-radius:8px;background:rgba(255,196,107,.12);color:#FFC46B;
+    display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0}
+  .phone.light .mrow .mi{background:#FDF1DC;color:#B87A10}
+  .mrow .arr{margin-left:auto;color:#7E8794;font-size:11px}
+  .mrow .val{margin-left:auto;font-size:9px;color:#7E8794}
+  .phone.light .mrow .val,.phone.light .mrow .arr{color:#7C8797}
+
+  /* 播放页 */
+  .pb-top{position:absolute;top:26px;left:10px;right:10px;height:42px;display:flex;align-items:center;gap:9px;
+    padding:0 13px;border-radius:14px;color:#E8ECF3;font-size:10.5px;
+    background:#12161DE6;border:1px solid rgba(255,255,255,.09);box-shadow:0 10px 24px -10px rgba(0,0,0,.6)}
+  .pb-stage{position:absolute;inset:80px 0 0 0;display:flex;align-items:center;justify-content:center;
+    color:rgba(255,255,255,.5);font-size:26px}
+  .pb-bottom{position:absolute;left:10px;right:10px;bottom:12px;border-radius:15px;padding:9px 13px 10px;
+    background:#12161DE6;border:1px solid rgba(255,255,255,.09);box-shadow:0 14px 30px -10px rgba(0,0,0,.65)}
+  .pb-track{height:3px;border-radius:2px;background:rgba(255,255,255,.16);position:relative;margin:4px 0 7px}
+  .pb-track i{position:absolute;left:0;top:0;bottom:0;width:38%;background:linear-gradient(90deg,#FFC46B,#E8862C);border-radius:2px}
+  .pb-track s{position:absolute;left:38%;top:50%;width:8px;height:8px;border-radius:50%;background:#FFC46B;
+    transform:translate(-50%,-50%);box-shadow:0 0 8px rgba(255,196,107,.8)}
+  .pb-row{display:flex;align-items:center;justify-content:space-between;color:#C9D2DE;font-size:13px}
+  .pb-time{font-size:8px;color:#7E8794;font-family:Consolas,monospace;display:flex;justify-content:space-between;margin-top:1px}
+  .pb-tools{display:flex;justify-content:space-between;margin-top:7px;padding-top:7px;
+    border-top:1px solid rgba(255,255,255,.07);font-size:8.5px;color:#C9D2DE}
+  .pb-row .cap2{font-size:9.5px;border:1px solid rgba(255,255,255,.16);border-radius:999px;padding:2px 9px;color:#E8ECF3}
+  .pb-row .cap2.hot{border-color:rgba(255,196,107,.5);color:#FFC46B}
+
+  /* component specimens */
+  .spec-row{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+  .btn{height:44px;border-radius:12px;display:inline-flex;align-items:center;padding:0 20px;font-size:14px;font-weight:700}
+  .btn.main{background:linear-gradient(180deg,#FFC46B,#E8862C);color:#201405;box-shadow:0 6px 16px -6px rgba(232,148,15,.5)}
+  .btn.ghost{background:#12161D;color:#F2F4F7;border:1px solid rgba(255,255,255,.10)}
+  .btn.text{color:#B87A10;background:none;height:40px}
+  .btn.dark-ctx{margin-bottom:0}
+  .chip2{border-radius:999px;padding:6px 16px;font-size:13px;background:#EFEDE8;color:#4E5866}
+  .chip2.on{background:linear-gradient(180deg,#FFC46B,#E8862C);color:#201405;font-weight:700}
+  .dk-spec{background:#0A0C10;border:1px solid #1A1F28;border-radius:16px;padding:24px}
+  .dk-spec .btn.ghost{background:#12161D}
+  .dk-spec .chip2{background:#191E27;color:#A8B0BC;border:1px solid rgba(255,255,255,.07)}
+  .badge{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:3px 12px;font-size:12px;font-weight:600}
+  .badge i{width:7px;height:7px;border-radius:50%;display:inline-block}
+  .b-ok{background:rgba(61,214,140,.14);color:#3DD68C}.b-ok i{background:#3DD68C}
+  .b-bad{background:rgba(255,107,107,.14);color:#FF6B6B}.b-bad i{background:#FF6B6B}
+  .b-wait{background:rgba(255,255,255,.08);color:#7E8794}.b-wait i{background:#7E8794}
+
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+  .ease-demo{display:flex;gap:18px;flex-wrap:wrap}
+  .ease{flex:1;min-width:200px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .ease b{font-size:13px}
+  .ease .t{font-size:11.5px;color:var(--hint);margin:2px 0 12px}
+  .track{height:34px;border-radius:9px;background:var(--surface2);position:relative;overflow:hidden}
+  .knob{position:absolute;top:4px;left:4px;width:26px;height:26px;border-radius:8px;
+    background:linear-gradient(180deg,#FFC46B,#E8862C)}
+  .ease:hover .knob{left:calc(100% - 30px)}
+  .k1{transition:left .18s cubic-bezier(.25,.46,.45,.94)}
+  .k2{transition:left .22s cubic-bezier(.165,.84,.44,1)}
+  .k3{transition:left .3s cubic-bezier(.22,1,.36,1)}
+
+  .a11y{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .sample{border-radius:12px;padding:14px;border:1px solid #1A1F28;background:#0A0C10}
+  .sample.pale{background:#FFFFFF;border-color:#E2DFD8}
+  .ratio{font-family:Consolas,monospace;font-size:11px;margin-top:6px}
+  .pass{color:#3DD68C;font-weight:700}.cond{color:#FF6B6B;font-weight:700}
+  .sample.pale .ratio{color:#4E5866}
+  .sample.pale .pass{color:#1E9E5A}.sample.pale .cond{color:#D64545}
+
+  footer{margin-top:70px;padding-top:20px;border-top:1px solid var(--line);
+    color:var(--hint);font-size:12.5px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+  @media (max-width:900px){.cands,.shots,.swgrid,.elev{grid-template-columns:repeat(2,1fr)}.two,.a11y{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ============ HERO ============ -->
+  <div class="hero">
+    <div class="kicker">VIDEOSHELL · UI 2.0 MATERIAL REDUX</div>
+    <h1>材质重设计：<br><em>暗场 Spotlight</em> —— 内容即光源</h1>
+    <p class="lead">磨砂玻璃的逻辑是"介质感"——让界面像一层可透的材质。现在换一套更贴合视频产品的物理：
+    <b>把界面当成一间暗场放映厅</b>。画布近乎全黑，海报是唯一发光体，光从内容里溢出来；
+    面板是实底分层结构，靠色阶与发丝线建立层次；唯一的高饱和色是一束"聚光琥珀"，
+    只落在进度、选中态和主按钮上——用户视线永远被光引向正在发生的事。</p>
+    <div class="meta">
+      <span class="tag">替代「磨砂玻璃浮岛」材质</span>
+      <span class="tag">暗色为第一主题</span>
+      <span class="tag">零 blur · 低端机友好</span>
+      <span class="tag">2026-09-23 · v2 草案</span>
+    </div>
+  </div>
+
+  <!-- ============ 1 为什么换 ============ -->
+  <section>
+    <h2><span class="no">01</span>为什么换材质</h2>
+    <p class="sub">玻璃不是不好，是在这个产品里有三条更硬的理由换掉它。</p>
+    <table>
+      <tr><th style="width:190px">理由</th><th>说明</th></tr>
+      <tr><td><b>内容属性更合拍</b></td><td>视频 App 的主角是海报与画面。玻璃迫使"界面感"浮在内容之上；暗场逻辑相反——界面退成黑场，<b>内容自己发光</b>。用户注意力的去向，正好是产品想引导的方向。</td></tr>
+      <tr><td><b>性能账</b></td><td>半透明浮岛依赖 RenderEffect / 硬件 blur 层，minSdk 21 的低端机上是最贵的效果之一。新材质<b>零 blur、零背透</b>，只剩纯色 + hairline + 阴影，绘制成本降到最低。</td></tr>
+      <tr><td><b>可读性从"守"变"稳"</b></td><td>玻璃方案里文字压在不可控的透出内容上，永远要靠透明度纪律去"守"可读性（v1.0.49 的反复调参都是这件事）。实底材质让对比度变成<b>静态可验证</b>的常量，一次达标、永远达标。</td></tr>
+    </table>
+    <h3>保留清单（不动的东西）</h3>
+    <div class="card">
+      <span class="pill p-keep">保留</span> 三 Tab 信息架构与导航位置 ·
+      <span class="pill p-keep">保留</span> 海报 3 列 / 1:1.4 / grid_gap 6dp ·
+      <span class="pill p-keep">保留</span> 字号阶梯（11–22sp）与间距体系 ·
+      <span class="pill p-keep">保留</span> 圆角尺度（6–20dp）·
+      <span class="pill p-keep">保留</span> 站源页 1 主 + 3 次的动作收敛 ·
+      <span class="pill p-keep">保留</span> 状态三态徽章（正常/失联/未体检）·
+      <span class="pill p-keep">保留</span> brand 蓝降级为信息/链接色（不删除，识别不丢）
+    </div>
+  </section>
+
+  <!-- ============ 2 方向比选 ============ -->
+  <section>
+    <h2><span class="no">02</span>三个候选方向</h2>
+    <p class="sub">先开阔再收敛 —— 每个方向都做了一句气质判断。</p>
+    <div class="cands">
+      <div class="cand">
+        <div class="viz" style="background:radial-gradient(circle at 50% 120%,#2A2118,#0A0C10 70%)">
+          <div class="blk" style="background:#191E27;border:1px solid rgba(255,255,255,.09);box-shadow:0 0 24px rgba(232,148,15,.45)"></div>
+          <div class="blk" style="background:linear-gradient(180deg,#FFC46B,#E8862C);border-radius:999px;width:16px;height:16px"></div>
+        </div>
+        <div class="body"><b>A · 暗场 Spotlight</b>
+          <div class="t">黑场画布 + 实底分层 + 琥珀聚光。气质：放映厅、仪器、克制的光。</div></div>
+        <div class="verdict"><span class="pill p-new">选定</span> 内容即光源，与产品心智零摩擦；暗色是默认主题，成本最低。</div>
+      </div>
+      <div class="cand">
+        <div class="viz" style="background:#F6F5F2">
+          <div class="blk" style="background:#fff;border:1px solid #E2DFD8"></div>
+          <div style="width:40px;border-top:2px solid #1A1C20;border-bottom:2px solid #1A1C20;height:52px"></div>
+        </div>
+        <div class="body"><b>B · 纸感编辑风</b>
+          <div class="t">暖白纸底 + 细规则线 + 大字号衬线标题。气质：电影杂志、排印。</div></div>
+        <div class="verdict">气质独特，但列表型工具产品里规则线密度高、易显旧；亮色优先与产品默认暗色相悖。</div>
+      </div>
+      <div class="cand">
+        <div class="viz" style="background:linear-gradient(140deg,#101418,#1C2430)">
+          <div class="blk" style="background:#191E27;border:1px solid rgba(120,180,255,.25);box-shadow:0 0 18px rgba(93,149,247,.4)"></div>
+          <div class="blk" style="background:#12161D;border:1px solid rgba(120,180,255,.25)"></div>
+        </div>
+        <div class="body"><b>C · 曜石冷光</b>
+          <div class="t">深灰蓝面板 + 冷蓝发光描边。气质：科技、电竞。</div></div>
+        <div class="verdict">冷光描边容易滑向"电竞风"，与"全年龄看片工具"的气质错位；蓝色主强调也是 AI 界最俗的组合。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 3 材质 Token ============ -->
+  <section>
+    <h2><span class="no">03</span>材质 Token</h2>
+    <p class="sub">三套新体系：<b>色阶面板 · 聚光琥珀 · 光溢出</b>。玻璃四层材质（fill/glow/stroke/edge + ambient）整体退役。</p>
+
+    <h3>3.1 层级面板（暗 · 默认主题）—— 深度靠色阶，不靠透明</h3>
+    <div class="elev">
+      <div class="el" style="background:#0A0C10;border:1px solid #1A1F28"><b style="color:#F2F4F7">e0 stage 画布</b><span style="color:#7E8794">#0A0C10 · 页面底</span></div>
+      <div class="el" style="background:#12161D;border:1px solid rgba(255,255,255,.09)"><b style="color:#F2F4F7">e1 panel 面板</b><span style="color:#7E8794">#12161D · 导航/顶栏/面板</span></div>
+      <div class="el" style="background:#191E27;border:1px solid rgba(255,255,255,.08)"><b style="color:#F2F4F7">e2 card 卡片</b><span style="color:#7E8794">#191E27 · 行卡/输入框</span></div>
+      <div class="el" style="background:#222834;border:1px solid rgba(255,255,255,.10)"><b style="color:#F2F4F7">e3 lift 提亮</b><span style="color:#7E8794">#222834 · 按压/悬停</span></div>
+    </div>
+    <p style="font-size:12.5px;color:var(--hint);margin-top:10px">
+      每级之间只差一档明度，配 8–10% 白 hairline 描边与向下投影；<b>禁止跨级跳色</b>（e0 直接叠 e2 会被读成"洞"）。</p>
+
+    <h3>3.2 聚光琥珀（唯一高饱和强调色）</h3>
+    <div class="swgrid">
+      <div class="sw"><div class="chip" style="background:linear-gradient(180deg,#FFC46B,#E8862C)"></div><div class="lbl"><b>amber 渐变</b><span>#FFC46B→#E8862C · 进度/选中</span></div></div>
+      <div class="sw"><div class="chip" style="background:#F0A63C"></div><div class="lbl"><b>amber 实底</b><span>#F0A63C · 主按钮/焦点</span></div></div>
+      <div class="sw"><div class="chip" style="background:#201405"></div><div class="lbl"><b>amber_ink</b><span>#201405 · 琥珀上的文字</span></div></div>
+      <div class="sw"><div class="chip" style="background:#B87A10"></div><div class="lbl"><b>amber_text</b><span>#B87A10 · 亮底文字用</span></div></div>
+      <div class="sw"><div class="chip" style="background:#5D95F7"></div><div class="lbl"><b>info（原brand）</b><span>#5D95F7 · 链接/信息，不承载强调</span></div></div>
+      <div class="sw"><div class="chip" style="background:linear-gradient(160deg,#5A8CF0,#5E43C8,#B85C4A)"></div><div class="lbl"><b>spill_* 光溢出</b><span>取海报主色的 12–18% alpha</span></div></div>
+    </div>
+
+    <h3>3.3 光溢出（Spill）—— 新材质的"灵魂动线"</h3>
+    <div class="card">
+      <p><b>规则只有一条：光只从内容里来。</b>每张海报卡在底部投一团<b>海报主色</b>的柔光（Coil 取主色或按分类预置渐变，12–18% alpha，模糊 12–16dp）；
+      播放中的卡片光晕随播放呼吸（透明度 ±4%）。界面里<b>不存在</b>无来源的光——没有背光斑、没有发光描边、没有渐变装饰。
+      这是暗场方案与"发光电竞风"的分界线。</p>
+      <p style="margin-top:10px;font-size:13px;color:var(--ink2)">实现代价：每卡一个低档模糊 Bitmap 或 9-patch 光斑，列表复用回收，<b>无 blur API 依赖</b>，minSdk 21 可用。</p>
+    </div>
+
+    <h3>3.4 双主题色卡</h3>
+    <div class="two" style="grid-template-columns:1.2fr 1fr">
+      <div class="dk-stage">
+        <div class="dk-title">暗 · Dark Stage（默认）</div>
+        <div class="swgrid" style="grid-template-columns:repeat(3,1fr)">
+          <div class="sw"><div class="chip" style="background:#0A0C10;border-bottom:1px solid #1A1F28"></div><div class="lbl"><b>stage</b><span>#0A0C10</span></div></div>
+          <div class="sw"><div class="chip" style="background:#F2F4F7"></div><div class="lbl"><b>ink</b><span>#F2F4F7</span></div></div>
+          <div class="sw"><div class="chip" style="background:#A8B0BC"></div><div class="lbl"><b>ink2</b><span>#A8B0BC</span></div></div>
+          <div class="sw"><div class="chip" style="background:#7E8794"></div><div class="lbl"><b>hint</b><span>#7E8794 · 4.6:1</span></div></div>
+          <div class="sw"><div class="chip" style="background:#3DD68C"></div><div class="lbl"><b>ok</b><span>#3DD68C</span></div></div>
+          <div class="sw"><div class="chip" style="background:#FF6B6B"></div><div class="lbl"><b>bad</b><span>#FF6B6B</span></div></div>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:13px;margin:8px 0 10px;color:var(--ink2)">亮 · Daylight 放映室（白昼陪衬主题）</div>
+        <div class="swgrid" style="grid-template-columns:repeat(3,1fr)">
+          <div class="sw"><div class="chip" style="background:#F6F5F2;border-bottom:1px solid #E2DFD8"></div><div class="lbl"><b>stage</b><span>#F6F5F2 暖纸</span></div></div>
+          <div class="sw"><div class="chip" style="background:#FFFFFF;border-bottom:1px solid #E2DFD8"></div><div class="lbl"><b>e1/e2</b><span>#FFFFFF</span></div></div>
+          <div class="sw"><div class="chip" style="background:#B87A10"></div><div class="lbl"><b>amber_text</b><span>#B87A10</span></div></div>
+        </div>
+        <p style="font-size:12.5px;color:var(--hint);margin-top:10px">亮色下琥珀只以 <code>amber_text/#B87A10</code> 与细描边出现，光溢出换成极淡的暖投影（<code>#B8862C</code> 8%）——"纸上的烫金"，不是暗场的灯。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 4 页面方案 ============ -->
+  <section>
+    <h2><span class="no">04</span>核心页面方案（新材质）</h2>
+    <p class="sub">同一批页面在「暗场 Spotlight」下的样子。第三屏为亮色主题对照。</p>
+    <div class="shots">
+
+      <!-- 首页 -->
+      <div class="shot">
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>▲ ● ▮</span></div>
+          <div class="home-top"><span class="site">金牌影视</span><span class="chip">JSON 直连</span>
+            <span class="ic">⌕</span><span class="ic">🕘</span></div>
+          <div class="cats"><span class="cat on">推荐</span><span class="cat">电影</span><span class="cat">剧集</span><span class="cat">综艺</span><span class="cat">动漫</span></div>
+          <div class="grid3">
+            <div class="pcard"><div class="glow w1"></div><div class="art g1"></div><div class="prog"><i style="width:70%"></i></div><div class="t">星际回响</div></div>
+            <div class="pcard"><div class="glow w2"></div><div class="art g2"></div><div class="t">长夜将尽</div></div>
+            <div class="pcard"><div class="glow w3"></div><div class="art g3"></div><div class="t">海雾灯塔</div></div>
+            <div class="pcard"><div class="glow w4"></div><div class="art g4"></div><div class="t">幻境旅行者</div></div>
+            <div class="pcard"><div class="glow w5"></div><div class="art g5"></div><div class="t">黄金年代</div></div>
+            <div class="pcard"><div class="glow w6"></div><div class="art g6"></div><div class="t">深蓝之境</div></div>
+            <div class="pcard"><div class="glow w7"></div><div class="art g7"></div><div class="t">玫瑰与刀</div></div>
+            <div class="pcard"><div class="glow w8"></div><div class="art g8"></div><div class="t">绿野迷踪</div></div>
+            <div class="pcard"><div class="glow w9"></div><div class="art g9"></div><div class="t">无名之城</div></div>
+          </div>
+          <div class="dock">
+            <div class="ni on"><b>⌂</b>首页</div><div class="ni"><b>⚙</b>站源</div><div class="ni"><b>☰</b>我的</div>
+          </div>
+        </div>
+        <div class="cap"><b>首页</b> —— 海报光溢出 + 琥珀进度</div>
+      </div>
+
+      <!-- 站源（亮色对照） -->
+      <div class="shot">
+        <div class="phone light">
+          <div class="status"><span>9:41</span><span>▲ ● ▮</span></div>
+          <div class="add-panel">
+            <div class="ttl">添加站源</div>
+            <div class="urlbox">粘贴网址，例如 example.com</div>
+            <div class="btn-primary">识别并添加</div>
+            <div class="btn-row"><span>网页浏览</span><span>直接播放</span><span>高级检测 ▾</span></div>
+          </div>
+          <div class="sites-head"><b>我的站源 · 3</b><span>管理 ⌄</span></div>
+          <div class="site-list">
+            <div class="srow"><div class="logo" style="background:#B8862C">金</div>
+              <div class="nm"><b>金牌影视</b><span>bolyship.com</span></div><span class="st ok">● 正常</span></div>
+            <div class="srow"><div class="logo" style="background:#1E8F84">野</div>
+              <div class="nm"><b>野果视频</b><span>wildfruit.tv</span></div><span class="st ok">● 正常</span></div>
+            <div class="srow"><div class="logo" style="background:#5E43C8">星</div>
+              <div class="nm"><b>星辰资源</b><span>xingchen.app</span></div><span class="st wait">○ 未体检</span></div>
+            <div class="srow" style="opacity:.55"><div class="logo" style="background:#9AA3AF">旧</div>
+              <div class="nm"><b>旧站备份</b><span>old.vod.cn</span></div><span class="st bad">● 失联</span></div>
+          </div>
+          <div class="dock">
+            <div class="ni"><b>⌂</b>首页</div><div class="ni on"><b>⚙</b>站源</div><div class="ni"><b>☰</b>我的</div>
+          </div>
+        </div>
+        <div class="cap"><b>站源 · 亮色对照</b> —— 白纸 + 烫金主按钮</div>
+      </div>
+
+      <!-- 我的 -->
+      <div class="shot">
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>▲ ● ▮</span></div>
+          <div class="mine">
+            <div class="mgroup" style="margin-top:0">内容</div>
+            <div class="mcard">
+              <div class="mrow"><span class="mi">🕘</span>观看历史<span class="arr">›</span></div>
+              <div class="mrow"><span class="mi">★</span>我的收藏<span class="arr">›</span></div>
+            </div>
+            <div class="mgroup">播放</div>
+            <div class="mcard">
+              <div class="mrow"><span class="mi">⟳</span>自动识别站型<span class="val">开</span></div>
+              <div class="mrow"><span class="mi">▶</span>自动连播<span class="val">开</span></div>
+              <div class="mrow"><span class="mi">⏵</span>记住进度<span class="val">开</span></div>
+              <div class="mrow"><span class="mi">♪</span>后台播放<span class="val">关</span></div>
+            </div>
+            <div class="mgroup">关于</div>
+            <div class="mcard">
+              <div class="mrow"><span class="mi">ⓘ</span>版本<span class="val">v1.0.58</span></div>
+              <div class="mrow"><span class="mi">⤓</span>检查更新<span class="val">已是最新</span></div>
+            </div>
+          </div>
+          <div class="dock">
+            <div class="ni"><b>⌂</b>首页</div><div class="ni"><b>⚙</b>站源</div><div class="ni on"><b>☰</b>我的</div>
+          </div>
+        </div>
+        <div class="cap"><b>我的</b> —— e1 分组卡 + 琥珀图标底</div>
+      </div>
+
+      <!-- 播放页 -->
+      <div class="shot">
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>▲ ● ▮</span></div>
+          <div class="pb-top"><span>‹</span><span style="flex:1">星际回响 · 第 3 集</span><span>⤢</span><span>投屏</span></div>
+          <div class="pb-stage">▶</div>
+          <div class="pb-bottom">
+            <div class="pb-track"><i></i><s></s></div>
+            <div class="pb-time"><span>12:48</span><span>34:20</span></div>
+            <div class="pb-row"><span>◁◁</span><span style="font-size:17px;color:#FFC46B">⏸</span><span>▷▷</span>
+              <span class="cap2">选集 3/24</span><span class="cap2 hot">线路 1</span></div>
+            <div class="pb-tools"><span>1.0×</span><span>横屏</span><span>字幕</span><span>...</span></div>
+          </div>
+        </div>
+        <div class="cap"><b>播放页</b> —— 琥珀进度光点 + e1 控制岛</div>
+      </div>
+    </div>
+
+    <h3>4.1 材质映射：旧玻璃件 → 暗场件</h3>
+    <table>
+      <tr><th style="width:220px">旧（磨砂玻璃浮岛）</th><th>新（暗场 Spotlight）</th><th style="width:110px">变化</th></tr>
+      <tr><td>底部导航浮岛（半透玻璃 + 背透滚动）</td><td><b>实体 Dock</b>：e1 实底 + 顶部 hairline + 深投影；选中 Tab = 琥珀胶囊（amber_ink 文字）</td><td><span class="pill p-new">重做</span></td></tr>
+      <tr><td>顶栏浮岛 / 玻璃次岛</td><td><b>滚动感知顶栏</b>：默认融入 stage（无面板），上滑后变 e1 实底 + hairline；分类芯片条直接落在画布上</td><td><span class="pill p-new">重做</span></td></tr>
+      <tr><td>站源行玻璃卡</td><td>e1 实底行卡 + hairline；Logo 色块沿用；失联行 55% 透明度沿用</td><td><span class="pill p-new">换底</span></td></tr>
+      <tr><td>「添加岛」玻璃面板</td><td>e1 实底面板 + amber 渐变主按钮 + 输入框 e0 内嵌</td><td><span class="pill p-new">换底</span></td></tr>
+      <tr><td>播放页玻璃顶/底栏</td><td><b>控制岛</b>：e1 88% 实底（<code>#12161DE6</code>）+ hairline；进度条 = 琥珀渐变 + 进度光点（播放位发光）</td><td><span class="pill p-new">重做</span></td></tr>
+      <tr><td>glass_pressed 按压变实</td><td>按压 = 提亮一档到 <code>e3</code> + scale 0.98，无位移无弹跳</td><td><span class="pill p-new">替换</span></td></tr>
+      <tr><td>ambient 光斑背景层</td><td>整体退役；光只来自海报 spill 与琥珀进度</td><td><span class="pill p-cut">移除</span></td></tr>
+      <tr><td>四层玻璃 Token（fill/glow/stroke/edge）</td><td>替换为 e0–e3 色阶 + hairline + spill 三组 Token</td><td><span class="pill p-cut">移除</span></td></tr>
+    </table>
+  </section>
+
+  <!-- ============ 5 组件规范 ============ -->
+  <section>
+    <h2><span class="no">05</span>组件规范（更新项）</h2>
+    <p class="sub">结构沿用上一版方案（三层级按钮 / 状态徽章 / 空态骨架），只更新材质表达。</p>
+    <div class="two">
+      <div class="card">
+        <b style="font-size:13.5px">按钮 · 三层级（暗底实拍）</b>
+        <div class="dk-spec">
+          <div class="spec-row">
+            <span class="btn main">识别并添加</span>
+            <span class="btn ghost">取消</span>
+            <span class="btn text">网页浏览 ›</span>
+          </div>
+          <p style="font-size:12.5px;color:#A8B0BC;margin-top:12px">
+          主按钮 = 琥珀渐变 + <b>深墨文字</b>（白字在琥珀上只有 2.1:1，禁用）；
+          次级 = e1 实底 + hairline；三级 = 琥珀文字（亮底下换 <code>amber_text</code>）。
+          按压统一 e3 提亮 + scale 0.98。</p>
+        </div>
+        <b style="font-size:13.5px;display:block;margin-top:16px">分类芯片</b>
+        <div class="spec-row" style="margin-top:10px">
+          <span class="chip2 on">推荐</span><span class="chip2">电影</span><span class="chip2">剧集</span><span class="chip2">综艺</span>
+        </div>
+      </div>
+      <div class="card">
+        <b style="font-size:13.5px">状态徽章（暗底实拍 · 语义沿用）</b>
+        <div class="dk-spec">
+          <div class="spec-row">
+            <span class="badge b-ok"><i></i>正常</span>
+            <span class="badge b-bad"><i></i>失联</span>
+            <span class="badge b-wait"><i></i>未体检</span>
+          </div>
+          <p style="font-size:12.5px;color:#A8B0BC;margin-top:12px">实底色块 → <b>14% 透明同色底</b>：状态色仍然三态唯一，但从"贴纸"变成"灯"。</p>
+        </div>
+        <b style="font-size:13.5px;display:block;margin-top:16px">骨架屏</b>
+        <p style="font-size:12.5px;color:var(--ink2);margin-top:8px">
+          海报位 = e2 灰块 + 微光扫过（琥珀 4% 高光带，1.2s/次）——骨架屏的"微光"是暗场里唯一允许的装饰性动效。</p>
+        <b style="font-size:13.5px;display:block;margin-top:16px">进度条</b>
+        <p style="font-size:12.5px;color:var(--ink2);margin-top:8px">
+          全 App 唯一进度表达：<b>琥珀渐变 2.5dp + 末端光点</b>（8dp 圆点 + 8dp glow）。卡片续播 / 播放页 / 下载进度共用，禁止再出现蓝色 ProgressBar。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 6 动效 ============ -->
+  <section>
+    <h2><span class="no">06</span>动效（更新项）</h2>
+    <p class="sub">节奏不变（150–300ms / ease-out 家族 / 尊重 duration_scale=0），材质表达换光。</p>
+    <div class="ease-demo">
+      <div class="ease"><b>按压</b><div class="t">提亮 e3 + scale 0.98 · 150ms</div><div class="track"><div class="knob k1"></div></div></div>
+      <div class="ease"><b>顶栏显底</b><div class="t">stage→e1 + hairline 淡入 · 220ms</div><div class="track"><div class="knob k2"></div></div></div>
+      <div class="ease"><b>光溢出呼吸</b><div class="t">播放中 spill ±4% · 2.4s 循环</div><div class="track"><div class="knob k3"></div></div></div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <table>
+        <tr><th style="width:210px">场景</th><th>规则</th></tr>
+        <tr><td>页面进入</td><td>内容先亮：海报卡从 4% 透明 + 12dp 下移淡入，首屏前 6 张错峰 30ms；<b>面板不做入场动效</b>——暗场里只有内容在动。</td></tr>
+        <tr><td>进度推进</td><td>光点位置变化不做补间拖影；琥珀填充平滑跟随。</td></tr>
+        <tr><td>状态变化</td><td>徽章底色 200ms 颜色过渡（灰→绿），同上一版。</td></tr>
+        <tr><td>禁用清单</td><td>无发光描边动画、无霓虹脉冲、无视差光斑 —— 光只属于内容与进度。</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ 7 无障碍 ============ -->
+  <section>
+    <h2><span class="no">07</span>无障碍（实测对比度）</h2>
+    <p class="sub">实底材质的好处：所有比值都是常量，一次验证永久有效。</p>
+    <div class="a11y">
+      <div class="card" style="background:#0A0C10;border-color:#1A1F28">
+        <b style="color:#F2F4F7;font-size:13px">暗 · Dark Stage</b>
+        <div class="sample" style="margin-top:12px"><span style="color:#F2F4F7">ink #F2F4F7 on stage</span><div class="ratio" style="color:#A8B0BC">16.9 : 1 <span class="pass">✓ AAA</span></div></div>
+        <div class="sample" style="margin-top:10px"><span style="color:#7E8794">hint #7E8794 on stage</span><div class="ratio" style="color:#A8B0BC">4.6 : 1 <span class="pass">✓ AA</span></div></div>
+        <div class="sample" style="margin-top:10px"><span style="color:#201405;background:linear-gradient(90deg,#FFC46B,#E8862C);padding:2px 10px;border-radius:6px;font-weight:700">amber_ink on 琥珀按钮</span><div class="ratio" style="color:#A8B0BC">8.9 : 1 <span class="pass">✓ AA+</span></div></div>
+      </div>
+      <div class="card">
+        <b style="font-size:13px">亮 · Daylight</b>
+        <div class="sample pale" style="margin-top:12px"><span>ink #1A1C20 on #F6F5F2</span><div class="ratio">14.8 : 1 <span class="pass">✓ AAA</span></div></div>
+        <div class="sample pale" style="margin-top:10px"><span style="color:#B87A10;font-weight:600">amber_text #B87A10 on #FFF</span><div class="ratio">4.7 : 1 <span class="pass">✓ AA</span></div></div>
+        <div class="sample pale" style="margin-top:10px"><span style="color:#E8940F;font-weight:600">✗ amber #E8940F 做亮底文字</span><div class="ratio">2.4 : 1 <span class="cond">禁用 · 只作图形色</span></div></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <table>
+        <tr><th style="width:180px">项目</th><th>要求</th></tr>
+        <tr><td>触控热区</td><td>≥ 44dp 不变（Dock 54dp、行 52–56dp、芯片垫足）。</td></tr>
+        <tr><td>状态不靠颜色</td><td>徽章文字 + 图标双编码不变。</td></tr>
+        <tr><td>光溢出不可读性</td><td>spill 永远在<b>卡片外</b>（画布上），永不压到文字底下。</td></tr>
+        <tr><td>动态光效开关</td><td>spill 呼吸、骨架微光在"减弱动态效果"下静止。</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ 8 落地 ============ -->
+  <section>
+    <h2><span class="no">08</span>落地路线（材质版）</h2>
+    <p class="sub">仍按 P0→P2 分期。材质替换是"换 Token + 换背景 drawable"级别，布局结构改动极小。</p>
+    <table>
+      <tr><th style="width:70px">期</th><th style="width:280px">内容</th><th>涉及文件</th></tr>
+      <tr><td><span class="pill p-p0">P0</span></td><td><b>材质 Token 替换</b>：colors/values-night 换成 e0–e3 + amber + hairline 体系；dimens 补 <code>elev_card</code>/<code>spill_blur</code>；退役 glass_* 四层（保留色名一个版本防炸）</td><td><code>values/colors.xml</code> <code>values-night/colors.xml</code> <code>dimens.xml</code></td></tr>
+      <tr><td><span class="pill p-p0">P0</span></td><td><b>bg_ambient → 纯 stage</b>：根布局背景 drawable 换纯色 + vignette；移除光斑层</td><td><code>drawable/bg_ambient*</code> <code>activity_main.xml</code></td></tr>
+      <tr><td><span class="pill p-p1">P1</span></td><td><b>Dock 化底栏</b>：实底 + hairline + 选中琥珀胶囊；<b>站源/添加面板换 e1 实底</b></td><td><code>view_site_browser.xml</code> <code>activity_main.xml</code> 自绘 <code>GlassEdgeDrawable</code> → <code>PanelDrawable</code></td></tr>
+      <tr><td><span class="pill p-p1">P1</span></td><td><b>海报光溢出</b>：Coil 取主色（或分类预置渐变）+ spill drawable；<b>琥珀进度条组件</b>统一三处</td><td><code>item_video.xml</code> 新 <code>SpillView</code> / <code>ProgressAmber</code></td></tr>
+      <tr><td><span class="pill p-p1">P1</span></td><td><b>播放页控制岛</b>：e1 88% 实底 + 琥珀进度光点（clearance 体系不变）</td><td><code>activity_player.xml</code> <code>PlayerActivity*</code></td></tr>
+      <tr><td><span class="pill p-p2">P2</span></td><td>滚动感知顶栏、骨架微光、spill 呼吸、按压 e3 提亮统一化</td><td>各 Adapter + <code>MainActivity</code></td></tr>
+    </table>
+    <div class="card" style="margin-top:14px;background:#FDF6E8;border-color:#EAD9AE">
+      <b style="font-size:13.5px">⚠ 落地纪律（材质版）</b>
+      <p style="font-size:13px;color:var(--ink2);margin-top:6px">
+      ① 层级只许逐级（e0→e1→e2），禁止跨级叠放；② hairline 统一 1dp，双主题各一套极性不需要了（新材质 hairline 都是"白 8%/黑 8%"，随底色取反即可）；
+      ③ 琥珀上永远用 <code>amber_ink</code> 深墨文字，禁白字；④ 光只从内容与进度来，任何新增发光都要先过这条；
+      ⑤ 改 Kotlin 后 debug + release 双构建 + <code>runall.py</code> 门禁 + grep 复核落盘。</p>
+    </div>
+  </section>
+
+  <footer>
+    <span>视频壳 UI 2.0 · 材质重设计「暗场 Spotlight」 v2 草案 · 2026-09-23</span>
+    <span>内容即光源 · 实底分层 · 一束聚光琥珀</span>
+  </footer>
+</div>
+</body>
+</html>

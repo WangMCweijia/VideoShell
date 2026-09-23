@@ -7,15 +7,18 @@
       不这么拆的话，亮色模式下会出现「白底白字」的状态栏（用户实测反馈）。
     -->
     <style name="Theme.VideoShell.Base" parent="Theme.MaterialComponents.NoActionBar">
-        <item name="colorPrimary">@color/brand</item>
-        <item name="colorPrimaryVariant">@color/brand_dark</item>
-        <item name="colorOnPrimary">@color/white</item>
-        <item name="colorSecondary">@color/brand</item>
-        <item name="colorOnSecondary">@color/white</item>
+        <!-- UI 2.0「暗场 Spotlight」：主强调 = 聚光琥珀（唯一高饱和色）。
+             brand 蓝降级为 info/链接色，仍以 @color/brand 字面引用出现在
+             链接文字、进度之外的语义处 —— 主题属性不再指向它。 -->
+        <item name="colorPrimary">@color/amber</item>
+        <item name="colorPrimaryVariant">@color/amber_dark</item>
+        <item name="colorOnPrimary">@color/amber_ink</item>
+        <item name="colorSecondary">@color/amber</item>
+        <item name="colorOnSecondary">@color/amber_ink</item>
         <item name="colorSurface">@color/surface</item>
         <item name="colorOnSurface">@color/text_primary</item>
         <item name="android:colorBackground">@color/bg</item>
-        <item name="colorError">@color/brand</item>
+        <item name="colorError">@color/bad</item>
         <item name="android:windowBackground">@color/bg</item>
         <item name="android:statusBarColor">@color/bg</item>
         <item name="android:navigationBarColor">@color/bg_deep</item>

@@ -186,7 +186,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center"
-            android:indeterminateTint="@color/brand"
+            android:indeterminateTint="@color/amber_progress"
             android:visibility="gone" />
     </FrameLayout>
 

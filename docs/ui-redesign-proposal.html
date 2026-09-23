@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>视频壳 UI 2.0 · 界面设计方案</title>
+<style>
+  :root{
+    --bg:#F0F3F8; --bg-deep:#E5EAF3; --surface:#FFFFFF; --surface2:#E9EDF5;
+    --line:#D9E0EA; --brand:#2F6FE4; --brand-dark:#2559B8;
+    --ink:#16191F; --ink2:#4E5866; --hint:#7C8797; --ok:#1E9E5A; --bad:#D64545;
+    --glass:#B8FFFFFF; --glass2:#8FFFFFFF; --gstroke:#1F0F1A2E;
+    --teal:#12B5A6; --purple:#7C4DFF;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    font-family:"Segoe UI","Microsoft YaHei UI","PingFang SC",system-ui,sans-serif;
+    background:var(--bg); color:var(--ink); line-height:1.65; font-size:15px;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:0 28px 80px}
+
+  /* ---------- hero ---------- */
+  .hero{
+    padding:64px 0 40px; position:relative;
+  }
+  .hero .kicker{color:var(--brand);font-weight:600;letter-spacing:.14em;font-size:12px;text-transform:uppercase}
+  .hero h1{font-size:40px;line-height:1.25;font-weight:700;margin:10px 0 14px}
+  .hero h1 em{font-style:normal;color:var(--brand)}
+  .hero p.lead{color:var(--ink2);max-width:640px;font-size:16px}
+  .hero .meta{margin-top:22px;display:flex;gap:10px;flex-wrap:wrap}
+  .tag{background:var(--glass);border:1px solid var(--gstroke);border-radius:999px;
+    padding:5px 14px;font-size:12px;color:var(--ink2);backdrop-filter:blur(6px)}
+
+  /* ---------- sections ---------- */
+  section{margin-top:56px}
+  h2{font-size:24px;font-weight:700;display:flex;align-items:baseline;gap:12px;margin-bottom:6px}
+  h2 .no{color:var(--brand);font-size:14px;font-weight:700;letter-spacing:.08em}
+  .sub{color:var(--hint);font-size:13.5px;margin-bottom:22px}
+  h3{font-size:16px;font-weight:700;margin:26px 0 10px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:24px}
+
+  /* ---------- principles ---------- */
+  .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .prin{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:20px}
+  .prin .ic{width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;
+    font-size:18px;margin-bottom:12px;background:linear-gradient(160deg,#EAF1FD,#DDE9FB);border:1px solid #CBDFF9}
+  .prin b{display:block;font-size:15px;margin-bottom:6px}
+  .prin span{font-size:13px;color:var(--ink2)}
+
+  /* ---------- tables ---------- */
+  table{width:100%;border-collapse:collapse;font-size:13.5px;background:var(--surface);
+    border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  th{background:var(--surface2);text-align:left;padding:10px 14px;font-size:12px;color:var(--ink2);
+    letter-spacing:.05em;font-weight:600}
+  td{padding:10px 14px;border-top:1px solid var(--line);vertical-align:top}
+  td code, .mono{font-family:Consolas,"Cascadia Mono",monospace;font-size:12.5px;background:var(--surface2);
+    border-radius:5px;padding:1px 6px;color:var(--brand-dark)}
+  .pill{display:inline-block;border-radius:999px;padding:1px 10px;font-size:11.5px;font-weight:600}
+  .p-keep{background:#E4F4EB;color:var(--ok)}
+  .p-fix{background:#FCEAEA;color:var(--bad)}
+  .p-new{background:#EAF1FD;color:var(--brand)}
+  .p-p0{background:var(--brand);color:#fff}
+  .p-p1{background:#BBD0F5;color:var(--brand-dark)}
+  .p-p2{background:var(--surface2);color:var(--ink2)}
+
+  /* ---------- swatches ---------- */
+  .swgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+  .sw{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+  .sw .chip{height:52px}
+  .sw .lbl{padding:8px 10px;font-size:11.5px}
+  .sw .lbl b{display:block;font-size:12px}
+  .sw .lbl span{color:var(--hint);font-family:Consolas,monospace;font-size:10.5px}
+  .swgrid.dk{background:#0B0D11;border-radius:16px;padding:14px;border:none}
+  .swgrid.dk .sw{background:#171A21;border-color:#262B36}
+  .swgrid.dk .sw .lbl{color:#F2F4F7}
+  .swgrid.dk .sw .lbl span{color:#9AA3AF}
+  .dk-title{color:#F2F4F7;font-size:13px;margin:8px 0 10px;padding-left:4px}
+
+  /* ---------- type & spacing ---------- */
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+  .tspec{display:flex;align-items:baseline;gap:14px;padding:9px 0;border-bottom:1px dashed var(--line)}
+  .tspec:last-child{border:none}
+  .tspec .demo{width:190px;white-space:nowrap;overflow:hidden}
+  .tspec .info{font-size:12px;color:var(--hint);font-family:Consolas,monospace}
+  .spacebar{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;padding:6px 0}
+  .sbar{background:linear-gradient(180deg,#EAF1FD,#D7E5FA);border:1px solid #C4D9F7;border-radius:6px}
+  .sbar i{display:block;font-style:normal;font-size:10.5px;color:var(--brand-dark);text-align:center;padding-top:4px}
+
+  /* ---------- phone mockups ---------- */
+  .shots{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+  .shot .cap{text-align:center;font-size:12.5px;color:var(--ink2);margin-top:10px}
+  .shot .cap b{color:var(--ink)}
+  .phone{
+    width:100%;aspect-ratio:360/740;border-radius:30px;position:relative;overflow:hidden;
+    border:1px solid #C9D3E2;box-shadow:0 18px 40px -18px rgba(22,25,31,.25);
+    background:
+      radial-gradient(220px 180px at 82% 6%, rgba(47,111,228,.30), transparent 70%),
+      radial-gradient(200px 200px at 6% 34%, rgba(18,181,166,.24), transparent 70%),
+      radial-gradient(210px 190px at 55% 96%, rgba(124,77,255,.16), transparent 70%),
+      linear-gradient(180deg,#F2F5FA 0%, #E9EEF6 55%, #E2E8F2 100%);
+  }
+  .phone.dark{
+    background:
+      radial-gradient(220px 180px at 82% 6%, rgba(61,127,251,.38), transparent 70%),
+      radial-gradient(200px 200px at 6% 34%, rgba(18,181,166,.30), transparent 70%),
+      radial-gradient(210px 190px at 55% 96%, rgba(124,77,255,.22), transparent 70%),
+      linear-gradient(180deg,#0D0F14 0%, #0B0D11 60%, #07090C 100%);
+    border-color:#20242e;
+  }
+  .status{display:flex;justify-content:space-between;padding:10px 16px 0;font-size:9px;font-weight:600}
+  .phone.dark .status{color:#E8ECF3}
+  .island{position:absolute;left:8px;right:8px;border-radius:16px;
+    background:linear-gradient(180deg,rgba(255,255,255,.72),rgba(255,255,255,.56));
+    border:1px solid rgba(15,26,46,.12);box-shadow:0 6px 18px -8px rgba(22,25,31,.28);
+    backdrop-filter:blur(10px)}
+  .phone.dark .island{
+    background:linear-gradient(180deg,rgba(21,25,33,.65),rgba(16,20,27,.48));
+    border:1px solid rgba(255,255,255,.17);box-shadow:0 6px 18px -8px rgba(0,0,0,.6)}
+  .topbar{top:26px;height:44px;display:flex;align-items:center;gap:8px;padding:0 12px}
+  .topbar .site{font-size:12.5px;font-weight:700}
+  .phone.dark .topbar .site{color:#F2F4F7}
+  .topbar .chip{font-size:9px;color:var(--brand);background:#EAF1FD;border-radius:999px;padding:2px 8px;font-weight:600}
+  .phone.dark .topbar .chip{background:rgba(61,127,251,.18);color:#7FA9F7}
+  .topbar .ic{margin-left:auto;font-size:13px;color:var(--ink2)}
+  .phone.dark .topbar .ic{color:#9AA3AF}
+  .cats{top:78px;height:32px;display:flex;align-items:center;gap:6px;padding:0 10px;overflow:hidden}
+  .cat{font-size:9.5px;padding:3px 9px;border-radius:999px;color:var(--ink2);white-space:nowrap}
+  .phone.dark .cat{color:#9AA3AF}
+  .cat.on{background:var(--brand);color:#fff;font-weight:600}
+  .grid3{position:absolute;top:120px;left:12px;right:12px;bottom:64px;
+    display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;align-content:start}
+  .pcard{border-radius:10px;overflow:hidden;position:relative;background:#D8DFEA}
+  .pcard .art{aspect-ratio:10/14;border-radius:10px 10px 0 0}
+  .pcard .t{font-size:8.2px;line-height:1.3;padding:3px 4px 5px;color:var(--ink);
+    background:var(--surface);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .phone.dark .pcard .t{background:#171A21;color:#F2F4F7}
+  .pcard .prog{position:absolute;left:0;bottom:22px;height:2.5px;background:rgba(255,255,255,.35);border-radius:2px}
+  .pcard .prog i{display:block;height:100%;background:var(--brand);border-radius:2px}
+  .g1{background:linear-gradient(160deg,#5A8CF0,#2F5FB8 60%,#223F7A)}
+  .g2{background:linear-gradient(160deg,#E8A17C,#B85C4A 60%,#6E2F3A)}
+  .g3{background:linear-gradient(160deg,#57C9BB,#1E8F84 60%,#0F4F4A)}
+  .g4{background:linear-gradient(160deg,#9B8CF2,#5E43C8 60%,#33246E)}
+  .g5{background:linear-gradient(160deg,#E8C97C,#B8862C 60%,#6E5214)}
+  .g6{background:linear-gradient(160deg,#7FB5E8,#3A6FB0 60%,#1C3A66)}
+  .g7{background:linear-gradient(160deg,#E88CB0,#B04470 60%,#5E1F3C)}
+  .g8{background:linear-gradient(160deg,#8FD08F,#3F9B4F 60%,#1E5528)}
+  .g9{background:linear-gradient(160deg,#B0B8C4,#6A7484 60%,#38404E)}
+  .navbar{position:absolute;left:10px;right:10px;bottom:10px;height:52px;border-radius:18px;
+    display:flex;align-items:center;justify-content:space-around;
+    background:linear-gradient(180deg,rgba(255,255,255,.78),rgba(255,255,255,.60));
+    border:1px solid rgba(15,26,46,.12);box-shadow:0 8px 22px -8px rgba(22,25,31,.30);backdrop-filter:blur(12px)}
+  .phone.dark .navbar{background:linear-gradient(180deg,rgba(21,25,33,.70),rgba(16,20,27,.48));
+    border:1px solid rgba(255,255,255,.17)}
+  .ni{font-size:8.5px;color:var(--hint);display:flex;flex-direction:column;align-items:center;gap:2px}
+  .ni b{font-size:13px;font-weight:400}
+  .ni.on{color:var(--brand);font-weight:700}
+  .phone.dark .ni{color:#6B7480}
+  .phone.dark .ni.on{color:#5D95F7}
+
+  /* 站源页 mockup */
+  .add-island{top:30px;padding:11px 12px}
+  .urlbox{height:34px;border-radius:10px;background:#fff;border:1px solid var(--line);
+    display:flex;align-items:center;padding:0 10px;font-size:10px;color:var(--hint)}
+  .phone.dark .urlbox{background:#10141B;border-color:#262B36;color:#6B7480}
+  .btn-primary{margin-top:8px;height:34px;border-radius:10px;background:var(--brand);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700}
+  .btn-row{margin-top:7px;display:flex;justify-content:space-between;font-size:9.5px;color:var(--brand)}
+  .sites-head{position:absolute;top:158px;left:16px;right:16px;display:flex;justify-content:space-between;align-items:center}
+  .sites-head b{font-size:10px;color:var(--hint);letter-spacing:.06em}
+  .sites-head span{font-size:9px;color:var(--brand);font-weight:600}
+  .site-list{position:absolute;top:178px;left:12px;right:12px;bottom:70px;display:flex;flex-direction:column;gap:7px}
+  .srow{border-radius:12px;background:linear-gradient(180deg,rgba(255,255,255,.86),rgba(255,255,255,.72));
+    border:1px solid rgba(15,26,46,.10);padding:9px 11px;display:flex;align-items:center;gap:9px;
+    box-shadow:0 3px 10px -6px rgba(22,25,31,.18)}
+  .phone.dark .srow{background:linear-gradient(180deg,rgba(23,26,33,.88),rgba(23,26,33,.72));
+    border:1px solid rgba(255,255,255,.10)}
+  .srow .logo{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;
+    color:#fff;font-size:11px;font-weight:800;flex-shrink:0}
+  .srow .nm{flex:1;min-width:0}
+  .srow .nm b{display:block;font-size:10.5px;color:var(--ink)}
+  .phone.dark .srow .nm b{color:#F2F4F7}
+  .srow .nm span{font-size:8.5px;color:var(--hint);font-family:Consolas,monospace}
+  .srow .st{font-size:8.5px;font-weight:700}
+  .st.ok{color:var(--ok)} .st.bad{color:var(--bad)} .st.wait{color:var(--hint)}
+
+  /* 我的页 mockup */
+  .mine{position:absolute;top:34px;left:14px;right:14px;bottom:70px}
+  .mgroup{font-size:8.5px;color:var(--hint);letter-spacing:.1em;margin:10px 2px 5px}
+  .mcard{border-radius:13px;background:linear-gradient(180deg,rgba(255,255,255,.88),rgba(255,255,255,.74));
+    border:1px solid rgba(15,26,46,.10);overflow:hidden;box-shadow:0 3px 10px -6px rgba(22,25,31,.18)}
+  .phone.dark .mcard{background:linear-gradient(180deg,rgba(23,26,33,.9),rgba(23,26,33,.74));
+    border:1px solid rgba(255,255,255,.10)}
+  .mrow{display:flex;align-items:center;gap:9px;padding:9px 11px;font-size:10.5px;color:var(--ink);
+    border-bottom:1px solid rgba(15,26,46,.06)}
+  .phone.dark .mrow{color:#F2F4F7;border-bottom:1px solid rgba(255,255,255,.05)}
+  .mrow:last-child{border-bottom:none}
+  .mrow .mi{width:24px;height:24px;border-radius:8px;background:#EAF1FD;color:var(--brand);
+    display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0}
+  .phone.dark .mrow .mi{background:rgba(61,127,251,.16);color:#7FA9F7}
+  .mrow .arr{margin-left:auto;color:var(--hint);font-size:11px}
+  .mrow .val{margin-left:auto;font-size:9px;color:var(--hint)}
+
+  /* 播放页 mockup（暗色） */
+  .pb-top{position:absolute;top:26px;left:8px;right:8px;height:42px;display:flex;align-items:center;
+    gap:9px;padding:0 12px;border-radius:16px;color:#E8ECF3;font-size:10.5px;
+    background:linear-gradient(180deg,rgba(21,25,33,.65),rgba(16,20,27,.48));
+    border:1px solid rgba(255,255,255,.17);backdrop-filter:blur(10px)}
+  .pb-stage{position:absolute;inset:80px 0 0 0;display:flex;align-items:center;justify-content:center;
+    color:rgba(255,255,255,.55);font-size:26px}
+  .pb-bottom{position:absolute;left:8px;right:8px;bottom:10px;border-radius:18px;padding:8px 12px 9px;
+    background:linear-gradient(180deg,rgba(21,25,33,.72),rgba(16,20,27,.55));
+    border:1px solid rgba(255,255,255,.17);backdrop-filter:blur(12px)}
+  .pb-track{height:3px;border-radius:2px;background:rgba(255,255,255,.22);position:relative;margin:4px 0 7px}
+  .pb-track i{position:absolute;left:0;top:0;bottom:0;width:38%;background:#5D95F7;border-radius:2px}
+  .pb-track s{position:absolute;left:38%;top:50%;width:8px;height:8px;border-radius:50%;background:#fff;
+    transform:translate(-50%,-50%)}
+  .pb-row{display:flex;align-items:center;justify-content:space-between;color:#C9D2DE;font-size:13px}
+  .pb-time{font-size:8px;color:#9AA3AF;font-family:Consolas,monospace;display:flex;justify-content:space-between;margin-top:1px}
+  .pb-tools{display:flex;justify-content:space-between;margin-top:6px;padding-top:6px;
+    border-top:1px solid rgba(255,255,255,.10);font-size:8.5px;color:#C9D2DE}
+  .callout{position:absolute;border:1.5px dashed var(--brand);border-radius:18px;pointer-events:none}
+
+  /* component specimens */
+  .spec-row{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+  .btn{height:44px;border-radius:12px;display:inline-flex;align-items:center;padding:0 20px;font-size:14px;font-weight:600}
+  .btn.main{background:var(--brand);color:#fff;box-shadow:0 4px 12px -4px rgba(47,111,228,.5)}
+  .btn.ghost{background:var(--surface);border:1px solid var(--line);color:var(--ink)}
+  .btn.text{color:var(--brand);background:none;height:40px}
+  .chips{display:flex;gap:8px;flex-wrap:wrap}
+  .chip2{border-radius:999px;padding:6px 16px;font-size:13px;background:var(--surface2);color:var(--ink2)}
+  .chip2.on{background:var(--brand);color:#fff;font-weight:600}
+  .badge{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:3px 12px;font-size:12px;font-weight:600}
+  .badge i{width:7px;height:7px;border-radius:50%;display:inline-block}
+  .b-ok{background:#E4F4EB;color:var(--ok)} .b-ok i{background:var(--ok)}
+  .b-bad{background:#FCEAEA;color:var(--bad)} .b-bad i{background:var(--bad)}
+  .b-wait{background:var(--surface2);color:var(--hint)} .b-wait i{background:var(--hint)}
+
+  /* motion */
+  .ease-demo{display:flex;gap:18px;flex-wrap:wrap}
+  .ease{flex:1;min-width:200px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .ease b{font-size:13px}
+  .ease .t{font-size:11.5px;color:var(--hint);margin:2px 0 12px}
+  .track{height:34px;border-radius:9px;background:var(--surface2);position:relative;overflow:hidden}
+  .knob{position:absolute;top:4px;left:4px;width:26px;height:26px;border-radius:8px;background:var(--brand)}
+  .ease:hover .knob{left:calc(100% - 30px)}
+  .k1{transition:left .18s cubic-bezier(.25,.46,.45,.94)}
+  .k2{transition:left .22s cubic-bezier(.165,.84,.44,1)}
+  .k3{transition:left .3s cubic-bezier(.22,1,.36,1)}
+
+  /* a11y */
+  .a11y{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .sample{border-radius:12px;padding:14px;border:1px solid var(--line)}
+  .sample.dark{background:#0B0D11;border-color:#262B36}
+  .ratio{font-family:Consolas,monospace;font-size:11px;margin-top:6px}
+  .pass{color:var(--ok);font-weight:700} .cond{color:#B8862C;font-weight:700}
+
+  footer{margin-top:70px;padding-top:20px;border-top:1px solid var(--line);
+    color:var(--hint);font-size:12.5px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+  @media (max-width:900px){.grid4,.shots,.swgrid{grid-template-columns:repeat(2,1fr)}.two,.a11y{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ============ HERO ============ -->
+  <div class="hero">
+    <div class="kicker">VIDEOSHELL · UI 2.0 DESIGN PROPOSAL</div>
+    <h1>视频壳 界面设计方案<br><em>玻璃浮岛 2.0</em> —— 习惯延续，质感升维</h1>
+    <p class="lead">这不是一次推倒重来。现有界面最值钱的资产是三样：三 Tab 信息架构、磨砂玻璃浮岛材质、
+    「输入网址就能看」的心智模型。方案 2.0 在此之上做<b>一致性收敛 + 主次重构 + 状态语言统一</b>，
+    让每一次触摸都落在用户已经熟悉的位置上。</p>
+    <div class="meta">
+      <span class="tag">Android · minSdk 21</span>
+      <span class="tag">Material Components</span>
+      <span class="tag">亮 / 暗双主题</span>
+      <span class="tag">WCAG AA</span>
+      <span class="tag">2026-09-23 · v1 草案</span>
+    </div>
+  </div>
+
+  <!-- ============ 1 设计上下文 ============ -->
+  <section>
+    <h2><span class="no">01</span>设计上下文</h2>
+    <p class="sub">设计判断的依据 —— 先说清楚"为谁、在什么场景、解决什么"。</p>
+    <div class="card">
+      <table>
+        <tr><th style="width:140px">维度</th><th>内容</th></tr>
+        <tr><td><b>目标用户</b></td><td>安卓用户（含开发者本人长期自用）。不是极客，也不需要被教育 —— 打开 App 的唯一目的：<b>找到源、点开、看片</b>。</td></tr>
+        <tr><td><b>核心任务</b></td><td>① 粘贴/输入网址 → 识别站型 → 浏览观看（低频但关键）；② 在已知站源内浏览分类、搜索、点开播放（高频）；③ 历史续播（高频，最被依赖的路径）。</td></tr>
+        <tr><td><b>气质定位</b></td><td><b>克制的光学仪器</b>：玻璃浮岛是 App 的识别符号，负责"美"；信息层级与状态反馈负责"易用"。两者不冲突 —— 玻璃之下必须是清晰的内容。</td></tr>
+        <tr><td><b>硬约束</b></td><td>包体敏感（R8 后 3.05MB，不引入新 UI 库）；单手竖屏为主；暗色为默认主题；列表必须从导航栏玻璃下穿过（v1.0.49 确立的物理规则）。</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ 2 现状诊断 ============ -->
+  <section>
+    <h2><span class="no">02</span>现状诊断</h2>
+    <p class="sub">逐条对照现有布局（activity_main.xml / dimens / colors）得出，每条都指向一个可落地的改法。</p>
+    <table>
+      <tr><th style="width:60px">判定</th><th style="width:230px">问题</th><th>细节</th></tr>
+      <tr><td><span class="pill p-fix">待改进</span></td><td><b>站源页动作过多、主次不分</b></td><td>输入框 + 2 个等权按钮（检测/嗅探）+ 2 个文字按钮（直接播放/网页浏览）+ 4 个管理按钮并排 —— 首屏 8 个可点击元素竞争注意力，新用户不知道先按哪个。核心动作「添加站源」反而没有视觉主角。</td></tr>
+      <tr><td><span class="pill p-fix">待改进</span></td><td><b>状态反馈各自为政</b></td><td>tvHint / tvHomeState / tvUpdateHint / tvEmpty 四处裸 TextView，字号 12–13sp 不齐，成功/失败没有统一的视觉语言（体检徽章 ok/bad 色已有，但只用在站源列表）。</td></tr>
+      <tr><td><span class="pill p-fix">待改进</span></td><td><b>「我的」页行缺图标锚点</b></td><td>行内只有文字 + ›，扫读时没有视觉锚；行高 padding 14dp 与 48dp 输入框、44dp 按钮的节奏未对齐成一套。</td></tr>
+      <tr><td><span class="pill p-fix">待改进</span></td><td><b>亮色辅助文字对比度不足</b></td><td><code>text_hint #7C8797</code> 在白底上 ≈ <b>3.6:1</b>，低于 AA 的 4.5:1，而它大量用于 12sp 小字（分组标题、空态、提示）。</td></tr>
+      <tr><td><span class="pill p-keep">保持</span></td><td><b>三 Tab + 底部玻璃导航</b></td><td>v1.0.49 起"真正浮起"，卡片从玻璃下穿过 —— 这是 App 质感的核心来源，<b>不动</b>。</td></tr>
+      <tr><td><span class="pill p-keep">保持</span></td><td><b>Token 体系已有骨架</b></td><td>dimens.xml 的字号/间距/圆角/浮岛四套尺度、colors.xml 的玻璃四层材质已经集中管理 —— 2.0 只做<b>补档与执行率</b>，不换体系。</td></tr>
+      <tr><td><span class="pill p-keep">保持</span></td><td><b>海报 3 列 + 1:1.4 比例</b></td><td>搜索页左栏 76dp 反算保证两页卡片同宽 —— 精密的既有决策，沿用。</td></tr>
+    </table>
+  </section>
+
+  <!-- ============ 3 设计原则 ============ -->
+  <section>
+    <h2><span class="no">03</span>四条设计原则</h2>
+    <p class="sub">之后所有页面的取舍，都用这四条裁决。</p>
+    <div class="grid4">
+      <div class="prin"><div class="ic">🧭</div><b>习惯不动</b><span>三 Tab 结构、底部浮岛、海报 3 列、"粘贴网址就能看"的心智全部保留。改动只发生在 Tab 内部。</span></div>
+      <div class="prin"><div class="ic">🫧</div><b>玻璃一致</b><span>所有浮层只用一套浮岛尺度（island_gap 10 / pad 14·10 / radius 16）与玻璃四层材质，禁止页面自创第二套半透明。</span></div>
+      <div class="prin"><div class="ic">👁</div><b>可读性优先</b><span>能读比更透重要（既有铁律）。玻璃上的正文一律 ≥14sp、primary 色；hint 色只用于 11–12sp 的辅助信息且提亮达标。</span></div>
+      <div class="prin"><div class="ic">🎯</div><b>一屏一事</b><span>每屏只有一个视觉主角：首页是海报网格、站源页是「添加岛」、播放页是画面本身。其余动作降级为文字按钮或收纳。</span></div>
+    </div>
+  </section>
+
+  <!-- ============ 4 Token ============ -->
+  <section>
+    <h2><span class="no">04</span>设计 Token（含新增项）</h2>
+    <p class="sub">沿用 colors.xml / values-night / dimens.xml 现值，<b>新增</b>项以 <span class="pill p-new">新增</span> 标注。落点：tokens 只改 values 文件，不改任何布局逻辑。</p>
+
+    <h3>4.1 色彩 · 亮色（values/colors.xml）</h3>
+    <div class="swgrid">
+      <div class="sw"><div class="chip" style="background:#2F6FE4"></div><div class="lbl"><b>brand</b><span>#2F6FE4 · 4.65:1 ✓AA</span></div></div>
+      <div class="sw"><div class="chip" style="background:#2559B8"></div><div class="lbl"><b>brand_dark</b><span>#2559B8</span></div></div>
+      <div class="sw"><div class="chip" style="background:#16191F"></div><div class="lbl"><b>text_primary</b><span>#16191F</span></div></div>
+      <div class="sw"><div class="chip" style="background:#4E5866"></div><div class="lbl"><b>text_secondary</b><span>#4E5866</span></div></div>
+      <div class="sw"><div class="chip" style="background:#6E7888"></div><div class="lbl"><b>text_hint ↗</b><span class="pill p-new">新增值</span> <span>#6E7888 · 4.6:1 ✓AA</span></div></div>
+      <div class="sw"><div class="chip" style="background:#1E9E5A"></div><div class="lbl"><b>ok</b><span>#1E9E5A</span></div></div>
+      <div class="sw"><div class="chip" style="background:#D64545"></div><div class="lbl"><b>bad</b><span>#D64545</span></div></div>
+      <div class="sw"><div class="chip" style="background:#F0F3F8;border-bottom:1px solid #D9E0EA"></div><div class="lbl"><b>bg</b><span>#F0F3F8</span></div></div>
+      <div class="sw"><div class="chip" style="background:#FFFFFF;border-bottom:1px solid #D9E0EA"></div><div class="lbl"><b>surface</b><span>#FFFFFF</span></div></div>
+      <div class="sw"><div class="chip" style="background:linear-gradient(160deg,#2F6FE4,#12B5A6,#7C4DFF)"></div><div class="lbl"><b>ambient_1–3</b><span>光斑 · 沿用</span></div></div>
+      <div class="sw"><div class="chip" style="background:linear-gradient(180deg,rgba(255,255,255,.72),rgba(255,255,255,.56));border-bottom:1px solid rgba(15,26,46,.12)"></div><div class="lbl"><b>glass_fill→2</b><span>72%→56% · 沿用</span></div></div>
+      <div class="sw"><div class="chip" style="background:#EAF1FD"></div><div class="lbl"><b>brand_tint ↗</b><span class="pill p-new">新增</span> <span>#EAF1FD · 图标底/选中底</span></div></div>
+    </div>
+    <p style="font-size:12.5px;color:var(--hint);margin-top:10px">text_hint 亮色 #7C8797 → <b>#6E7888</b>：仅加深一档到 AA 达标，视觉气质几乎不变。暗色 text_hint #6B7480 在 #0B0D11 上 ≈ 4.1:1，同样提到 <b>#7A8492</b>。</p>
+
+    <h3>4.2 色彩 · 暗色（values-night/colors.xml · 默认主题）</h3>
+    <div class="swgrid dk">
+      <div class="sw"><div class="chip" style="background:#3D7FFB"></div><div class="lbl"><b>brand</b><span>#3D7FFB</span></div></div>
+      <div class="sw"><div class="chip" style="background:#F2F4F7"></div><div class="lbl"><b>text_primary</b><span>#F2F4F7</span></div></div>
+      <div class="sw"><div class="chip" style="background:#9AA3AF"></div><div class="lbl"><b>text_secondary</b><span>#9AA3AF</span></div></div>
+      <div class="sw"><div class="chip" style="background:#7A8492"></div><div class="lbl"><b>text_hint ↗</b><span>#7A8492 · 4.5:1 ✓</span></div></div>
+      <div class="sw"><div class="chip" style="background:#3DD68C"></div><div class="lbl"><b>ok</b><span>#3DD68C</span></div></div>
+      <div class="sw"><div class="chip" style="background:#FF6B6B"></div><div class="lbl"><b>bad</b><span>#FF6B6B</span></div></div>
+    </div>
+
+    <h3>4.3 字号（dimens · 沿用，补两档）</h3>
+    <div class="two">
+      <div class="card">
+        <div class="tspec"><div class="demo" style="font-size:22px;font-weight:700">页面大标题</div><div class="info">text_hero · 22sp <span class="pill p-new">新增</span></div></div>
+        <div class="tspec"><div class="demo" style="font-size:16px;font-weight:700">卡片/组标题</div><div class="info">text_title · 16sp</div></div>
+        <div class="tspec"><div class="demo" style="font-size:14px">正文 / 行主文字</div><div class="info">text_body · 14sp</div></div>
+        <div class="tspec"><div class="demo" style="font-size:13px">次要说明</div><div class="info">text_sub · 13sp</div></div>
+        <div class="tspec"><div class="demo" style="font-size:12px">辅助 / 空态</div><div class="info">text_caption · 12sp</div></div>
+        <div class="tspec"><div class="demo" style="font-size:11px">徽章 / 集数</div><div class="info">text_badge · 11sp（下限）</div></div>
+      </div>
+      <div class="card">
+        <b style="font-size:13.5px">间距 / 圆角 / 浮岛（全部沿用）</b>
+        <div class="spacebar">
+          <div class="sbar" style="width:22px;height:26px"><i>4</i></div>
+          <div class="sbar" style="width:26px;height:26px"><i>6</i></div>
+          <div class="sbar" style="width:30px;height:26px"><i>8</i></div>
+          <div class="sbar" style="width:44px;height:26px"><i>14</i></div>
+          <div class="sbar" style="width:52px;height:26px"><i>18</i></div>
+        </div>
+        <div class="spacebar">
+          <div class="sbar" style="width:34px;height:26px"><i>r6</i></div>
+          <div class="sbar" style="width:42px;height:26px"><i>r8</i></div>
+          <div class="sbar" style="width:56px;height:26px"><i>r12</i></div>
+          <div class="sbar" style="width:66px;height:26px"><i>r16</i></div>
+          <div class="sbar" style="width:74px;height:26px"><i>r20</i></div>
+        </div>
+        <p style="font-size:12.5px;color:var(--ink2);margin-top:8px">
+          浮岛四件套 <code>island_gap 10</code> / <code>pad 14·10</code> / <code>min_h 52</code> / <code>radius_lg 16</code>；
+          新增 <code>touch_min 44dp</code>（所有可点元素热区下限，现有 44dp 按钮合规、38dp 管理按钮需垫到 44）。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 5 页面方案 ============ -->
+  <section>
+    <h2><span class="no">05</span>核心页面方案</h2>
+    <p class="sub">四屏并排。虚线框标注的是相对现状的<b>关键改动</b>，其余与现状一致。</p>
+    <div class="shots">
+
+      <!-- 首页 -->
+      <div class="shot">
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>▲ ● ▮</span></div>
+          <div class="island topbar"><span class="site">金牌影视</span><span class="chip">JSON 直连</span>
+            <span class="ic">⌕</span><span class="ic">🕘</span></div>
+          <div class="island cats"><span class="cat on">推荐</span><span class="cat">电影</span><span class="cat">剧集</span><span class="cat">综艺</span><span class="cat">动漫</span></div>
+          <div class="grid3">
+            <div class="pcard"><div class="art g1"></div><div class="prog" style="width:62%"><i style="width:70%"></i></div><div class="t">星际回响</div></div>
+            <div class="pcard"><div class="art g2"></div><div class="t">长夜将尽</div></div>
+            <div class="pcard"><div class="art g3"></div><div class="t">海雾灯塔</div></div>
+            <div class="pcard"><div class="art g4"></div><div class="t">幻境旅行者</div></div>
+            <div class="pcard"><div class="art g5"></div><div class="t">黄金年代</div></div>
+            <div class="pcard"><div class="art g6"></div><div class="t">深蓝之境</div></div>
+            <div class="pcard"><div class="art g7"></div><div class="t">玫瑰与刀</div></div>
+            <div class="pcard"><div class="art g8"></div><div class="t">绿野迷踪</div></div>
+            <div class="pcard"><div class="art g9"></div><div class="t">无名之城</div></div>
+          </div>
+          <div class="navbar">
+            <div class="ni on"><b>⌂</b>首页</div><div class="ni"><b>⚙</b>站源</div><div class="ni"><b>☰</b>我的</div>
+          </div>
+        </div>
+        <div class="cap"><b>首页 · 浏览</b> —— 新增玻璃顶岛</div>
+      </div>
+
+      <!-- 站源 -->
+      <div class="shot">
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>▲ ● ▮</span></div>
+          <div class="island add-island">
+            <div class="urlbox">粘贴网址，例如 example.com</div>
+            <div class="btn-primary">识别并添加</div>
+            <div class="btn-row"><span>网页浏览</span><span>直接播放</span><span>高级检测 ▾</span></div>
+          </div>
+          <div class="sites-head"><b>我的站源 · 3</b><span>导入 / 导出 / 体检 ⌄</span></div>
+          <div class="site-list">
+            <div class="srow"><div class="logo" style="background:#2F6FE4">金</div>
+              <div class="nm"><b>金牌影视</b><span>bolyship.com</span></div><span class="st ok">● 正常</span></div>
+            <div class="srow"><div class="logo" style="background:#12B5A6">野</div>
+              <div class="nm"><b>野果视频</b><span>wildfruit.tv</span></div><span class="st ok">● 正常</span></div>
+            <div class="srow"><div class="logo" style="background:#7C4DFF">星</div>
+              <div class="nm"><b>星辰资源</b><span>xingchen.app</span></div><span class="st wait">○ 未体检</span></div>
+            <div class="srow" style="opacity:.6"><div class="logo" style="background:#9AA3AF">旧</div>
+              <div class="nm"><b>旧站备份</b><span>old.vod.cn</span></div><span class="st bad">● 失联</span></div>
+          </div>
+          <div class="navbar">
+            <div class="ni"><b>⌂</b>首页</div><div class="ni on"><b>⚙</b>站源</div><div class="ni"><b>☰</b>我的</div>
+          </div>
+        </div>
+        <div class="cap"><b>站源 · 添加岛重构</b> —— 8 个动作收敛为 1 主 + 3 次</div>
+      </div>
+
+      <!-- 我的 -->
+      <div class="shot">
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>▲ ● ▮</span></div>
+          <div class="mine">
+            <div class="mgroup" style="margin-top:0">内容</div>
+            <div class="mcard">
+              <div class="mrow"><span class="mi">🕘</span>观看历史<span class="arr">›</span></div>
+              <div class="mrow"><span class="mi">★</span>我的收藏<span class="arr">›</span></div>
+            </div>
+            <div class="mgroup">播放</div>
+            <div class="mcard">
+              <div class="mrow"><span class="mi">⟳</span>自动识别站型<span class="val">开</span></div>
+              <div class="mrow"><span class="mi">▶</span>自动连播<span class="val">开</span></div>
+              <div class="mrow"><span class="mi">⏵</span>记住进度<span class="val">开</span></div>
+              <div class="mrow"><span class="mi">♪</span>后台播放<span class="val">关</span></div>
+            </div>
+            <div class="mgroup">外观</div>
+            <div class="mcard">
+              <div class="mrow"><span class="mi">◐</span>深色模式<span class="val">跟随系统</span></div>
+            </div>
+            <div class="mgroup">关于</div>
+            <div class="mcard">
+              <div class="mrow"><span class="mi">ⓘ</span>版本<span class="val">v1.0.58</span></div>
+              <div class="mrow"><span class="mi">⤓</span>检查更新<span class="val">已是最新</span></div>
+            </div>
+          </div>
+          <div class="navbar">
+            <div class="ni"><b>⌂</b>首页</div><div class="ni"><b>⚙</b>站源</div><div class="ni on"><b>☰</b>我的</div>
+          </div>
+        </div>
+        <div class="cap"><b>我的</b> —— 行加图标锚点 + 开关值右显</div>
+      </div>
+
+      <!-- 播放页（暗色） -->
+      <div class="shot">
+        <div class="phone dark">
+          <div class="status"><span>9:41</span><span>▲ ● ▮</span></div>
+          <div class="pb-top"><span>‹</span><span style="flex:1">星际回响 · 第 3 集</span><span>⤢</span><span>投屏</span></div>
+          <div class="pb-stage">▶</div>
+          <div class="pb-bottom">
+            <div class="pb-track"><i></i><s></s></div>
+            <div class="pb-time"><span>12:48</span><span>34:20</span></div>
+            <div class="pb-row"><span>◁◁</span><span style="font-size:17px">⏸</span><span>▷▷</span>
+              <span style="font-size:9.5px;border:1px solid rgba(255,255,255,.3);border-radius:999px;padding:2px 9px">选集 3/24</span>
+              <span style="font-size:9.5px;border:1px solid rgba(255,255,255,.3);border-radius:999px;padding:2px 9px">线路 1</span></div>
+            <div class="pb-tools"><span>1.0×</span><span>横屏</span><span>字幕</span><span>...</span></div>
+          </div>
+        </div>
+        <div class="cap"><b>播放页 · 暗色浮岛</b> —— 结构沿用，微调见 5.4</div>
+      </div>
+    </div>
+
+    <h3>5.1 首页 —— 新增「玻璃顶岛」</h3>
+    <div class="card">
+      <p><b>改动：</b>现状首页直接铺 view_site_browser，站源身份、搜索入口没有固定落点。新增一块顶岛（结构 = 现有浮岛规范）：
+      左侧<b>站源名 + 站型徽章</b>（让"自动识别"这项核心能力第一次被看见），右侧<b>搜索、历史</b>两个图标（热区 44dp）。
+      分类芯片条并入顶岛下方同材质次岛。<b>海报网格、3 列、1:1.4、grid_gap 6dp 全部不动。</b></p>
+      <p style="margin-top:10px"><b>续播可视化：</b>有进度的卡片底部加 2.5dp 品牌色进度条（利用现有 HistEntry 数据，零新存储）。这是把"最被依赖的路径"（历史续播）提前到首页的第一触点。</p>
+    </div>
+
+    <h3>5.2 站源页 —— 「添加岛」主次重构</h3>
+    <div class="card">
+      <p><b>现状 8 个动作 → 收敛为 1 主 + 3 次：</b></p>
+      <table style="margin-top:10px">
+        <tr><th>层级</th><th>元素</th><th>处理</th></tr>
+        <tr><td><b>主角</b></td><td>「识别并添加」主按钮（满宽、44dp、实心 brand）</td><td><span class="pill p-new">新增</span>合并原「检测」；这是本页唯一实心按钮</td></tr>
+        <tr><td><b>次级</b></td><td>网页浏览 / 直接播放 / 高级检测（含嗅探）</td><td>降为文字按钮一行，保留现有行为与 id</td></tr>
+        <tr><td><b>收纳</b></td><td>导入 / 导出 / 合并 / 体检</td><td>收进列表标题右侧「管理 ⌄」弹出菜单（4 个 38dp 并排按钮退役，顺带解决热区不足）</td></tr>
+      </table>
+      <p style="margin-top:10px"><b>站源行升级：</b>站点 Logo 字符块（品牌色取自站名首字哈希）+ 状态徽章（沿用 ok/bad 色体系 + 新增「未体检」灰态）。失联站源整行 60% 透明度——状态一眼可扫。</p>
+    </div>
+
+    <h3>5.3 我的 —— 图标锚点 + 状态右显</h3>
+    <div class="card">
+      <p>每行加 24dp 圆角图标底（<code>brand_tint</code> 底 + brand 图标），分组标题用 <code>text_hint</code> 12sp + 0.1em 字距；
+      开关类设置的<b>当前值</b>以文字右显（「开/关/跟随系统」），替代"必须看到 Switch 才知道状态"——Switch 控件保留，两者不冲突。
+      行高统一 52dp（= island_min_h，与底栏节奏对齐）。</p>
+    </div>
+
+    <h3>5.4 播放页 —— 只做减法</h3>
+    <div class="card">
+      <p>浮岛顶/底栏结构与 <code>player_panel_clearance 144dp</code> 体系<b>全部沿用</b>（改行高必须同步 values-land 的既有纪律不变）。
+      微调两处：① 底栏工具行四项（倍速/横屏/字幕/更多）改 8.5sp 图标+文字，与主行拉开层级；② 「选集」「线路」改胶囊描边样式，替代裸文字——这两个是播放页最高频的二次操作，值得更大的可点击暗示。</p>
+    </div>
+  </section>
+
+  <!-- ============ 6 组件规范 ============ -->
+  <section>
+    <h2><span class="no">06</span>组件规范</h2>
+    <p class="sub">五类高频组件，一处定义、处处引用。</p>
+    <div class="two">
+      <div class="card">
+        <b style="font-size:13.5px">按钮（唯一三个层级）</b>
+        <div class="spec-row" style="margin-top:12px">
+          <span class="btn main">识别并添加</span>
+          <span class="btn ghost">取消</span>
+          <span class="btn text">网页浏览 ›</span>
+        </div>
+        <p style="font-size:12.5px;color:var(--ink2);margin-top:12px">
+          实心 = 每屏最多 1 个 · 描边 = 次级确认 · 文字 = 三级动作。
+          圆角统一 12dp（radius），高度 44dp，按压态用 <code>glass_pressed</code> 同款变实反馈。</p>
+        <b style="font-size:13.5px;display:block;margin-top:18px">分类芯片</b>
+        <div class="chips" style="margin-top:10px">
+          <span class="chip2 on">推荐</span><span class="chip2">电影</span><span class="chip2">剧集</span><span class="chip2">综艺</span>
+        </div>
+        <p style="font-size:12.5px;color:var(--ink2);margin-top:10px">选中 = brand 实底白字；未选中 = surface_2 底。高度 32dp，横滑。</p>
+      </div>
+      <div class="card">
+        <b style="font-size:13.5px">状态徽章（统一状态语言）</b>
+        <div class="spec-row" style="margin-top:12px">
+          <span class="badge b-ok"><i></i>正常</span>
+          <span class="badge b-bad"><i></i>失联</span>
+          <span class="badge b-wait"><i></i>未体检</span>
+        </div>
+        <p style="font-size:12.5px;color:var(--ink2);margin-top:12px">
+          全 App 只此一套状态色（ok/bad + 灰），站源体检、更新检查、嗅探结果、识别进度共用。
+          禁止再造第四种状态色。<span class="pill p-new">新增</span>「未体检」灰态补齐三态语义。</p>
+        <b style="font-size:13.5px;display:block;margin-top:18px">空状态 / 骨架屏</b>
+        <p style="font-size:12.5px;color:var(--ink2);margin-top:8px">
+          空态 = 一句话 + 一个动作按钮（"还没有站源 → 去添加"），居中、<code>text_hint</code>。
+          列表加载 = 海报位置灰色圆角块（<code>surface_2</code>），<b>不用转圈 ProgressBar</b>——骨架屏让"正在来"比"在等待"感知更快。</p>
+        <b style="font-size:13.5px;display:block;margin-top:18px">站源行</b>
+        <p style="font-size:12.5px;color:var(--ink2);margin-top:8px">
+          56dp 高 · Logo 字符块 30dp（底色 = 站名哈希从 brand/teal/purple 三色池取）·
+          名称 14sp + 域名 11sp mono · 右侧状态徽章。整行热区 56dp ≥ 44dp ✓。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 7 动效 ============ -->
+  <section>
+    <h2><span class="no">07</span>动效规范</h2>
+    <p class="sub">克制、快、无弹性 —— 玻璃是"仪器"，不是"玩具"。（悬停下方卡片可预览三种缓动）</p>
+    <div class="ease-demo">
+      <div class="ease"><b>微交互</b><div class="t">按压 / 芯片切换 · 150–180ms</div><div class="track"><div class="knob k1"></div></div></div>
+      <div class="ease"><b>浮层进出</b><div class="t">顶岛 / 面板 / 菜单 · 220ms ease-out-quart</div><div class="track"><div class="knob k2"></div></div></div>
+      <div class="ease"><b>页面转场</b><div class="t">Tab 切换内容淡移 · 300ms ease-out-expo</div><div class="track"><div class="knob k3"></div></div></div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <table>
+        <tr><th style="width:200px">场景</th><th>规则</th></tr>
+        <tr><td>按钮 / 行按压</td><td><code>glass_pressed</code> 变实 + 无位移。玻璃按压"变实不变深"是材质物理，别加 scale 弹跳。</td></tr>
+        <tr><td>列表进入</td><td>卡片从下方 12dp 淡入，<b>首屏只动前 6 张</b>，错峰 30ms。滚动中不再触发（防抖）。</td></tr>
+        <tr><td>状态徽章变化</td><td>体检完成：灰→绿 200ms 颜色过渡，不加闪动。</td></tr>
+        <tr><td>尊重系统设置</td><td><code>animator_duration_scale=0</code> / 无障碍"减弱动态效果"时全部动效直达终态。</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ 8 无障碍 ============ -->
+  <section>
+    <h2><span class="no">08</span>无障碍（WCAG AA）</h2>
+    <p class="sub">达标情况与两处必须修的项。</p>
+    <div class="a11y">
+      <div class="card">
+        <div class="sample"><span style="color:#2F6FE4;font-weight:600">brand 主按钮文字 #2F6FE4 on #FFF</span>
+          <div class="ratio">4.65 : 1 <span class="pass">✓ AA（正文）</span></div></div>
+        <div class="sample" style="margin-top:10px"><span style="color:#4E5866">text_secondary #4E5866 on #FFF</span>
+          <div class="ratio">7.1 : 1 <span class="pass">✓ AA+</span></div></div>
+        <div class="sample" style="margin-top:10px"><span style="color:#6E7888">text_hint（新值 #6E7888）on #FFF</span>
+          <div class="ratio">4.6 : 1 <span class="pass">✓ AA（原 #7C8797 仅 3.6:1）</span></div></div>
+      </div>
+      <div class="card">
+        <div class="sample dark"><span style="color:#5D95F7;font-weight:600">brand #3D7FFB on #0B0D11</span>
+          <div class="ratio" style="color:#9AA3AF">5.4 : 1 <span class="pass">✓ AA</span></div></div>
+        <div class="sample dark" style="margin-top:10px"><span style="color:#7A8492">text_hint（新值）on #0B0D11</span>
+          <div class="ratio" style="color:#9AA3AF">4.5 : 1 <span class="pass">✓ AA</span></div></div>
+        <div class="sample dark" style="margin-top:10px"><span style="color:#6B7480">text_hint（旧值）on #0B0D11</span>
+          <div class="ratio" style="color:#9AA3AF">4.1 : 1 <span class="cond">△ 需替换</span></div></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <table>
+        <tr><th style="width:180px">项目</th><th>要求</th></tr>
+        <tr><td>触控热区</td><td>全部 ≥ 44dp：站源页 4 个 38dp 管理按钮（收纳后消除）、分类芯片 32dp 需垂直 padding 垫到 44。</td></tr>
+        <tr><td>内容描述</td><td>图标按钮（搜索/历史/播放控制）补 <code>contentDescription</code>；纯装饰图 <code>importantForAccessibility=no</code>。</td></tr>
+        <tr><td>状态不靠颜色</td><td>徽章自带文字（正常/失联/未体检），色盲用户只读文字也能分辨。</td></tr>
+        <tr><td>字号缩放</td><td>sp 全程生效；200% 缩放时行卡改上下两行布局（名称/域名换行），不截断。</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ 9 落地路线 ============ -->
+  <section>
+    <h2><span class="no">09</span>落地路线（工程映射）</h2>
+    <p class="sub">按 P0 → P2 分期，每期独立可发版、可回滚。全部不引新依赖。</p>
+    <table>
+      <tr><th style="width:70px">期</th><th style="width:260px">内容</th><th>涉及文件</th></tr>
+      <tr><td><span class="pill p-p0">P0</span></td><td><b>Token 修正</b>：text_hint 双主题提亮至 AA、新增 brand_tint / text_hero / touch_min</td><td><code>values/colors.xml</code> <code>values-night/colors.xml</code> <code>dimens.xml</code></td></tr>
+      <tr><td><span class="pill p-p0">P0</span></td><td><b>站源页添加岛重构</b>：主按钮合并「检测」、管理四键收纳为菜单、站源行加 Logo 与徽章</td><td><code>activity_main.xml</code>(pageSites) <code>item_site.xml</code> <code>SiteActivity</code> / <code>SiteBrowser_Doctor.kt</code></td></tr>
+      <tr><td><span class="pill p-p1">P1</span></td><td><b>首页顶岛</b>：站源名+站型徽章+搜索/历史图标；分类条并入玻璃次岛</td><td>新 <code>view_home_top.xml</code> <code>view_site_browser.xml</code> <code>SiteBrowser.kt</code></td></tr>
+      <tr><td><span class="pill p-p1">P1</span></td><td><b>续播进度条</b>（item_video 2.5dp 进度）+ <b>骨架屏</b>替换 ProgressBar + <b>统一状态徽章组件</b></td><td><code>item_video.xml</code> <code>item_site.xml</code> 新 <code>drawable/bg_skeleton.xml</code></td></tr>
+      <tr><td><span class="pill p-p1">P1</span></td><td><b>「我的」页图标锚点</b> + 行高统一 52dp + 设置值右显</td><td><code>activity_main.xml</code>(pageMine)</td></tr>
+      <tr><td><span class="pill p-p2">P2</span></td><td><b>动效</b>：列表首屏错峰淡入、徽章颜色过渡、Tab 转场（尊重 duration_scale=0）</td><td>各 Adapter + <code>MainActivity</code></td></tr>
+      <tr><td><span class="pill p-p2">P2</span></td><td><b>播放页微调</b>：选集/线路胶囊化、工具行层级（改行高必须同步 values-land + clearance）</td><td><code>activity_player.xml</code> <code>dimens.xml</code></td></tr>
+    </table>
+    <div class="card" style="margin-top:14px;background:#FFF9EE;border-color:#EAD9AE">
+      <b style="font-size:13.5px">⚠ 落地纪律（来自项目既有铁律）</b>
+      <p style="font-size:13px;color:var(--ink2);margin-top:6px">
+      ① 玻璃只压在会动的内容上：任何新浮岛下方，列表自己加 <code>paddingBottom</code>，不加在容器上；
+      ② 改底栏行高必须同步 <code>player_panel_clearance</code> + <code>values-land</code>；
+      ③ 改 Kotlin 后 debug + release 都重建，跑 <code>runall.py</code> 判 FAIL=0；④ 改完 grep 复核落盘。</p>
+    </div>
+  </section>
+
+  <footer>
+    <span>视频壳 UI 2.0 · 界面设计方案 v1 草案 · 2026-09-23</span>
+    <span>玻璃浮岛 2.0 —— 习惯延续，质感升维</span>
+  </footer>
+</div>
+</body>
+</html>

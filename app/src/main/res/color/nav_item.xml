@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 选中 = 聚光琥珀（nav_active：亮 Dock 烫金 / 暗 Dock 亮琥珀，随主题取值） -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:color="@color/brand" android:state_checked="true" />
+    <item android:color="@color/nav_active" android:state_checked="true" />
     <item android:color="@color/text_hint" />
 </selector>

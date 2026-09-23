@@ -417,7 +417,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
-        android:indeterminateTint="@color/brand"
+        android:indeterminateTint="@color/amber_progress"
         android:visibility="gone" />
 
     <!-- 出错时给出可操作的诊断信息，而不是只闪一下 toast -->

@@ -180,7 +180,7 @@
                     android:id="@+id/pb"
                     android:layout_width="16dp"
                     android:layout_height="16dp"
-                    android:indeterminateTint="@color/brand" />
+                    android:indeterminateTint="@color/amber_progress" />
 
                 <TextView
                     android:id="@+id/tvStatus"

@@ -147,21 +147,13 @@ ok("底基仍是 bg_glass_nav（填充/砂质/描边四层不能被顶掉）",
 ok("bg_glass_nav 仍带砂质层", "@drawable/glass_grain" in nav_xml)
 ok("bg_glass_nav 仍带描边", "glass_stroke" in nav_xml)
 
-print("== B. 折射的物理量：四边分档，且随主题反极性 ==")
-la, lb, lc = luma(light, "glass_edge_a"), luma(light, "glass_edge_b"), luma(light, "glass_edge_c")
-da, db, dc = luma(dark, "glass_edge_a"), luma(dark, "glass_edge_b"), luma(dark, "glass_edge_c")
-ok("★ 亮色外棱是暗棱（亮底上白棱 = 边界消失，v1.0.48 定下的极性）",
-   la is not None and la <= 0x60)
-ok("★ 暗色外棱是亮棱（深底上暗棱看不见）", da is not None and da >= 0xA0)
-ok("亮色内侧一道是亮线（暗棱 + 内亮线 = 玻璃厚度）", lc is not None and lc >= 0xA0)
-ok("★ 暗色内侧一道是暗线（与亮色极性正好相反）", dc is not None and dc <= 0x60)
-laa, lba = alpha_of(light, "glass_edge_a"), alpha_of(light, "glass_edge_b")
-daa, dba = alpha_of(dark, "glass_edge_a"), alpha_of(dark, "glass_edge_b")
-ok("★ 亮色次光比主光弱（四边一样亮就成白框了）",
-   laa is not None and lba is not None and lba < laa)
-ok("★ 暗色次光 ≤ 主光的 60%（差距要拉得出来）",
-   daa is not None and dba is not None and dba <= daa * 0.6)
-ok("三支颜色两套主题都定义了", all(x is not None for x in (la, lb, lc, da, db, dc)))
+print("== B. 折射配色（UI 2.0「暗场 Spotlight」起退役）：三支棱色双主题全透明 ==")
+la, lb, lc = alpha_of(light, "glass_edge_a"), alpha_of(light, "glass_edge_b"), alpha_of(light, "glass_edge_c")
+da, db, dc = alpha_of(dark, "glass_edge_a"), alpha_of(dark, "glass_edge_b"), alpha_of(dark, "glass_edge_c")
+ok("★ 三支棱色双主题全透明（实底材质里边缘折射退役；GlassEdgeDrawable 画出空操作，代码保留）",
+   all(x == 0.0 for x in (la, lb, lc, da, db, dc)))
+ok("三支颜色两套主题都**还有定义**（退役 = 置透明，删名会让引用它的 drawable 全线编译炸）",
+   all(x is not None for x in (la, lb, lc, da, db, dc)))
 
 print("== C. 折射的画法：逐边衰减带 + 内外双棱 ==")
 top_h = num(edge_kt, r"topH = ([\d.]+)f \* density")

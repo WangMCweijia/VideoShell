@@ -1,17 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 亮色（自动暗色关闭 / 系统为浅色时用；暗色值在 values-night/colors.xml） -->
-    <color name="bg">#FFF0F3F8</color>
-    <!-- 页面基底的下缘（bg_ambient 的渐变终点）：比 bg 深半档，让玻璃片"浮"得起来 -->
-    <color name="bg_deep">#FFE5EAF3</color>
+    <!-- ============================================================
+         白昼放映室（UI 2.0 · 暗场 Spotlight 的亮色主题）
+         材质逻辑从"磨砂玻璃"换成"实底分层 + 发丝线 + 投影"：
+           深度靠色阶与描边承担，不再依赖半透明（零 blur，低端机友好）。
+         ⚠️ glass_* 色名全部保留、只换值 —— 十几个 drawable（bg_glass/bg_surface/
+            bg_chip/bg_input…）都引用这些名字，改名会全线炸。玻璃棱（glass_edge_*）
+            与背景光斑（ambient_*）在本材质里退役，统一置透明，引用它们的层
+            画出来就是空操作，不需要动 drawable。
+         ============================================================ -->
+    <!-- 画布：暖纸，上亮下深（vignette 保留，光源在"天的方向"） -->
+    <color name="bg">#FFF6F5F2</color>
+    <color name="bg_deep">#FFEFEDE6</color>
+    <!-- 面板 e1（实白）/ 卡面 e2（微暖）/ 按压 e3（压暖提亮） -->
     <color name="surface">#FFFFFFFF</color>
-    <color name="surface_2">#FFE9EDF5</color>
-    <color name="line">#FFD9E0EA</color>
-    <color name="brand">#FF2F6FE4</color>
-    <color name="brand_dark">#FF2559B8</color>
-    <color name="text_primary">#FF16191F</color>
+    <color name="surface_2">#FFEFEDE8</color>
+    <color name="line">#FFE2DFD8</color>
+    <!-- info / 链接色（原 brand 蓝降级，不再承载主强调） -->
+    <color name="brand">#FF3E77D6</color>
+    <color name="brand_dark">#FF2F5BA8</color>
+    <color name="text_primary">#FF1A1C20</color>
     <color name="text_secondary">#FF4E5866</color>
-    <color name="text_hint">#FF7C8797</color>
+    <!-- 12sp 辅助字也过 AA（4.6:1） -->
+    <color name="text_hint">#FF6E7888</color>
     <color name="white">#FFFFFFFF</color>
     <color name="black">#FF000000</color>
     <color name="transparent_scrim">#99000000</color>
@@ -21,44 +32,35 @@
     <color name="bad">#FFD64545</color>
 
     <!-- ============================================================
-         磨砂玻璃（UI 方案 A）。四层材质，缺一层就"糊成一块灰"：
-           ① glass_fill → glass_fill_2  主体：从上到下略微变淡（漫反射）
-           ② glass_glow                 顶部高光带（玻璃棱）
-           ③ glass_stroke              1px 边（亮色下必须是**深**色，白描白看不见）
-           ④ 底下透出的 ambient_* 光斑   —— 在 bg_ambient 里，不在玻璃里
-         ⚠️ 亮色模式的白玻璃如果描边也用白，边界会完全消失；所以描边取 12% 深蓝黑。
+         聚光琥珀 —— 全 App 唯一高饱和强调色（UI 2.0）。
+         amber 渐变只做"光"：进度条 / 选中芯片 / 主按钮 / 导航选中。
+         ⚠️ 琥珀上永远用 amber_ink 深墨文字（白字只有 2.1:1，禁用）；
+         ⚠️ 琥珀做亮底**文字**时必须用 amber_text #B87A10
+            （#E8940F 在白底 2.4:1，只许当图形色）。
          ============================================================ -->
-    <!-- ⚠️ v1.0.49 把玻璃的透明度**降下来**：原来 #D9（85%）/#A6（65%）几乎就是
-         不透明的，"半透明磨砂看不出来"的病根就在这里 —— 背后有什么都透不出来。
-         现在 72% / 56%，能看清 ambient 光斑的走向，"玻璃"才成立。
-         ⚠️ 不要再往低调过 #8F（56%）：再透就会伤到列表文字的可读性，
-         而"能读"比"更透"重要。 -->
-    <color name="glass_fill">#B8FFFFFF</color>
-    <color name="glass_fill_2">#8FFFFFFF</color>
-    <color name="glass_stroke">#1F0F1A2E</color>
-    <color name="glass_glow">#B3FFFFFF</color>
-    <!-- 按下态：比常态更实、更白，给点击一个物理反馈 -->
-    <color name="glass_pressed">#F2FFFFFF</color>
+    <color name="amber_hi">#FFFFC46B</color>
+    <color name="amber">#FFE8862C</color>
+    <color name="amber_dark">#FFD0731A</color>
+    <color name="amber_ink">#FF201405</color>
+    <color name="amber_text">#FFB87A10</color>
+    <!-- 进度/滑杆专用：亮底需要 ≥3:1 的图形对比度，故压深一档 -->
+    <color name="amber_progress">#FFC9830F</color>
+    <!-- 底部导航选中态（亮 Dock 上用烫金，暗 Dock 上用亮琥珀） -->
+    <color name="nav_active">#FFB87A10</color>
 
-    <!-- ============================================================
-         边缘折射（v1.0.50）—— 玻璃浮岛那圈"棱"。
-         透明度只能让玻璃"透"，让玻璃看起来**是一块有厚度的东西**的是这一圈：
-           ① glass_edge_a  外棱主光（顶 / 左上）
-           ② glass_edge_b  外棱次光（底 / 右下，比主光弱一档）
-           ③ glass_edge_c  内侧那一道 = 玻璃的厚度（棱的内沿）
-         ⚠️ 极性同 glass_stroke：**亮色主题必须用暗棱**。亮色下玻璃本身已经是浅的，
-            再描一圈白 = 边界消失，整片糊在浅底上；所以亮色是"暗棱 + 内侧一道白"，
-            暗色反过来是"亮棱 + 内侧一道暗"。
-         ============================================================ -->
-    <color name="glass_edge_a">#4D0F1A2E</color>
-    <color name="glass_edge_b">#1A0F1A2E</color>
-    <color name="glass_edge_c">#66FFFFFF</color>
-
-    <!-- 环境光斑（bg_ambient）：低 alpha 的品牌色/青色，用来"照亮"半透明玻璃。
-         ⚠️ v1.0.49 提高了一档：原来 24%/18%/12% 配 260dp 的半径，在 360dp 宽的屏上
-         被摊成了一块近乎均匀的底色 —— 玻璃片挪过去也看不出明暗变化，等于没有背景。
-         现在 30%/24%/15%，仍然远低于"像贴了张贴纸"的程度。 -->
-    <color name="ambient_1">#4D2F6FE4</color>
-    <color name="ambient_2">#3D12B5A6</color>
-    <color name="ambient_3">#267C4DFF</color>
+    <!-- 玻璃四层 → 实底材质的兼容映射（色名退役期，引用方不用改）：
+         fill/fill_2 = 实白面板（底部留一丝暖差当"漫反射"残影），
+         stroke = 发丝线，glow/edge/ambient = 透明退役。 -->
+    <color name="glass_fill">#FFFFFFFF</color>
+    <color name="glass_fill_2">#FFF9F7F3</color>
+    <color name="glass_stroke">#FFE2DFD8</color>
+    <color name="glass_glow">#00000000</color>
+    <!-- 按下态 = e3 压暖（触感与暗色的"提亮"等价） -->
+    <color name="glass_pressed">#FFF1EFE9</color>
+    <color name="glass_edge_a">#00000000</color>
+    <color name="glass_edge_b">#00000000</color>
+    <color name="glass_edge_c">#00000000</color>
+    <color name="ambient_1">#00000000</color>
+    <color name="ambient_2">#00000000</color>
+    <color name="ambient_3">#00000000</color>
 </resources>

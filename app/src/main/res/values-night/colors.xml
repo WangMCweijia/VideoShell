@@ -1,51 +1,59 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 暗色（默认） -->
-    <color name="bg">#FF0B0D11</color>
-    <color name="bg_deep">#FF06080B</color>
-    <color name="surface">#FF171A21</color>
-    <color name="surface_2">#FF1F2430</color>
-    <color name="line">#FF262B36</color>
-    <color name="brand">#FF3D7FFB</color>
-    <color name="brand_dark">#FF2F66CC</color>
+    <!-- ============================================================
+         暗场 Spotlight（UI 2.0 · 默认主题）。
+         界面 = 一间暗场放映厅：黑场画布，海报是唯一发光体，
+         面板是实底分层（e1/e2/e3），靠色阶 + 发丝线 + 投影建立层次，
+         不再用半透明磨砂（零 blur）。
+         glass_* 色名保留换值（退役期），理由见 values/colors.xml 头注。
+         ============================================================ -->
+    <!-- 画布：黑场，bg → bg_deep 竖向渐变 = 极淡 vignette -->
+    <color name="bg">#FF0A0C10</color>
+    <color name="bg_deep">#FF060709</color>
+    <!-- 层级面板：e1 面板 / e2 卡片 / line = 8% 白发丝线 -->
+    <color name="surface">#FF12161D</color>
+    <color name="surface_2">#FF191E27</color>
+    <color name="line">#14FFFFFF</color>
+    <!-- info / 链接色（原 brand 蓝降级） -->
+    <color name="brand">#FF5D95F7</color>
+    <color name="brand_dark">#FF3E77D6</color>
     <color name="text_primary">#FFF2F4F7</color>
-    <color name="text_secondary">#FF9AA3AF</color>
-    <color name="text_hint">#FF6B7480</color>
+    <color name="text_secondary">#FFA8B0BC</color>
+    <!-- 12sp 辅助字过 AA（4.6:1 on stage） -->
+    <color name="text_hint">#FF7E8794</color>
     <color name="white">#FFFFFFFF</color>
     <color name="black">#FF000000</color>
     <color name="transparent_scrim">#99000000</color>
     <color name="ic_launcher_background">#FF0E1013</color>
-    <!-- 体检 / 状态徽章（FN-6）：暗色下提亮，保证在深底上可读 -->
+    <!-- 体检 / 状态徽章（FN-6） -->
     <color name="ok">#FF3DD68C</color>
     <color name="bad">#FFFF6B6B</color>
 
-    <!--
-      磨砂玻璃（暗色）：同样是"半透明 + 顶部高光 + 描边"，但描边换成 16% 白 ——
-      深底上白描边才看得见，跟亮色的深描边正好相反（两边必须各写一套，不能共用）。
-      色相偏蓝黑（#151921 系）而不是纯黑：纯黑玻璃压在暖色光斑上会显脏。
+    <!-- 聚光琥珀：双主题唯一同值 Token —— "白天黑夜都是那束灯"。
+         规则同亮色：琥珀上文字用 amber_ink，禁白字。 -->
+    <color name="amber_hi">#FFFFC46B</color>
+    <color name="amber">#FFE8862C</color>
+    <color name="amber_dark">#FFD0731A</color>
+    <color name="amber_ink">#FF201405</color>
+    <color name="amber_text">#FFB87A10</color>
+    <!-- 进度/滑杆专用：黑场上 #E8862C ≈ 5:1，直接用原琥珀 -->
+    <color name="amber_progress">#FFE8862C</color>
+    <!-- 底部导航选中态（亮 Dock 上用烫金，暗 Dock 上用亮琥珀） -->
+    <color name="nav_active">#FFFFC46B</color>
 
-      ⚠️ v1.0.49 把透明度降下来（72% → 65%、56% → 48%）：原来的 72% 几乎不透明，
-      "磨砂看不出来"的病根就在这里。现在还能看清背后光斑的走向。
-      ⚠️ 高光从 14% 提到 18%：顶部那道棱是让人眼读出"这是一块凸起的玻璃"的关键，
-      太弱就会被当成"比背景亮一点的矩形"。
-    -->
-    <color name="glass_fill">#A6151921</color>
-    <color name="glass_fill_2">#7A10141B</color>
-    <color name="glass_stroke">#2BFFFFFF</color>
-    <color name="glass_glow">#2EFFFFFF</color>
-    <color name="glass_pressed">#CC1E232C</color>
-
-    <!-- 边缘折射（v1.0.50，与 values/colors.xml 成对）：
-         暗色下是"亮棱 + 内侧一道暗"，与亮色正好相反 —— 见亮色那边的说明。
-         主光 44%、次光 14%、内线 18% 黑：主光要够亮才能读出顶部那道棱，
-         次光必须明显更弱，否则四条边一样亮就变成"白框"而不是折射。 -->
-    <color name="glass_edge_a">#70FFFFFF</color>
-    <color name="glass_edge_b">#24FFFFFF</color>
-    <color name="glass_edge_c">#2E000000</color>
-
-    <!-- 环境光斑：v1.0.49 提高一档（24%/18%/12% → 40%/32%/22%）。
-         深底上低 alpha 的蓝几乎不可见，原来那组数值在实测里就是不存在的。 -->
-    <color name="ambient_1">#663D7FFB</color>
-    <color name="ambient_2">#5212B5A6</color>
-    <color name="ambient_3">#387C4DFF</color>
+    <!-- 玻璃四层 → 实底材质兼容映射（退役期）：
+         fill = e1 面板 88%（Dock 压在滚动内容上仍留一线暗影），
+         stroke = 8% 白发丝线，glow/edge/ambient 退役置透明。 -->
+    <color name="glass_fill">#E612161D</color>
+    <color name="glass_fill_2">#E60F131B</color>
+    <color name="glass_stroke">#14FFFFFF</color>
+    <color name="glass_glow">#00000000</color>
+    <!-- 按下态 = e3 提亮 -->
+    <color name="glass_pressed">#FF222834</color>
+    <color name="glass_edge_a">#00000000</color>
+    <color name="glass_edge_b">#00000000</color>
+    <color name="glass_edge_c">#00000000</color>
+    <color name="ambient_1">#00000000</color>
+    <color name="ambient_2">#00000000</color>
+    <color name="ambient_3">#00000000</color>
 </resources>

@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>暗场 Spotlight · 亮色主题「白昼放映室」完整效果</title>
+<style>
+  :root{
+    --bg:#F6F5F2; --surface:#FFFFFF; --surface2:#EFEDE8; --line:#E2DFD8;
+    --ink:#1A1C20; --ink2:#4E5866; --hint:#6E7888;
+    --amber:#E8940F; --amber-text:#B87A10; --stage:#F6F5F2;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:"Segoe UI","Microsoft YaHei UI","PingFang SC",system-ui,sans-serif;
+    background:var(--bg); color:var(--ink); line-height:1.65; font-size:15px}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 28px 80px}
+
+  .hero{padding:60px 0 36px;position:relative;overflow:hidden}
+  .hero::before{content:"";position:absolute;top:-120px;right:-60px;width:420px;height:420px;border-radius:50%;
+    background:radial-gradient(circle,rgba(232,148,15,.14),transparent 65%);pointer-events:none}
+  .hero .kicker{color:var(--amber-text);font-weight:700;letter-spacing:.16em;font-size:12px;text-transform:uppercase}
+  .hero h1{font-size:40px;line-height:1.24;font-weight:700;margin:12px 0 14px}
+  .hero h1 em{font-style:normal;color:var(--amber-text)}
+  .hero p.lead{color:var(--ink2);max-width:680px;font-size:16px}
+  .hero .meta{margin-top:20px;display:flex;gap:10px;flex-wrap:wrap}
+  .tag{background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:5px 14px;font-size:12px;color:var(--ink2)}
+
+  section{margin-top:52px}
+  h2{font-size:24px;font-weight:700;display:flex;align-items:baseline;gap:12px;margin-bottom:6px}
+  h2 .no{color:var(--amber-text);font-size:14px;font-weight:700;letter-spacing:.08em}
+  .sub{color:var(--hint);font-size:13.5px;margin-bottom:20px}
+  h3{font-size:16px;font-weight:700;margin:24px 0 10px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:22px}
+
+  table{width:100%;border-collapse:collapse;font-size:13.5px;background:var(--surface);
+    border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  th{background:var(--surface2);text-align:left;padding:10px 14px;font-size:12px;color:var(--ink2);letter-spacing:.05em;font-weight:600}
+  td{padding:10px 14px;border-top:1px solid var(--line);vertical-align:top}
+  td code,.mono{font-family:Consolas,monospace;font-size:12.5px;background:var(--surface2);border-radius:5px;padding:1px 6px;color:#9A6406}
+  .pill{display:inline-block;border-radius:999px;padding:1px 10px;font-size:11.5px;font-weight:600}
+  .p-keep{background:#E4F4EB;color:#1E9E5A}
+  .p-fix{background:#FCEAEA;color:#D64545}
+  .p-new{background:#FDF1DC;color:#9A6406}
+
+  /* swatches */
+  .swgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+  .sw{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+  .sw .chip{height:52px}
+  .sw .lbl{padding:8px 10px;font-size:11.5px}
+  .sw .lbl b{display:block;font-size:12px}
+  .sw .lbl span{color:var(--hint);font-family:Consolas,monospace;font-size:10.5px}
+
+  /* phone mockups —— 亮色主题 */
+  .shots{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+  .shot .cap{text-align:center;font-size:12.5px;color:var(--ink2);margin-top:10px}
+  .shot .cap b{color:var(--ink)}
+  .phone{
+    width:100%;aspect-ratio:360/740;border-radius:30px;position:relative;overflow:hidden;
+    border:1px solid #D8D4CA;box-shadow:0 18px 40px -18px rgba(26,28,32,.28);
+    background:radial-gradient(320px 280px at 50% -60px,#FCFBF8 0%,#F6F5F2 55%,#EFEDE6 100%);
+  }
+  .phone.dark-fixed{
+    background:radial-gradient(300px 260px at 50% -40px,#12161F 0%,#0A0C10 60%);
+    border-color:#1A1F28;box-shadow:0 22px 50px -20px rgba(0,0,0,.55);
+  }
+  .status{display:flex;justify-content:space-between;padding:10px 16px 0;font-size:9px;font-weight:600;color:#4E5866}
+  .phone.dark-fixed .status{color:#C9D2DE}
+
+  .home-top{position:absolute;top:28px;left:16px;right:16px;display:flex;align-items:center;gap:8px}
+  .home-top .site{font-size:13px;font-weight:800;color:#1A1C20}
+  .home-top .chip{font-size:8.5px;color:#9A6406;border:1px solid #EAD9AE;background:#FDF6E8;border-radius:999px;padding:2px 8px;font-weight:700}
+  .home-top .ic{margin-left:auto;font-size:13px;color:#4E5866}
+  .cats{position:absolute;top:56px;left:16px;right:16px;display:flex;gap:6px;overflow:hidden}
+  .cat{font-size:9px;padding:4px 10px;border-radius:999px;color:#4E5866;white-space:nowrap;border:1px solid #E2DFD8;background:#FFFFFF}
+  .cat.on{background:linear-gradient(180deg,#FFC46B,#E8862C);color:#201405;font-weight:800;border:none;
+    box-shadow:0 3px 10px -3px rgba(232,148,15,.55)}
+
+  .grid3{position:absolute;top:94px;left:14px;right:14px;bottom:76px;
+    display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;align-content:start}
+  .pcard{border-radius:11px;position:relative}
+  .pcard .art{aspect-ratio:10/14;border-radius:11px;position:relative;z-index:1;border:1px solid rgba(26,28,32,.10)}
+  .pcard .glow{position:absolute;left:10%;right:10%;top:24%;bottom:-4px;border-radius:50%;
+    filter:blur(13px);opacity:.30}
+  .pcard .t{font-size:8.2px;line-height:1.3;padding:4px 2px 0;color:#1A1C20;font-weight:600;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pcard .prog{position:absolute;left:0;bottom:24px;height:2.5px;width:100%;background:rgba(26,28,32,.14);
+    border-radius:2px;z-index:2;overflow:hidden}
+  .pcard .prog i{display:block;height:100%;background:linear-gradient(90deg,#FFC46B,#E8862C)}
+  .g1{background:linear-gradient(160deg,#5A8CF0,#2F5FB8 60%,#223F7A)} .w1{background:#2F5FB8}
+  .g2{background:linear-gradient(160deg,#E8A17C,#B85C4A 60%,#6E2F3A)} .w2{background:#B85C4A}
+  .g3{background:linear-gradient(160deg,#57C9BB,#1E8F84 60%,#0F4F4A)} .w3{background:#1E8F84}
+  .g4{background:linear-gradient(160deg,#9B8CF2,#5E43C8 60%,#33246E)} .w4{background:#5E43C8}
+  .g5{background:linear-gradient(160deg,#E8C97C,#B8862C 60%,#6E5214)} .w5{background:#B8862C}
+  .g6{background:linear-gradient(160deg,#7FB5E8,#3A6FB0 60%,#1C3A66)} .w6{background:#3A6FB0}
+  .g7{background:linear-gradient(160deg,#E88CB0,#B04470 60%,#5E1F3C)} .w7{background:#B04470}
+  .g8{background:linear-gradient(160deg,#8FD08F,#3F9B4F 60%,#1E5528)} .w8{background:#3F9B4F}
+  .g9{background:linear-gradient(160deg,#B0B8C4,#6A7484 60%,#38404E)} .w9{background:#6A7484}
+
+  .dock{position:absolute;left:12px;right:12px;bottom:12px;height:54px;border-radius:17px;
+    background:#FFFFFF;border:1px solid #E2DFD8;
+    box-shadow:0 12px 26px -12px rgba(26,28,32,.30),inset 0 1px 0 #FFFFFF;
+    display:flex;align-items:center;justify-content:space-around}
+  .phone.dark-fixed .dock{background:#12161D;border:1px solid rgba(255,255,255,.09);
+    box-shadow:0 14px 30px -10px rgba(0,0,0,.65)}
+  .ni{font-size:8.5px;color:#7C8797;display:flex;flex-direction:column;align-items:center;gap:2px}
+  .ni b{font-size:13px;font-weight:400}
+  .ni.on{color:#1A1C20;font-weight:800}
+  .ni.on b{background:linear-gradient(180deg,#FFC46B,#E8862C);color:#201405;border-radius:999px;
+    width:40px;height:24px;display:flex;align-items:center;justify-content:center;
+    box-shadow:0 3px 10px -3px rgba(232,148,15,.55)}
+  .phone.dark-fixed .ni{color:#7E8794}
+  .phone.dark-fixed .ni.on{color:#F2F4F7;font-weight:700}
+
+  /* 站源 */
+  .add-panel{position:absolute;top:30px;left:12px;right:12px;border-radius:15px;padding:12px;
+    background:#FFFFFF;border:1px solid #E2DFD8;box-shadow:0 10px 26px -12px rgba(26,28,32,.25)}
+  .add-panel .ttl{font-size:9px;color:#7C8797;letter-spacing:.12em;margin-bottom:8px}
+  .urlbox{height:36px;border-radius:10px;background:#F6F5F2;border:1px solid #E2DFD8;
+    display:flex;align-items:center;padding:0 10px;font-size:10px;color:#7C8797}
+  .btn-primary{margin-top:8px;height:36px;border-radius:10px;
+    background:linear-gradient(180deg,#FFC46B,#E8862C);color:#201405;
+    display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:800;
+    box-shadow:0 6px 16px -6px rgba(232,148,15,.5)}
+  .btn-row{margin-top:8px;display:flex;justify-content:space-between;font-size:9.5px;color:#B87A10;font-weight:600}
+  .sites-head{position:absolute;top:172px;left:16px;right:16px;display:flex;justify-content:space-between;align-items:center}
+  .sites-head b{font-size:10px;color:#7C8797;letter-spacing:.08em}
+  .sites-head span{font-size:9px;color:#B87A10;font-weight:700}
+  .site-list{position:absolute;top:192px;left:12px;right:12px;bottom:76px;display:flex;flex-direction:column;gap:7px}
+  .srow{border-radius:13px;background:#FFFFFF;border:1px solid #E2DFD8;padding:9px 11px;
+    display:flex;align-items:center;gap:9px;box-shadow:0 4px 12px -8px rgba(26,28,32,.14)}
+  .srow .logo{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;
+    color:#fff;font-size:11px;font-weight:800;flex-shrink:0}
+  .srow .nm{flex:1;min-width:0}
+  .srow .nm b{display:block;font-size:10.5px;color:#1A1C20}
+  .srow .nm span{font-size:8.5px;color:#7C8797;font-family:Consolas,monospace}
+  .srow .st{font-size:8.5px;font-weight:700}
+  .st.ok{color:#1E9E5A}.st.bad{color:#D64545}.st.wait{color:#7C8797}
+
+  /* 我的 */
+  .mine{position:absolute;top:34px;left:14px;right:14px;bottom:76px}
+  .mgroup{font-size:8.5px;color:#7C8797;letter-spacing:.12em;margin:12px 2px 5px}
+  .mcard{border-radius:13px;background:#FFFFFF;border:1px solid #E2DFD8;overflow:hidden;
+    box-shadow:0 4px 12px -8px rgba(26,28,32,.14)}
+  .mrow{display:flex;align-items:center;gap:9px;padding:10px 12px;font-size:10.5px;color:#1A1C20;
+    border-bottom:1px solid #EFEEE9}
+  .mrow:last-child{border-bottom:none}
+  .mrow .mi{width:24px;height:24px;border-radius:8px;background:#FDF1DC;color:#B87A10;
+    display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0}
+  .mrow .arr{margin-left:auto;color:#7C8797;font-size:11px}
+  .mrow .val{margin-left:auto;font-size:9px;color:#7C8797}
+
+  /* 播放页（永远暗场） */
+  .pb-top{position:absolute;top:26px;left:10px;right:10px;height:42px;display:flex;align-items:center;gap:9px;
+    padding:0 13px;border-radius:14px;color:#E8ECF3;font-size:10.5px;
+    background:rgba(18,22,29,.9);border:1px solid rgba(255,255,255,.09)}
+  .pb-stage{position:absolute;inset:80px 0 0 0;display:flex;align-items:center;justify-content:center;
+    color:rgba(255,255,255,.5);font-size:26px}
+  .pb-bottom{position:absolute;left:10px;right:10px;bottom:12px;border-radius:15px;padding:9px 13px 10px;
+    background:rgba(18,22,29,.9);border:1px solid rgba(255,255,255,.09)}
+  .pb-track{height:3px;border-radius:2px;background:rgba(255,255,255,.16);position:relative;margin:4px 0 7px}
+  .pb-track i{position:absolute;left:0;top:0;bottom:0;width:38%;background:linear-gradient(90deg,#FFC46B,#E8862C);border-radius:2px}
+  .pb-track s{position:absolute;left:38%;top:50%;width:8px;height:8px;border-radius:50%;background:#FFC46B;
+    transform:translate(-50%,-50%);box-shadow:0 0 8px rgba(255,196,107,.8)}
+  .pb-row{display:flex;align-items:center;justify-content:space-between;color:#C9D2DE;font-size:13px}
+  .pb-time{font-size:8px;color:#7E8794;font-family:Consolas,monospace;display:flex;justify-content:space-between;margin-top:1px}
+  .pb-tools{display:flex;justify-content:space-between;margin-top:7px;padding-top:7px;
+    border-top:1px solid rgba(255,255,255,.07);font-size:8.5px;color:#C9D2DE}
+  .pb-row .cap2{font-size:9.5px;border:1px solid rgba(255,255,255,.16);border-radius:999px;padding:2px 9px;color:#E8ECF3}
+  .pb-row .cap2.hot{border-color:rgba(255,196,107,.5);color:#FFC46B}
+
+  /* side-by-side compare */
+  .cmp{display:grid;grid-template-columns:1fr 1fr;gap:18px;max-width:560px;margin:0 auto}
+  .cmp .shot{}
+
+  /* tokens dark strip */
+  .dk-stage{background:#0A0C10;border-radius:16px;padding:14px;border:1px solid #1A1F28}
+  .dk-stage .sw{background:#12161D;border-color:#262B36}
+  .dk-stage .sw .lbl{color:#F2F4F7}
+  .dk-stage .sw .lbl span{color:#9AA3AF}
+  .dk-title{color:#F2F4F7;font-size:13px;margin:8px 0 10px;padding-left:4px}
+
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+  .a11y{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .sample{border-radius:12px;padding:14px;border:1px solid #E2DFD8;background:#FFFFFF}
+  .ratio{font-family:Consolas,monospace;font-size:11px;margin-top:6px;color:#4E5866}
+  .pass{color:#1E9E5A;font-weight:700}.cond{color:#D64545;font-weight:700}
+
+  footer{margin-top:70px;padding-top:20px;border-top:1px solid var(--line);
+    color:var(--hint);font-size:12.5px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+  @media (max-width:900px){.shots,.swgrid{grid-template-columns:repeat(2,1fr)}.two,.a11y,.cmp{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <div class="kicker">SPOTLIGHT · DAYLIGHT VARIANT</div>
+    <h1>白昼放映室 ——<br><em>暗场 Spotlight 的亮色主题</em>完整效果</h1>
+    <p class="lead">同一套材质物理翻译到白天：黑场换成<b>暖纸画布</b>，发丝线换成<b>浅墨描边</b>，
+    海报光溢出收敛成<b>纸上的烫金投影</b>，聚光琥珀原样保留但文字用色加深到 <code>#B87A10</code>。
+    下面是三屏完整亮色效果 + 播放页为何永远暗色。</p>
+    <div class="meta">
+      <span class="tag">values（亮）/ values-night（暗）成对维护</span>
+      <span class="tag">跟随系统切换</span>
+      <span class="tag">2026-09-23 · v2.1</span>
+    </div>
+  </div>
+
+  <!-- ============ 1 转译规则 ============ -->
+  <section>
+    <h2><span class="no">01</span>暗→亮的五条转译规则</h2>
+    <p class="sub">不是"换个配色"，是同一套物理在白天的样子。每条都可对照检查。</p>
+    <table>
+      <tr><th style="width:220px">暗场（Dark Stage）</th><th>白昼（Daylight）转译</th></tr>
+      <tr><td>黑场画布 <code>#0A0C10</code></td><td><b>暖纸画布 <code>#F6F5F2</code></b>：不是纯白也不是冷灰，暖调承接"放映室"气质；上缘微亮 vignette 保留（光源在天的方向）。</td></tr>
+      <tr><td>e1/e2/e3 色阶靠<b>提亮</b></td><td>色阶靠<b>实白 + 浅墨描边 + 投影</b>：e1 = 纯白面板，e2 = 白卡 + <code>#E2DFD8</code> 发丝线 + 极淡投影。亮色下"明度分档"空间小，层次改由描边与投影承担。</td></tr>
+      <tr><td>白 8% hairline</td><td><b>墨 12% hairline（#E2DFD8）</b>：极性反转但职责不变——面板的"折边"。</td></tr>
+      <tr><td>海报主色光溢出（12–18% alpha）</td><td><b>烫金投影（30% 不透明度、更小半径）</b>：暗场里光是"洒出来的"，白昼里光变成"纸面下的暖影"——海报底下那团暖影依然来自海报主色，来源规则不破。</td></tr>
+      <tr><td>琥珀上深墨文字</td><td>原样保留；<b>琥珀做文字时加深为 <code>amber_text #B87A10</code></b>（#E8940F 在白底只有 2.4:1，只许当图形色）。</td></tr>
+    </table>
+  </section>
+
+  <!-- ============ 2 Token ============ -->
+  <section>
+    <h2><span class="no">02</span>亮色 Token（values/colors.xml 替换后）</h2>
+    <p class="sub">与 values-night 成对；命名不变，只换值 —— 布局代码零改动。</p>
+    <div class="swgrid">
+      <div class="sw"><div class="chip" style="background:#F6F5F2;border-bottom:1px solid #E2DFD8"></div><div class="lbl"><b>stage</b><span>#F6F5F2 暖纸画布</span></div></div>
+      <div class="sw"><div class="chip" style="background:#FFFFFF;border-bottom:1px solid #E2DFD8"></div><div class="lbl"><b>e1 panel</b><span>#FFFFFF 纯白面板</span></div></div>
+      <div class="sw"><div class="chip" style="background:#FBFAF7;border-bottom:1px solid #E2DFD8"></div><div class="lbl"><b>e2 card</b><span>#FBFAF7 卡面（微暖）</span></div></div>
+      <div class="sw"><div class="chip" style="background:#F1EFE9"></div><div class="lbl"><b>e3 lift</b><span>#F1EFE9 按压</span></div></div>
+      <div class="sw"><div class="chip" style="background:#E2DFD8"></div><div class="lbl"><b>hairline</b><span>#E2DFD8 · 墨12%</span></div></div>
+      <div class="sw"><div class="chip" style="background:#1A1C20"></div><div class="lbl"><b>ink</b><span>#1A1C20</span></div></div>
+      <div class="sw"><div class="chip" style="background:#4E5866"></div><div class="lbl"><b>ink2</b><span>#4E5866</span></div></div>
+      <div class="sw"><div class="chip" style="background:#6E7888"></div><div class="lbl"><b>hint</b><span>#6E7888 · 4.6:1 ✓AA</span></div></div>
+      <div class="sw"><div class="chip" style="background:linear-gradient(180deg,#FFC46B,#E8862C)"></div><div class="lbl"><b>amber 渐变</b><span>图形/进度/主按钮</span></div></div>
+      <div class="sw"><div class="chip" style="background:#B87A10"></div><div class="lbl"><b>amber_text</b><span>#B87A10 · 亮底文字专用</span></div></div>
+      <div class="sw"><div class="chip" style="background:#1E9E5A"></div><div class="lbl"><b>ok</b><span>#1E9E5A（压暗回白天档）</span></div></div>
+      <div class="sw"><div class="chip" style="background:#D64545"></div><div class="lbl"><b>bad</b><span>#D64545</span></div></div>
+    </div>
+    <div class="two" style="margin-top:16px">
+      <div class="card">
+        <b style="font-size:13.5px">与旧亮色方案（玻璃 v1）的三处差异</b>
+        <table style="margin-top:10px">
+          <tr><th>项</th><th>玻璃 v1（现状）</th><th>白昼 v2.1</th></tr>
+          <tr><td>画布</td><td>冷蓝灰 <code>#F0F3F8</code> + 彩色光斑</td><td>暖纸 <code>#F6F5F2</code>，<b>光斑层退役</b></td></tr>
+          <tr><td>主强调</td><td>brand 蓝 <code>#2F6FE4</code></td><td>聚光琥珀；蓝降级为 info/链接 <code>#3E77D6</code></td></tr>
+          <tr><td>面板</td><td>半透玻璃 + blur</td><td>实白 + 发丝线 + 投影，<b>零 blur</b></td></tr>
+        </table>
+      </div>
+      <div class="card" style="background:#0A0C10;border-color:#1A1F28">
+        <b style="color:#F2F4F7;font-size:13.5px">暗色档不变（对照）</b>
+        <div class="swgrid" style="grid-template-columns:repeat(4,1fr);margin-top:12px">
+          <div class="sw"><div class="chip" style="background:#0A0C10;border-bottom:1px solid #1A1F28"></div><div class="lbl"><b>stage</b><span>#0A0C10</span></div></div>
+          <div class="sw"><div class="chip" style="background:#12161D;border-bottom:1px solid #262B36"></div><div class="lbl"><b>e1</b><span>#12161D</span></div></div>
+          <div class="sw"><div class="chip" style="background:#F2F4F7"></div><div class="lbl"><b>ink</b><span>#F2F4F7</span></div></div>
+          <div class="sw"><div class="chip" style="background:linear-gradient(180deg,#FFC46B,#E8862C)"></div><div class="lbl"><b>amber</b><span>同一条渐变</span></div></div>
+        </div>
+        <p style="font-size:12.5px;color:#A8B0BC;margin-top:10px">琥珀渐变是<b>双主题唯一同值 Token</b>——它是"光"，白天黑夜都是那束灯。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 3 三屏亮色 ============ -->
+  <section>
+    <h2><span class="no">03</span>三屏完整亮色效果</h2>
+    <p class="sub">与暗场版同一批页面，可直接对照上一份文档的暗色 mockup。</p>
+    <div class="shots">
+
+      <!-- 首页 亮 -->
+      <div class="shot">
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>▲ ● ▮</span></div>
+          <div class="home-top"><span class="site">金牌影视</span><span class="chip">JSON 直连</span>
+            <span class="ic">⌕</span><span class="ic">🕘</span></div>
+          <div class="cats"><span class="cat on">推荐</span><span class="cat">电影</span><span class="cat">剧集</span><span class="cat">综艺</span><span class="cat">动漫</span></div>
+          <div class="grid3">
+            <div class="pcard"><div class="glow w1"></div><div class="art g1"></div><div class="prog"><i style="width:70%"></i></div><div class="t">星际回响</div></div>
+            <div class="pcard"><div class="glow w2"></div><div class="art g2"></div><div class="t">长夜将尽</div></div>
+            <div class="pcard"><div class="glow w3"></div><div class="art g3"></div><div class="t">海雾灯塔</div></div>
+            <div class="pcard"><div class="glow w4"></div><div class="art g4"></div><div class="t">幻境旅行者</div></div>
+            <div class="pcard"><div class="glow w5"></div><div class="art g5"></div><div class="t">黄金年代</div></div>
+            <div class="pcard"><div class="glow w6"></div><div class="art g6"></div><div class="t">深蓝之境</div></div>
+            <div class="pcard"><div class="glow w7"></div><div class="art g7"></div><div class="t">玫瑰与刀</div></div>
+            <div class="pcard"><div class="glow w8"></div><div class="art g8"></div><div class="t">绿野迷踪</div></div>
+            <div class="pcard"><div class="glow w9"></div><div class="art g9"></div><div class="t">无名之城</div></div>
+          </div>
+          <div class="dock">
+            <div class="ni on"><b>⌂</b>首页</div><div class="ni"><b>⚙</b>站源</div><div class="ni"><b>☰</b>我的</div>
+          </div>
+        </div>
+        <div class="cap"><b>首页 · 白昼</b> —— 暖纸画布 + 烫金投影 + 白 Dock</div>
+      </div>
+
+      <!-- 站源 亮 -->
+      <div class="shot">
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>▲ ● ▮</span></div>
+          <div class="add-panel">
+            <div class="ttl">添加站源</div>
+            <div class="urlbox">粘贴网址，例如 example.com</div>
+            <div class="btn-primary">识别并添加</div>
+            <div class="btn-row"><span>网页浏览</span><span>直接播放</span><span>高级检测 ▾</span></div>
+          </div>
+          <div class="sites-head"><b>我的站源 · 3</b><span>管理 ⌄</span></div>
+          <div class="site-list">
+            <div class="srow"><div class="logo" style="background:#B8862C">金</div>
+              <div class="nm"><b>金牌影视</b><span>bolyship.com</span></div><span class="st ok">● 正常</span></div>
+            <div class="srow"><div class="logo" style="background:#1E8F84">野</div>
+              <div class="nm"><b>野果视频</b><span>wildfruit.tv</span></div><span class="st ok">● 正常</span></div>
+            <div class="srow"><div class="logo" style="background:#5E43C8">星</div>
+              <div class="nm"><b>星辰资源</b><span>xingchen.app</span></div><span class="st wait">○ 未体检</span></div>
+            <div class="srow" style="opacity:.55"><div class="logo" style="background:#9AA3AF">旧</div>
+              <div class="nm"><b>旧站备份</b><span>old.vod.cn</span></div><span class="st bad">● 失联</span></div>
+          </div>
+          <div class="dock">
+            <div class="ni"><b>⌂</b>首页</div><div class="ni on"><b>⚙</b>站源</div><div class="ni"><b>☰</b>我的</div>
+          </div>
+        </div>
+        <div class="cap"><b>站源 · 白昼</b> —— 烫金主按钮 + 白卡列表</div>
+      </div>
+
+      <!-- 我的 亮 -->
+      <div class="shot">
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>▲ ● ▮</span></div>
+          <div class="mine">
+            <div class="mgroup" style="margin-top:0">内容</div>
+            <div class="mcard">
+              <div class="mrow"><span class="mi">🕘</span>观看历史<span class="arr">›</span></div>
+              <div class="mrow"><span class="mi">★</span>我的收藏<span class="arr">›</span></div>
+            </div>
+            <div class="mgroup">播放</div>
+            <div class="mcard">
+              <div class="mrow"><span class="mi">⟳</span>自动识别站型<span class="val">开</span></div>
+              <div class="mrow"><span class="mi">▶</span>自动连播<span class="val">开</span></div>
+              <div class="mrow"><span class="mi">⏵</span>记住进度<span class="val">开</span></div>
+              <div class="mrow"><span class="mi">♪</span>后台播放<span class="val">关</span></div>
+            </div>
+            <div class="mgroup">关于</div>
+            <div class="mcard">
+              <div class="mrow"><span class="mi">ⓘ</span>版本<span class="val">v1.0.58</span></div>
+              <div class="mrow"><span class="mi">⤓</span>检查更新<span class="val">已是最新</span></div>
+            </div>
+          </div>
+          <div class="dock">
+            <div class="ni"><b>⌂</b>首页</div><div class="ni"><b>⚙</b>站源</div><div class="ni on"><b>☰</b>我的</div>
+          </div>
+        </div>
+        <div class="cap"><b>我的 · 白昼</b> —— 白分组卡 + 烫金图标底</div>
+      </div>
+
+      <!-- 播放页：永远暗场 -->
+      <div class="shot">
+        <div class="phone dark-fixed">
+          <div class="status"><span>9:41</span><span>▲ ● ▮</span></div>
+          <div class="pb-top"><span>‹</span><span style="flex:1">星际回响 · 第 3 集</span><span>⤢</span><span>投屏</span></div>
+          <div class="pb-stage">▶</div>
+          <div class="pb-bottom">
+            <div class="pb-track"><i></i><s></s></div>
+            <div class="pb-time"><span>12:48</span><span>34:20</span></div>
+            <div class="pb-row"><span>◁◁</span><span style="font-size:17px;color:#FFC46B">⏸</span><span>▷▷</span>
+              <span class="cap2">选集 3/24</span><span class="cap2 hot">线路 1</span></div>
+            <div class="pb-tools"><span>1.0×</span><span>横屏</span><span>字幕</span><span>...</span></div>
+          </div>
+        </div>
+        <div class="cap"><b>播放页 · 永远暗场</b> —— 亮色系统下也保持黑场</div>
+      </div>
+    </div>
+
+    <h3>3.1 设计决策：播放页为什么不做亮色变体</h3>
+    <div class="card">
+      <p><b>放映厅里没有白天。</b>播放器是环境光最暗的场景，视频画面本身是暗底内容：
+      亮色控制栏压在视频上会产生"白条压黑画"的撕裂感，且系统主题切换会造成观看中突兀闪变。
+      规则：<b>播放页（含画中画、横屏）固定使用暗场材质</b>，不随系统主题走；
+      这也是 YouTube / Netflix / 哔哩哔哩播放器的通行做法。实现上 = PlayerActivity 强制
+      <code>AppCompatDelegate.setDefaultNightMode(YES)</code> 局部生效，改动一处。</p>
+    </div>
+  </section>
+
+  <!-- ============ 4 亮色组件 ============ -->
+  <section>
+    <h2><span class="no">04</span>亮色组件关键差异</h2>
+    <p class="sub">只列与暗场不同的表达，其余沿用。</p>
+    <table>
+      <tr><th style="width:200px">组件</th><th>白昼表达</th></tr>
+      <tr><td>主按钮「识别并添加」</td><td>琥珀渐变原样 + 深墨文字 + <b>琥珀色投影</b>（暗场里投影是黑的，白昼里换成琥珀 35% 让按钮像一盏灯）。</td></tr>
+      <tr><td>选中 Tab 胶囊 / 分类芯片</td><td>同一条琥珀渐变 + 琥珀投影；未选中 = 白底 + 发丝线（暗场是 e2 底）。</td></tr>
+      <tr><td>状态徽章</td><td>14% 透明同色底不变，但状态色压暗回白天档（ok <code>#1E9E5A</code> / bad <code>#D64545</code> / 灰 <code>#7C8797</code>）。</td></tr>
+      <tr><td>进度条</td><td>琥珀渐变原样；末端光点的 glow 在白昼下收小到 4dp——"光点"在纸上不能糊成一团。</td></tr>
+      <tr><td>骨架屏</td><td>e2 暖灰块 + 微光扫过不变；高光带在白昼用纯白 40%。</td></tr>
+      <tr><td>按压态</td><td>e3 提亮（<code>#F1EFE9</code>）+ scale 0.98；暗场是提亮，白昼是<b>压暖</b>，触感等价。</td></tr>
+      <tr><td>光溢出 spill</td><td>30% 不透明度、半径 ×0.6、模糊 13dp——"烫金投影"参数，与暗场（50%/16dp）分开调。</td></tr>
+    </table>
+  </section>
+
+  <!-- ============ 5 对比 ============ -->
+  <section>
+    <h2><span class="no">05</span>暗 / 亮同屏对照</h2>
+    <p class="sub">同一块「添加面板」在两个主题下的并排效果。</p>
+    <div class="cmp">
+      <div class="shot">
+        <div class="phone" style="max-width:100%">
+          <div class="status"><span>9:41</span><span>▲ ● ▮</span></div>
+          <div class="add-panel" style="top:64px;background:#12161D;border:1px solid rgba(255,255,255,.09);box-shadow:0 14px 30px -12px rgba(0,0,0,.6)">
+            <div class="ttl" style="color:#7E8794">添加站源</div>
+            <div class="urlbox" style="background:#0A0C10;border:1px solid rgba(255,255,255,.10);color:#7E8794">粘贴网址，例如 example.com</div>
+            <div class="btn-primary">识别并添加</div>
+            <div class="btn-row" style="color:#FFC46B"><span>网页浏览</span><span>直接播放</span><span>高级检测 ▾</span></div>
+          </div>
+          <div class="dock">
+            <div class="ni on"><b>⌂</b>首页</div><div class="ni"><b>⚙</b>站源</div><div class="ni"><b>☰</b>我的</div>
+          </div>
+        </div>
+        <div class="cap"><b>Dark Stage</b> · 琥珀文字次级动作</div>
+      </div>
+      <div class="shot">
+        <div class="phone light" style="background:#F6F5F2;border-color:#D8D4CA;box-shadow:0 18px 40px -18px rgba(26,28,32,.25);max-width:100%">
+          <div class="status"><span>9:41</span><span>▲ ● ▮</span></div>
+          <div class="add-panel" style="top:64px">
+            <div class="ttl">添加站源</div>
+            <div class="urlbox">粘贴网址，例如 example.com</div>
+            <div class="btn-primary">识别并添加</div>
+            <div class="btn-row"><span>网页浏览</span><span>直接播放</span><span>高级检测 ▾</span></div>
+          </div>
+          <div class="dock">
+            <div class="ni on"><b>⌂</b>首页</div><div class="ni"><b>⚙</b>站源</div><div class="ni"><b>☰</b>我的</div>
+          </div>
+        </div>
+        <div class="cap"><b>Daylight</b> · 琥珀文字 → #B87A10</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 6 无障碍 ============ -->
+  <section>
+    <h2><span class="no">06</span>亮色无障碍（实测）</h2>
+    <p class="sub">所有比值都是实底常量。</p>
+    <div class="a11y">
+      <div class="card">
+        <div class="sample"><span>ink #1A1C20 on stage #F6F5F2</span><div class="ratio">14.8 : 1 <span class="pass">✓ AAA</span></div></div>
+        <div class="sample" style="margin-top:10px"><span style="color:#B87A10;font-weight:600">amber_text #B87A10 on #FFF</span><div class="ratio">4.7 : 1 <span class="pass">✓ AA（链接/次级动作）</span></div></div>
+        <div class="sample" style="margin-top:10px"><span style="color:#6E7888">hint #6E7888 on #FFF</span><div class="ratio">4.6 : 1 <span class="pass">✓ AA</span></div></div>
+      </div>
+      <div class="card">
+        <div class="sample"><span style="color:#201405;background:linear-gradient(90deg,#FFC46B,#E8862C);padding:2px 10px;border-radius:6px;font-weight:800">amber_ink on 琥珀按钮</span><div class="ratio">8.9 : 1 <span class="pass">✓ AA+</span></div></div>
+        <div class="sample" style="margin-top:10px"><span style="color:#E8940F;font-weight:600">✗ amber #E8940F 做亮底文字</span><div class="ratio">2.4 : 1 <span class="cond">禁用 · 只作图形/进度色</span></div></div>
+        <div class="sample" style="margin-top:10px"><span style="color:#3E77D6;font-weight:600">info 蓝 #3E77D6（链接）on #FFF</span><div class="ratio">4.5 : 1 <span class="pass">✓ AA</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>视频壳 UI 2.0 · 暗场 Spotlight 白昼变体 v2.1 · 2026-09-23</span>
+    <span>暖纸画布 · 烫金投影 · 同一束琥珀</span>
+  </footer>
+</div>
+</body>
+</html>

@@ -157,20 +157,37 @@ ok("SiteBrowser 提供 setBottomInset", "fun setBottomInset" in browser_kt)
 ok("★ 让位加在 rvVideos 自己的 paddingBottom 上（加在容器上内容不会从玻璃下穿过）",
    "b.rvVideos.setPadding" in browser_kt)
 
-print("== F. 玻璃：透明度必须真的透 ==")
+print("== F. 材质（UI 2.0「暗场 Spotlight」）：实底面板 + 玻璃层退役 ==")
 lf, lf2 = alpha(light, "glass_fill"), alpha(light, "glass_fill_2")
 df, df2 = alpha(dark, "glass_fill"), alpha(dark, "glass_fill_2")
-ok("★ 亮色 glass_fill ≤ 0.75（v1.0.48 是 0.85，几乎不透明）",
-   lf is not None and lf <= 0.75)
-ok("★ 暗色 glass_fill ≤ 0.70（v1.0.48 是 0.72）", df is not None and df <= 0.70)
-ok("亮色 glass_fill 仍 ≥ 0.55（再透就伤文字可读性）", lf is not None and lf >= 0.55)
-ok("暗色 glass_fill 仍 ≥ 0.50（再透就伤文字可读性）", df is not None and df >= 0.50)
-ok("亮色自上而下变淡（fill_2 < fill）", lf2 is not None and lf is not None and lf2 < lf)
-ok("暗色自上而下变淡（fill_2 < fill）", df2 is not None and df is not None and df2 < df)
-for tag, txt, floor in (("亮色", light, 0.25), ("暗色", dark, 0.32)):
-    a1 = alpha(txt, "ambient_1")
-    ok("%s ambient_1 ≥ %.2f（v1.0.48 的低 alpha 在实机上等于没有背景）" % (tag, floor),
-       a1 is not None and a1 >= floor)
+ok("★ 亮色 glass_fill 是实底面板（≥0.95；磨砂已退役，不许手滑调回半透明）",
+   lf is not None and lf >= 0.95)
+ok("★ 暗色 glass_fill 是实底面板（e1 档 0.85~0.92，Dock 压滚动内容仍留一线暗影）",
+   df is not None and 0.85 <= df <= 0.92)
+ok("fill_2 同为实底（双主题 ≥0.85）",
+   lf2 is not None and df2 is not None and lf2 >= 0.85 and df2 >= 0.85)
+ls_, ds_ = alpha(light, "glass_stroke"), alpha(dark, "glass_stroke")
+ok("★ 发丝线极性：亮色实描边（≥0.9）/ 暗色弱白（0<alpha≤0.2）",
+   ls_ is not None and ds_ is not None and ls_ >= 0.9 and 0.0 < ds_ <= 0.2)
+for name in ("glass_glow", "glass_edge_a", "glass_edge_b", "glass_edge_c",
+             "ambient_1", "ambient_2", "ambient_3"):
+    la, da = alpha(light, name), alpha(dark, name)
+    ok("%s 已退役（双主题全透明）" % name, la == 0.0 and da == 0.0)
+
+
+def val(text, name):
+    m = re.search(r'<color name="%s">#([0-9A-Fa-f]{8})</color>' % name, text)
+    return m.group(1).upper() if m else None
+
+
+for name in ("amber", "amber_hi", "amber_ink"):
+    ok("★ 琥珀 %s 双主题同值（唯一同值 Token：白天黑夜都是那束灯）" % name,
+       val(light, name) is not None and val(light, name) == val(dark, name))
+ok("★ 亮色 text_hint 达 AA（#6E7888 档，不许回退 #7C8797 的 3.6:1）",
+   val(light, "text_hint") == "FF6E7888")
+ok("★ 暗色 text_hint 达 AA（#7E8794 档）", val(dark, "text_hint") == "FF7E8794")
+ok("主题主强调指向琥珀（colorPrimary=@color/amber）",
+   'colorPrimary">@color/amber' in rd("values", "themes.xml"))
 
 print("== G. 砂质层：颗粒必须长在玻璃片自己身上 ==")
 grain = rd("drawable", "glass_grain.xml")

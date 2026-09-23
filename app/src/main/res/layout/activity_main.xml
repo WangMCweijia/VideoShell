@@ -506,6 +506,7 @@
                                 android:layout_height="36dp"
                                 android:layout_weight="1"
                                 android:text="@string/dark_system"
+                                android:textColor="@color/text_primary"
                                 android:textSize="@dimen/text_badge" />
 
                             <com.google.android.material.button.MaterialButton
@@ -515,6 +516,7 @@
                                 android:layout_height="36dp"
                                 android:layout_weight="1"
                                 android:text="@string/dark_light"
+                                android:textColor="@color/text_primary"
                                 android:textSize="@dimen/text_badge" />
 
                             <com.google.android.material.button.MaterialButton
@@ -524,6 +526,7 @@
                                 android:layout_height="36dp"
                                 android:layout_weight="1"
                                 android:text="@string/dark_dark"
+                                android:textColor="@color/text_primary"
                                 android:textSize="@dimen/text_badge" />
                         </com.google.android.material.button.MaterialButtonToggleGroup>
                     </LinearLayout>

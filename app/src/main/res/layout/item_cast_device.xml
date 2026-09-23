@@ -33,7 +33,7 @@
         android:id="@+id/pb"
         android:layout_width="22dp"
         android:layout_height="22dp"
-        android:indeterminateTint="@color/brand"
+        android:indeterminateTint="@color/amber_progress"
         android:visibility="gone" />
 
 </LinearLayout>

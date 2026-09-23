@@ -17,11 +17,11 @@
     android:paddingEnd="4dp"
     android:paddingBottom="4dp">
 
-    <!-- 品牌色竖条：给"这块从这里开始"一个不依赖文字也能看见的边界 -->
+    <!-- 琥珀竖条：给"这块从这里开始"一个不依赖文字也能看见的边界 -->
     <View
         android:layout_width="3dp"
         android:layout_height="14dp"
-        android:background="@color/brand" />
+        android:background="@color/amber" />
 
     <TextView
         android:id="@+id/tvHeaderSite"
