@@ -2640,6 +2640,18 @@ E 把 restore 挂错位 : 第 2 次仍被覆盖（**静默失效**，编译无�
 默认值不生效** ⇒ 老配置反序列化后它是 `null`。所以一律走 `mirrorList()`；全仓扫描守卫禁止别处直读
 `.mirrors`（那里是唯一的 NPE 入口）。（同一个坑本文件 `apiMode` 那一栏踩过，见总表 E1。）
 
+**加这一个字段还顺手炸掉了 7 个套件的 `javac`** —— 这条比上面那条更容易复发，单独说清：
+
+| 观测 | 事实 |
+|---|---|
+| 症状 | 全量回归里 **8 个套件 BAD**，其中 7 个（`runverify3` / `runbs` / `runbs4` / `runyg` / `runygcalib` / `rununiversal` / `runagg37`）报的是 **`javac` 失败**，不是断言红 |
+| 归因 | **Kotlin 默认参数对 Java 不可见** —— `List<String>? = null` 在 Java 侧不生成重载，而几十个 harness 是用**位置参数**构造 `SiteConfig` 的 |
+| 为什么以前没事 | 加之前它**正好是 8 个参数**，于是 `new SiteConfig(8 args)` 恰好就是那个全参构造器 ⇒ 一直能编过。**"一直没炸"的另一种解释是"从没被触发"** |
+| 修法 | `data class SiteConfig @JvmOverloads constructor(` —— **注解必须挂在 `constructor` 上**；写成类级注解（`@JvmOverloads` 单独一行放在 `data class` 前）**直接编译不过** |
+
+一条注解顶回 ~45 处 Java 构造点，比手改 45 个文件更稳（手改每个点都带 E29「编辑假成功」的风险）。
+**判据**：不只看"编译绿"，还要 `javap -p` 数构造器个数（8/9 参两个都在）。
+
 ### 四、左栏渐进式 `RailGrowth`
 
 三个纯决策：`shouldShow` / `insertAt` / `needFooter`。
