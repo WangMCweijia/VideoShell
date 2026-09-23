@@ -1,8 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Dock 图标 / 文字色（v1.0.62）：
-     选中 = 聚光琥珀（双主题同值 —— 亮 Dock 是墨底、暗 Dock 是黑场，用同一支亮琥珀）；
-     未选中 = dock_inactive，**按各自 Dock 底色取值**（亮色墨底 6.3:1 / 暗色 5.0:1，均过 AA）。
-     ⚠️ 不能沿用 text_hint：亮色 #6E7888 落在墨底只有 3.6:1，11sp 小字不达标。
+<!-- Dock 图标 / 文字色（v1.0.63）：
+     选中与未选中都走 dock_* Token，**两个主题各取一支** —— 因为 v1.0.63 起
+     亮色 Dock 是白面板、暗色 Dock 是墨岛，同一支颜色不可能在两种底色上同时达标。
+
+     亮色（白底）  ：选中 #9E6709 = 4.7:1，未选中 #64707F = 5.0:1
+     暗色（黑场底）：选中 #FFC46B = 11.7:1，未选中 #7E8794 = 5.1:1
+     全部过 AA（4.5:1）—— 11sp 文字与 22dp 图标都算小尺寸，不能拿"图形门槛 3:1"凑。
+
+     ⚠️ 不要"顺手统一"成一支琥珀：亮琥珀 #FFC46B 在白底只有 1.9:1（连 3:1 都不到），
+        烫金 #9E6709 落在黑场上又看不见。这不是不一致，是各自按底色取值。
+     ⚠️ 也不要沿用 text_hint 当未选中色：它的取值只对"画布"负责，
+        不是对 Dock 底色负责（亮色 #6E7888 白底 4.5:1 贴线、落在旧墨底只有 3.6:1）。
+
      状态键是 state_selected（手写 Dock 由 View.setSelected 驱动，不再是 menu 的 checked）。 -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:color="@color/dock_active" android:state_selected="true" />

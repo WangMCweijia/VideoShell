@@ -45,31 +45,34 @@
     <color name="amber_text">#FFB87A10</color>
     <!-- 进度/滑杆专用：亮底需要 ≥3:1 的图形对比度，故压深一档 -->
     <color name="amber_progress">#FFC9830F</color>
-    <!-- 底部导航选中态：**双主题同值亮琥珀**（v1.0.62）——
-         亮色 Dock 改成墨底后，原来那支烫金 #B87A10 在墨上只有 2.4:1，
-         根本看不见；墨底/黑底用的是同一支亮琥珀，这是刻意的。 -->
-    <color name="nav_active">#FFFFC46B</color>
     <!-- 导航选中胶囊底：琥珀 12% 面积色（旧值，面板类保留引用） -->
     <color name="amber_pill">#1FE8862C</color>
 
     <!-- ============================================================
-         底部 Dock（v1.0.62 · "墨岛"）。
-         亮色主题下 Dock 用**深墨**而不是白：白 Dock 压在暖纸画布上，
-         无论怎么加描边/投影，观感永远只是"一块白" —— 这是"tab 栏质感
-         不好"的真正根因：材质之间没有对比。深度来自材质对比，
-         画布（暖纸）→ Dock（墨岛）一次拉满。
-         暗色主题沿用 e1 面板（黑场上把 Dock 再压暗 = 等于没有 Dock）。
-         ⚠️ 未选中色必须按**自家底色**取：dock_inactive 在墨底 6.3:1、
-            黑场 5.0:1，都过 AA；不能沿用 text_hint（亮色 #6E7888 落在
-            墨底只有 3.6:1，11sp 小字不达标）。
+         底部 Dock（v1.0.63 · 亮色改回**浅色实体面板**）。
+         v1.0.62 曾把亮色 Dock 做成"墨岛"（#1B2028），理由是白 Dock 压在
+         暖纸画布上"永远只是一块白"。这个判断是错的：**亮色主题里放一块
+         深色块 = 主题反转**，观感上就是"这不该是这样"（实测反馈原话）。
+         「分层」的正确来源不是明度反转，而是三者叠加：
+            ① 抬亮一档 —— 白 #FFFFFF 压在暖纸 #F6F5F2 之上（漫反射顶面）
+            ② 发丝线描边 —— 浅墨 #D9D5CA 勾出边界（与全 App 面板同源）
+            ③ elevation 12dp 投影（activity_main.xml，LayerDrawable 圆角 outline）
+         暗色主题**保持墨岛**：黑场上只能靠"提亮一档 + 白发丝线"分层。
+         两者是同一设计意图（把 Dock 从画布里分出来）的两种主题表达。
+         ⚠️ 选中/未选中色必须按**自家底色**取，两个主题各算一遍：
+            亮色白底：dock_inactive #64707F 5.0:1、dock_active #9E6709 4.7:1
+            暗色黑场：dock_inactive #7E8794 5.0:1、dock_active #FFC46B（见 night）
+         ⚠️ 两支琥珀是**故意不同**的，不要"统一"：亮琥珀 #FFC46B 在白底
+            只有 1.9:1（连图形门槛都到不了），烫金必须压深到 #9E6709 才过 AA；
+            反过来 #9E6709 落在黑场上又看不见。
          ============================================================ -->
-    <color name="dock_fill">#FF1B2028</color>
-    <color name="dock_fill_2">#FF15191F</color>
-    <color name="dock_stroke">#26FFFFFF</color>
-    <color name="dock_inactive">#FF98A1AE</color>
-    <color name="dock_active">#FFFFC46B</color>
-    <color name="dock_pill">#2EFFC46B</color>
-    <color name="dock_ripple">#1FFFFFFF</color>
+    <color name="dock_fill">#FFFFFFFF</color>
+    <color name="dock_fill_2">#FFF9F7F3</color>
+    <color name="dock_stroke">#FFD9D5CA</color>
+    <color name="dock_inactive">#FF64707F</color>
+    <color name="dock_active">#FF9E6709</color>
+    <color name="dock_pill">#2BE8862C</color>
+    <color name="dock_ripple">#14000000</color>
 
     <!-- 玻璃四层 → 实底材质的兼容映射（色名退役期，引用方不用改）：
          fill/fill_2 = 实白面板（底部留一丝暖差当"漫反射"残影），

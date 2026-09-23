@@ -146,7 +146,62 @@ ok("底基仍是 bg_glass_nav（填充/砂质/描边四层不能被顶掉）",
    "R.drawable.bg_glass_nav" in main_kt)
 ok("bg_glass_nav 不再带砂质层（v1.0.60 实底材质退役颗粒）",
    "@drawable/glass_grain" not in nav_xml)
-ok("bg_glass_nav 仍带描边", "glass_stroke" in nav_xml)
+# v1.0.63：这里原来写的是 `"glass_stroke" in nav_xml` —— 那是**弱断言**：
+#   文件里早已改引用 @color/dock_stroke，全靠注释里提了一句 "glass_stroke" 才蒙对。
+#   包含 ≠ 等于（§4.54）。现在改成锁「存在 stroke 元素 + 走 Dock 专属 Token」。
+ok("bg_glass_nav 仍带描边，且走 dock_stroke（v1.0.63 起描边极性随主题反转）",
+   "<stroke" in nav_xml and "@color/dock_stroke" in nav_xml)
+
+
+def _lum(text, name):
+    """相对亮度（WCAG）。argb 拿到的是 ARGB，这里只看 RGB 通道。
+
+    带 alpha 的 Dock 底（暗色 #F212161D）按 95% 压在画布上估算时差异 < 1%，
+    直接当不透明处理不会影响判据，故不额外做合成。
+    """
+    v = argb(text, name)
+    if not v:
+        return None
+
+    def ch(c):
+        c = c / 255.0
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    return 0.2126 * ch(v[1]) + 0.7152 * ch(v[2]) + 0.0722 * ch(v[3])
+
+
+def _ratio(text, fg, bg):
+    a, b = _lum(text, fg), _lum(text, bg)
+    if a is None or b is None:
+        return None
+    hi, lo = max(a, b), min(a, b)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+print("== A2. Dock 材质必须与主题同向（锁机制，不锁色值 · v1.0.63 教训）==")
+# v1.0.62 把亮色 Dock 做成深墨 #1B2028，这是**主题反转** —— 用户一眼否掉。
+# 判据表达的本质是「不管哪个主题，Dock 都得从画布里浮起来」：
+#   亮色靠抬亮一档（白面板压在暖纸上）、暗色靠提亮一档（黑场上再压暗就没了）。
+# 所以同一条断言对两个主题都成立 —— 而 v1.0.62 的墨岛会被它当场抓住。
+for _t, _tag in ((light, "亮色"), (dark, "暗色")):
+    _df, _bg = _lum(_t, "dock_fill"), _lum(_t, "bg")
+    ok("★ %s Dock 底比自家画布亮（浮起来；反过来就是主题反转）" % _tag,
+       _df is not None and _bg is not None and _df > _bg)
+
+# 描边极性随主题反转：材质换了必须同步换描边色，否则要么看不见、要么一道突兀亮边。
+ok("亮色 Dock 描边比 Dock 底暗（浅墨发丝线画在白面板上）",
+   _ratio(light, "dock_stroke", "dock_fill") is not None
+   and _lum(light, "dock_stroke") < _lum(light, "dock_fill"))
+ok("暗色 Dock 描边比 Dock 底亮（黑场上只有白发丝线勾得出上棱）",
+   _lum(dark, "dock_stroke") > _lum(dark, "dock_fill"))
+
+# 选中/未选中色必须按**自家 Dock 底色**取：11sp 文字 + 22dp 图标都不算大字，
+# 一律按 4.5:1（AA）要求，不拿"图形门槛 3:1"凑。
+for _t, _tag in ((light, "亮色"), (dark, "暗色")):
+    for _name, _what in (("dock_active", "选中"), ("dock_inactive", "未选中")):
+        _r = _ratio(_t, _name, "dock_fill")
+        ok("★ %s Dock %s色在自家底上过 AA 4.5:1（实测 %.2f:1）" % (_tag, _what, _r or 0),
+           _r is not None and _r >= 4.5)
 
 print("== B. 折射配色（UI 2.0「暗场 Spotlight」起退役）：三支棱色双主题全透明 ==")
 la, lb, lc = alpha_of(light, "glass_edge_a"), alpha_of(light, "glass_edge_b"), alpha_of(light, "glass_edge_c")
