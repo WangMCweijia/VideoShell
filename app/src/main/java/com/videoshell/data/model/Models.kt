@@ -74,13 +74,33 @@ sealed class MediaSource {
     data class Direct(
         val url: String,
         val headers: Map<String, String> = emptyMap(),
-        val isHls: Boolean = false
+        val isHls: Boolean = false,
+        /**
+         * 内容类型（v1.0.65）。
+         *
+         * **为什么非要它**：media3 的 `DefaultMediaSourceFactory` 靠 URI 的**后缀**推断内容类型，
+         * 而网盘直链经常不带扩展名（`…/file/download?fid=…`）。推断不出来时它会按
+         * progressive 处理 —— 结果是一个 HLS 流被当成 mp4 去解，用户看到"能解析、一播就黑屏"。
+         * 取流方（网盘 Provider）**知道**自己给的是什么，所以由它报出来，别让上层猜。
+         */
+        val mimeType: String? = null
     ) : MediaSource()
 
     data class Sniff(
         val pageUrl: String,
         val headers: Map<String, String> = emptyMap()
     ) : MediaSource()
+
+    /**
+     * 需要登录（v1.0.65，网盘）。
+     *
+     * 与 [Error] 分开，是因为它有一个**明确的下一步动作**：去「网盘账号」页登录。
+     * 只丢一个 toast 的话，用户知道"要登录"却不知道去哪儿登 —— 而这条路径是网盘方案的
+     * 第一道门（实测：不登录连一条直链都取不到），必须一次说清。
+     *
+     * [driveKey] 是 [com.videoshell.data.pan.PanType.key]，账号页靠它定位到对应那一行。
+     */
+    data class NeedLogin(val message: String, val driveKey: String = "") : MediaSource()
 
     data class Error(val message: String) : MediaSource()
 }

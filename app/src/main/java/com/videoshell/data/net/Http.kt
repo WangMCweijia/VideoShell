@@ -268,9 +268,26 @@ object Http {
      * 播放器走这一套（而不是 ExoPlayer 自带的 DefaultHttpDataSource）是有意为之：
      * 自检/解析/嗅探都用 OkHttp，只有播放器用 HttpURLConnection 的话，
      * 「自检全绿、播放打不开」这类问题永远查不清 —— 详见 OkHttpDataSource 的注释。
+     *
+     * ## 为什么必须自己换一个 Dispatcher（v1.0.65）
+     *
+     * OkHttp 的 `Dispatcher` **默认 `maxRequestsPerHost = 5`** —— 这是"同一个域名同时最多几个请求"。
+     * 播放分片全在同一个 CDN 域上，而 v1.0.65 加了**并发预取**（[com.videoshell.player.HlsPrefetch]，
+     * 默认 4 条在飞）。4 条预取 + 播放器自己的分片/清单请求正好顶到 5 ⇒ 播放器的请求会被
+     * **排进 Dispatcher 队列等预取腾位置**：画面上就是"明明带宽够、却一顿一顿的"，
+     * 而且从日志上看一切正常（没有错误、没有超时，只是慢）。
+     *
+     * 所以这里给播放器**单独一个 Dispatcher**（不动 [client] 的，普通请求没必要放宽），
+     * 并把每 host 上限提到 8 = 4 条预取 + 4 条留给播放器自身（清单/分片/重试）的余量。
      */
     val mediaClient: OkHttpClient by lazy {
         client.newBuilder()
+            .dispatcher(
+                okhttp3.Dispatcher().apply {
+                    maxRequests = 64
+                    maxRequestsPerHost = 8
+                }
+            )
             .callTimeout(0, TimeUnit.MILLISECONDS)
             .connectTimeout(8, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
@@ -435,18 +452,24 @@ object Http {
      * 摆进 `window.__XXX__={...}`，再用混淆 JS `POST /api/parse` 换真地址 —— 骚火的 hhplayer
      * 就是这种。**这类接口只认 JSON 体，用表单体过去会被拒**，所以不能复用 [postForm]。
      * 与 [postForm] 同享重试、CookieJar、NetLog 与韧性 DNS。
+     *
+     * [headers]（v1.0.65）给网盘类接口用：它们的登录态**不在**本进程的 CookieJar 里
+     * （凭据是用户在「网盘账号」页登录后由 [com.videoshell.data.pan.DriveStore] 保管的），
+     * 必须逐次显式带上 `Cookie`。放在这里而不是让调用方自己 newCall，是为了
+     * **重试 / NetLog / 韧性 DNS 只有一份实现** —— 网盘请求同样会遇到 DNS 污染与瞬时失败。
      */
     suspend fun postJson(
         url: String,
         json: String,
         referer: String? = null,
-        ua: String = UA
+        ua: String = UA,
+        headers: Map<String, String> = emptyMap()
     ): String = withContext(Dispatchers.IO) {
         var last: Exception? = null
         for (attempt in 0 until MAX_ATTEMPTS) {
             if (attempt > 0) delay(RETRY_DELAY_MS[attempt])
             try {
-                return@withContext oncePostJson(url, json, referer, ua)
+                return@withContext oncePostJson(url, json, referer, ua, headers)
             } catch (e: Exception) {
                 last = e
                 if (!worthRetry(e)) break
@@ -459,15 +482,57 @@ object Http {
         url: String,
         json: String,
         referer: String? = null,
-        ua: String = UA
+        ua: String = UA,
+        headers: Map<String, String> = emptyMap()
     ): String? = try {
-        postJson(url, json, referer, ua)
+        postJson(url, json, referer, ua, headers)
     } catch (e: Exception) {
         null
     }
 
+    /**
+     * 单次 JSON POST：**不重试**、不抛异常，返回 `(HTTP 状态码, 响应体)`；网络失败返回 `(-1, "")`（v1.0.65）。
+     *
+     * 只给"尽力而为的收尾动作"用（云盘取流后清理转存产物）。与 [postJsonOrNull] 的区别：
+     *  - **不做 5xx 退避重试**：那层重试（`0/400/1200ms` + 3 次请求 ≈ 2.4s）是为"这次必须成"的
+     *    的请求准备的；而收尾动作接在**用户的等待路径**上（取流成功后、返回播放地址之前），
+     *    让它白自旋 2.4 秒去撞一个**必定失败**的请求，纯粹是拖慢播放启动。
+     *  - **把状态码交出来**：调用方要能区分"成了 / 4xx 别再试 / 5xx 稍后再试"这三种结局。
+     *
+     * ⚠️ 非 2xx 时 `oncePostJson` 抛的是 `IOException("HTTP <code> @ <url>")`，**正文拿不到**
+     * ⇒ 第二个返回值是 `""`。所以这个 API 只适合"按状态码分派"的调用；要读 4xx 的正文
+     * （比如 `code:23004` 那种），得走别的路子。清理逻辑不需要它 —— 4xx 一律"别再试"。
+     *
+     * 仍然记 `NetLog`（复用 [oncePostJson]），诊断信息不丢。
+     */
+    suspend fun postJsonOnceRaw(
+        url: String,
+        json: String,
+        referer: String? = null,
+        ua: String = UA,
+        headers: Map<String, String> = emptyMap()
+    ): Pair<Int, String> = withContext(Dispatchers.IO) {
+        try {
+            200 to oncePostJson(url, json, referer, ua, headers)
+        } catch (e: Exception) {
+            val m = e.message.orEmpty()
+            val code = if (m.startsWith("HTTP ")) {
+                m.removePrefix("HTTP ").takeWhile { it.isDigit() }.toIntOrNull() ?: -1
+            } else {
+                -1
+            }
+            code to ""
+        }
+    }
+
     /** 单次 JSON POST（不含重试） */
-    private fun oncePostJson(url: String, json: String, referer: String?, ua: String): String {
+    private fun oncePostJson(
+        url: String,
+        json: String,
+        referer: String?,
+        ua: String,
+        headers: Map<String, String> = emptyMap()
+    ): String {
         val body = json.toRequestBody("application/json; charset=utf-8".toMediaType())
         val b = Request.Builder().url(url)
             .post(body)
@@ -479,6 +544,7 @@ object Http {
             // 同表单 POST：有 Referer 就补 Origin，免得 WAF 403
             runCatching { b.header("Origin", originOf(referer)) }
         }
+        for ((k, v) in headers) runCatching { b.header(k, v) }
         val t0 = System.currentTimeMillis()
         try {
             client.newCall(b.build()).execute().use { resp ->

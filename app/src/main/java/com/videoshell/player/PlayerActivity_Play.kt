@@ -68,10 +68,12 @@ import com.videoshell.data.Store
 import com.videoshell.data.model.MediaSource
 import com.videoshell.data.net.Http
 import com.videoshell.data.net.NetLog
+import com.videoshell.data.pan.PanResolver
 import com.videoshell.data.site.AdapterFactory
 import com.videoshell.data.site.Media
 import com.videoshell.databinding.ActivityPlayerBinding
 import com.videoshell.ui.adapter.EpisodeAdapter
+import com.videoshell.ui.askDriveLogin
 import com.videoshell.util.formatTime
 import com.videoshell.util.toast
 import kotlinx.coroutines.launch
@@ -415,17 +417,24 @@ internal fun PlayerActivity.playEpisode(index: Int, autoHeal: Boolean = false) {
     fallbackPage = ep.url
 
     val site = PlayQueue.siteKey.takeIf { it.isNotBlank() }?.let { Store.find(this, it) }
-    if (site == null) {
+    // 没有站点也可以播 —— 但**只限网盘链接**（用户直接粘了一条分享链接，或从网盘详情页
+    // 进来）。普通地址仍然照旧直接交给播放器，不走解析（省一次协程与一次网络）。
+    if (site == null && !PanResolver.handles(ep.url)) {
+        currentMime = null
         playUrl(ep.url)
         return
     }
     lifecycleScope.launch {
         binding.pbBuffering.visibility = View.VISIBLE
-        val r = runCatching { AdapterFactory.create(site).resolve(ep) }.getOrNull()
+        val r = runCatching {
+            if (site != null) AdapterFactory.create(site).resolve(ep)
+            else PanResolver.resolve(ep.url)
+        }.getOrNull()
         binding.pbBuffering.visibility = View.GONE
         when (r) {
             is MediaSource.Direct -> {
                 headers = r.headers
+                currentMime = r.mimeType
                 retried = false
                 playUrl(r.url)
             }
@@ -440,8 +449,40 @@ internal fun PlayerActivity.playEpisode(index: Int, autoHeal: Boolean = false) {
                 )
                 finish()
             }
+            // v1.0.65：网盘未登录。给一个**能直接走的下一步**（跳账号页），
+            // 而不是只弹一句 toast —— 用户知道"要登录"却不知道去哪儿登，等于没说。
+            is MediaSource.NeedLogin -> askDriveLogin(r)
             is MediaSource.Error -> toast(r.message)
             null -> toast("解析播放地址失败")
+        }
+    }
+}
+
+/**
+ * 「直接播放」粘贴了一条网盘分享链接（v1.0.65）。
+ *
+ * 走到这里说明 [com.videoshell.data.pan.PanResolver.handles] 认了这条地址，
+ * 所以必须先在网盘层解析成直链，再交给播放器 —— 直接把 `pan.quark.cn/s/…` 丢给 ExoPlayer
+ * 只会得到一个 HTML 页面和一句"无法播放"。
+ */
+internal fun PlayerActivity.resolvePanInline(url: String) {
+    lifecycleScope.launch {
+        binding.pbBuffering.visibility = View.VISIBLE
+        val r = runCatching { PanResolver.resolve(url) }.getOrNull()
+        binding.pbBuffering.visibility = View.GONE
+        when (r) {
+            is MediaSource.Direct -> {
+                headers = r.headers
+                currentMime = r.mimeType
+                retried = false
+                playUrl(r.url)
+            }
+            is MediaSource.NeedLogin -> askDriveLogin(r)
+            is MediaSource.Error -> {
+                toast(r.message)
+                PlayLog.record("✗ 网盘解析失败：${r.message}")
+            }
+            else -> toast("解析播放地址失败")
         }
     }
 }

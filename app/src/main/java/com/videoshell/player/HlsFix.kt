@@ -230,12 +230,27 @@ object HlsPlaylistFixer {
 /**
  * 包装上游 [DataSource]：只拦 **playlist 响应**，读全书 -> [HlsPlaylistFixer.fix] -> 交给播放器；
  * 分片等大流量请求一律原样透传（不缓冲）。
+ *
+ * v1.0.65 起它还是**并发预取**的挂载点（见 [HlsPrefetch]）：清单读完顺手把"接下来那几片"
+ * 排进线程池，分片请求先在本地缓存里找 —— 这一层本来就在每个请求的必经之路上，
+ * 不需要另起一个代理服务来干同样的事。
  */
-class HlsFixDataSource(private val upstream: DataSource) : DataSource {
+class HlsFixDataSource(
+    private val upstream: DataSource,
+    private val prefetch: HlsPrefetch? = null
+) : DataSource {
 
     private var buffered: ByteArray? = null
     private var pos = 0
     private var closed = false
+
+    /**
+     * 本次实际读取的地址。
+     *
+     * 从缓存命中时上游**根本没打开**，`upstream.uri` 是 null，而 media3 会拿 `getUri()`
+     * 去解析相对地址/做去重 —— 返回 null 会让它拿到一个没有基准的地址。
+     */
+    private var servedUri: android.net.Uri? = null
 
     override fun addTransferListener(transferListener: TransferListener) {
         upstream.addTransferListener(transferListener)
@@ -246,14 +261,40 @@ class HlsFixDataSource(private val upstream: DataSource) : DataSource {
         buffered = null
         pos = 0
         closed = false
+        servedUri = null
+
+        // "整份读取"= 无偏移、无长度。带 Range 的局部读（seek 造成）不能拿缓存去糊 ——
+        // 缓存里存的是整片，语义不一样。
+        val whole = dataSpec.position == 0L && dataSpec.length == C.LENGTH_UNSET.toLong()
+
+        // ---- ① 预取命中：一个字节都不走网络 ----
+        // ⚠️ 必须放在 upstream.open() **之前**。放到后面就等于"先发起请求、再从缓存读"，
+        //    预取省下的那点时间全白搭，还平白多占一条连接 —— 本层最容易写错的就是这一处。
+        if (whole) {
+            val hit = prefetch?.get(dataSpec.uri.toString())
+            if (hit != null) {
+                buffered = hit
+                servedUri = dataSpec.uri
+                closed = true
+                return hit.size.toLong()
+            }
+        }
+
+        // 后缀先判一次（便宜）；判不出来在 open 之后再靠 Content-Type 兜
+        val byUri = isPlaylistUri(dataSpec.uri.toString())
         val len = upstream.open(dataSpec)
         // ⚠️ 必须**紧接 open** 取，且取的是 `upstream.uri`（= 跟随重定向后的地址），
         //    不是 `dataSpec.uri`（我们发出去的那个）—— 两者在"清单被 302 到另一个目录"
         //    的站上完全不同，用错一个就是"清单 200、分片全 402、一直转圈"（v1.0.40 真踩）。
+        servedUri = runCatching { upstream.uri }.getOrNull()
         val servedUrl = runCatching { upstream.uri?.toString() }.getOrNull()
-        // 只处理完整请求的 playlist
-        if (dataSpec.position != 0L) return len
-        if (!isPlaylist(dataSpec)) return len
+        if (!whole) return len
+
+        if (!byUri && !isPlaylistByContentType()) {
+            // 分片：告诉预取器"播放器走到哪了"，让它把后面几片提前拉好
+            prefetch?.onSegment(dataSpec.uri.toString())
+            return len
+        }
 
         val bytes = readAll()
         val text = String(bytes, Charsets.UTF_8)
@@ -267,7 +308,10 @@ class HlsFixDataSource(private val upstream: DataSource) : DataSource {
             )
         }
         buffered = if (text.trimStart().startsWith("#EXTM3U")) {
-            HlsPlaylistFixer.fix(text, base).toByteArray(Charsets.UTF_8)
+            val fixed = HlsPlaylistFixer.fix(text, base)
+            // 预取只在"这份清单确实要播"时才开（直播/master 清单会被 HlsPrefetch 自己忽略）
+            prefetch?.onPlaylist(servedUrl ?: requested, fixed)
+            fixed.toByteArray(Charsets.UTF_8)
         } else {
             bytes
         }
@@ -276,8 +320,7 @@ class HlsFixDataSource(private val upstream: DataSource) : DataSource {
         return buffered!!.size.toLong()
     }
 
-    private fun isPlaylist(dataSpec: DataSpec): Boolean {
-        val u = dataSpec.uri.toString()
+    private fun isPlaylistUri(u: String): Boolean {
         // 后缀判据要连 `.m3u` 一起认：少数站用 `.m3u`（无反斜杠），
         // 漏掉它就等于那份 playlist 完全没被规范化过
         if (u.contains(".m3u8", true) || u.contains(".m3u?", true) ||
@@ -285,6 +328,10 @@ class HlsFixDataSource(private val upstream: DataSource) : DataSource {
         ) {
             return true
         }
+        return false
+    }
+
+    private fun isPlaylistByContentType(): Boolean {
         val ct = upstream.responseHeaders.entries
             .firstOrNull { it.key.equals("Content-Type", true) }
             ?.value?.firstOrNull().orEmpty()
@@ -321,16 +368,24 @@ class HlsFixDataSource(private val upstream: DataSource) : DataSource {
         pos = 0
     }
 
-    override fun getUri(): android.net.Uri? = upstream.uri
+    override fun getUri(): android.net.Uri? = servedUri ?: upstream.uri
 
     override fun getResponseHeaders(): Map<String, List<String>> = upstream.responseHeaders
 }
 
-/** 把 [HlsFixDataSource] 挂到任意 [DataSource.Factory] 上 */
+/**
+ * 把 [HlsFixDataSource] 挂到任意 [DataSource.Factory] 上。
+ *
+ * [prefetch] 由调用方持有（一个播放会话一个）：**必须让预取与播放器用同一个
+ * 请求头来源**，否则网盘分片会 412（见 PITFALLS §4.60 的"只认 Cookie"）。
+ * 所以工厂这一侧只管透传，不自己造预取器。
+ */
 class HlsFixDataSourceFactory(
-    private val upstreamFactory: DataSource.Factory
+    private val upstreamFactory: DataSource.Factory,
+    private val prefetch: HlsPrefetch? = null
 ) : DataSource.Factory {
-    override fun createDataSource(): DataSource = HlsFixDataSource(upstreamFactory.createDataSource())
+    override fun createDataSource(): DataSource =
+        HlsFixDataSource(upstreamFactory.createDataSource(), prefetch)
 }
 
 /**

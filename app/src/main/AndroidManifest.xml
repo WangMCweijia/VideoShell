@@ -60,7 +60,26 @@
             android:name=".ui.FavActivity"
             android:exported="false" />
 
+        <!-- 网盘账号（v1.0.65）：内嵌 WebView 登录夸克/UC 等网盘，凭据只存本机。
+             configChanges 必须带上 orientation|screenSize|keyboardHidden ——
+             登录页是桌面版页面，用户很容易转屏；不声明的话转屏会重建 Activity，
+             AlertDialog 里的 WebView 连同已填的密码一起消失，用户只会以为"登录坏了"。 -->
+        <activity
+            android:name=".ui.DriveAccountsActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize" />
+
         <!-- 调试校准模式：用 WebView 打开站点，引导用户点分类 / 影片 / 分集，把规则固化下来 -->
+        <!-- 网盘登录页（v1.0.65）：全屏 WebView，给扫码用。
+             必须是**独立 Activity + 全屏**：网页版登录默认就是扫码，二维码塞进
+             对话框会被压到扫不动（原来 DriveAccountsActivity 就是这么干的）。
+             configChanges 与 DriveAccountsActivity 一致 —— 桌面版登录页很容易被转屏，
+             不声明就会重建，正在走的扫码流程直接断掉。 -->
+        <activity
+            android:name=".ui.DriveLoginActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize" />
+
         <activity
             android:name=".ui.CalibrateActivity"
             android:exported="false"

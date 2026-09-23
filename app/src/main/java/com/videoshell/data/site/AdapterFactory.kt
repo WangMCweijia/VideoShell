@@ -67,6 +67,19 @@ object AdapterFactory {
         val fam = CryptFamily.cachedState(site.baseUrl)
         if (fam is CryptFamily.State.Hit) return YeguoAdapter(site, fam.recipe)
 
+        // ②.5（v1.0.65）这个域名**已自证是「网盘分享站族」** ⇒ 直接上 [PanShareAdapter]。
+        //
+        // 为什么要单列这一步，而不是只在兜底链里换掉 [HtmlAdapter]：
+        // 下面的第 ④ 步（站点自己的采集接口）会**提前返回**。而网盘分享站恰好常被识别出
+        // 一个"看着像 maccms 但已经关掉"的接口（快映实测 `/api.php/provide/vod/at/json/`
+        // 200 但只有 **6 字节**）—— 一旦 `apiUrl` 被写上，兜底链就再也走不到，
+        // 详情页永远解析不出东西。
+        //
+        // 只读缓存、零网络 ⇒ 与 ② 一样是零成本；首帧判定仍由兜底链负责（那时已经在 IO 协程里）。
+        if (PanShareFamily.cachedState(site.baseUrl) is PanShareFamily.State.Hit) {
+            return PanShareAdapter(site)
+        }
+
         // ③ 人工校准过 ⇒ 网页解析被**真实验证过**（用户点了分类→详情→分集还试播成功），
         //    不许被采集接口模式绕过 —— 这是 v1.0.15 定下的规则。
         //    ⚠️ 但**不能**因此跳过家族路由：加密接口族的搜索只在接口里，校准 HTML 救不了它

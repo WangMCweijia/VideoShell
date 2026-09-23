@@ -167,6 +167,14 @@ class PlayerActivity : AppCompatActivity() {
     internal var fallbackPage = ""
     internal var retried = false
 
+    /**
+     * 本次播放地址的内容类型（v1.0.65）。
+     *
+     * 只在解析方**明确知道**时才有值（目前是网盘层：直链常不带扩展名，
+     * `DefaultMediaSourceFactory` 靠后缀推断会判错容器）。为 null 时行为与以前完全一致。
+     */
+    internal var currentMime: String? = null
+
     /** 本次 playUrl 实际应用的续播点 —— 第一个 READY 时核对它是否落在流末尾（见 STATE_READY 守卫） */
     internal var appliedResume: Long = 0L
     /** 已经自动降级到嗅探过一次（防止反复跳转） */

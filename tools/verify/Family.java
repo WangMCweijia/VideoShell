@@ -266,17 +266,30 @@ public class Family {
                 factoryFeedsAbsent = true; break;
             }
         }
+        //    ⚠️ ③ v1.0.65 又动了一次，而且**又是守卫先红**：网盘分享站族要在详情步插一层
+        //       `PanShareAdapter`（装饰器，只覆盖 detail，其余全部委托 HtmlAdapter），
+        //       于是"Absent 落点"从 `HtmlAdapter(site)` 变成 `PanShareAdapter(site)`。
+        //       规则并没有被搬走 —— 被搬走的是**落点的写法**，判据跟着放宽：
+        //       familyAbsent 那一行可以落 `HtmlAdapter(site)` 或 `PanShareAdapter(site)`，
+        //       但若落的是装饰器，就**必须**验证装饰器自己仍委托 `HtmlAdapter(site)`
+        //       （跨文件判语义，而不是信它的类名）。零成本的本意不变：
+        //       PanShareAdapter **不读 CryptFamily 缓存**，不会再发一次否定探测。
         boolean absentToHtml = false;
         String absentWhere = "";
         for (String l : srr.split("\n")) {
-            if (l.contains("familyAbsent") && l.contains("HtmlAdapter(site)")) {
+            if (l.contains("familyAbsent")
+                    && (l.contains("HtmlAdapter(site)") || l.contains("PanShareAdapter(site)"))) {
                 absentToHtml = true; absentWhere = l.trim(); break;
             }
         }
+        String psa = src(PROJ, "app/src/main/java/com/videoshell/data/site/PanShareAdapter.kt");
+        boolean decoratorDelegates = psa.contains("HtmlAdapter(site)");
         ok("D4 已判定「不是本族」的域名不再套 FamilyRouter（零成本）",
-                factoryFeedsAbsent && absentToHtml && srr.contains("FamilyRouter(site)"),
+                factoryFeedsAbsent && absentToHtml && srr.contains("FamilyRouter(site)")
+                        && decoratorDelegates,
                 "缺少否定分支（工厂把 Absent 传下去=" + factoryFeedsAbsent
-                        + "，种子路由按它落 HtmlAdapter=" + absentToHtml + "）：" + absentWhere);
+                        + "，种子路由按它落 HtmlAdapter=" + absentToHtml
+                        + "，装饰器仍委托 HtmlAdapter=" + decoratorDelegates + "）：" + absentWhere);
 
         String[] deleg = {"categories", "browse", "search", "detail", "resolve", "lastDiag",
                 "calibDiag", "calibApplied", "supportsWebRender", "countCatTplHits",

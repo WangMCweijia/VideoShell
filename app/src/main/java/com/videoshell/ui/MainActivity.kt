@@ -31,6 +31,10 @@ import com.videoshell.data.Store
 import com.videoshell.data.model.SiteConfig
 import com.videoshell.data.model.VideoItem
 import com.videoshell.data.net.Http
+import com.videoshell.data.pan.DriveState
+import com.videoshell.data.pan.DriveStore
+import com.videoshell.data.pan.PanProviders
+import com.videoshell.data.pan.PanType
 import com.videoshell.data.site.Media
 import com.videoshell.data.site.SearchEngine
 import com.videoshell.data.site.SearchScope
@@ -248,6 +252,10 @@ class MainActivity : AppCompatActivity() {
         // ---- 我的 ----
         binding.rowHistory.setOnClickListener { startActivity(Intent(this, HistoryActivity::class.java)) }
         binding.rowFav.setOnClickListener { startActivity(Intent(this, FavActivity::class.java)) }
+        // 网盘账号（v1.0.65）：右侧那格直接显示"已登录几个"——
+        // 网盘直链**不登录就取不到**，所以这个状态必须一进页面就能看见，
+        // 而不是等用户点了某一集才从一句"未登录"里反推。
+        binding.rowDrives.setOnClickListener { startActivity(DriveAccountsActivity.intent(this)) }
 
         val sp = getSharedPreferences(SP, MODE_PRIVATE)
         binding.swAutoOrient.isChecked = sp.getBoolean("setting_auto_orient", true)
@@ -306,7 +314,19 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refresh()
+        refreshDrives()
         bindHome()
+    }
+
+    /** 「网盘账号」右侧那格：已登录几个盘（用户从账号页返回时要立刻看到变化） */
+    private fun refreshDrives() {
+        var signed = 0
+        for (t in PanType.values()) {
+            if (!PanProviders.of(t).supported) continue
+            if (DriveStore.state(t) != DriveState.None) signed++
+        }
+        binding.tvDrivesHint.text = if (signed == 0) getString(R.string.drive_signed_none)
+        else getString(R.string.drive_signed_count, signed)
     }
 
     // ------------------------------------------------------------------ 暗色（UI-4）

@@ -317,6 +317,47 @@
                             android:textColor="@color/text_hint"
                             android:textSize="14sp" />
                     </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="0.5dp"
+                        android:background="@color/line" />
+
+                    <!-- 网盘账号（v1.0.65）。放在「内容」这一组里，与历史/收藏并列 ——
+                         它是"内容的来源"，不是设置项。右侧那格直接显示已登录几个盘：
+                         网盘直链**不登录就取不到**，所以这行必须能一眼看出当前状态。 -->
+                    <LinearLayout
+                        android:id="@+id/rowDrives"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="?android:attr/selectableItemBackground"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:padding="14dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/row_drives"
+                            android:textColor="@color/text_primary"
+                            android:textSize="14sp" />
+
+                        <TextView
+                            android:id="@+id/tvDrivesHint"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="6dp"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="›"
+                            android:textColor="@color/text_hint"
+                            android:textSize="14sp" />
+                    </LinearLayout>
                 </LinearLayout>
 
                 <TextView

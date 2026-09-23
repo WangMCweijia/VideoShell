@@ -37,7 +37,7 @@ object NetLog {
     fun record(url: String, status: Int, ms: Long, err: String? = null, tag: String? = null) {
         val ok = err == null && status in 200..399
         if (ok && !verbose && tag == null) return
-        buf.addLast(Entry(short(url), status, ms, err, tag))
+        buf.addLast(Entry(short(redact(url)), status, ms, err?.let { redact(it) }, tag))
         while (buf.size > MAX) buf.removeFirst()
     }
 
@@ -75,4 +75,23 @@ object NetLog {
     }
 
     private fun short(u: String): String = if (u.length <= 150) u else u.take(90) + "…" + u.takeLast(50)
+
+    /**
+     * ## 凭据脱敏（v1.0.65）
+     *
+     * 为什么非做不可：网盘接口的 URL 里**带着分享令牌**（夸克 `stoken=…`），而 [report]
+     * 的输出会被用户直接贴出来求助（本站点自检报告就是这么用的）。不做这一步，
+     * 「贴个报告」等于把凭据公开。
+     *
+     * 只抹**看起来是密钥**的值（长度 ≥ 8），短参数（`?pwd=6107` 这种提取码属于公开信息、
+     * 且是排查时最需要看到的）原样保留 —— 过度脱敏会让报告失去诊断价值。
+     * [com.videoshell.data.pan.DriveStore] 的凭据本身从不进 NetLog（只进请求头）。
+     */
+    private val SECRET = Regex(
+        "(?i)\\b(pwd|passcode|stoken|sign|signature|token|access_token|auth|" +
+                "authorization|cookie|secret|dltoken|download_url)=([^&\\s]{8,400})"
+    )
+
+    private fun redact(s: String): String =
+        if (s.indexOf('=') < 0) s else SECRET.replace(s) { "${it.groupValues[1]}=**" }
 }

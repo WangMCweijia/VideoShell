@@ -43,7 +43,7 @@ class SeedRouter(site: SiteConfig, private val familyAbsent: Boolean = false) : 
      * 落点直接从 [HtmlAdapter] 起。**这是 v1.0.35 的「零成本」规矩，v1.0.53 加种子族时差点丢掉**。
      */
     private val fallback: SiteAdapter by lazy {
-        if (familyAbsent) HtmlAdapter(site) else FamilyRouter(site)
+        if (familyAbsent) PanShareAdapter(site) else FamilyRouter(site)
     }
 
     @Volatile

@@ -362,6 +362,23 @@ class CalibrateActivity : AppCompatActivity() {
                         .setNegativeButton(R.string.calib_finish) { _, _ -> finishOk() }
                         .show()
                 }
+                // v1.0.65：网盘未登录。与 Error 分开处理 —— 它有一个**明确的下一步**（去登录），
+                // 而且规则照样要固化（校准学到的分类/详情形状与"能不能取到直链"是两件事）。
+                is MediaSource.NeedLogin -> {
+                    AlertDialog.Builder(this@CalibrateActivity)
+                        .setTitle(R.string.drive_need_login_title)
+                        .setMessage(r.message)
+                        .setCancelable(false)
+                        .setPositiveButton(R.string.drive_go_login) { _, _ ->
+                            commit(playUrl, "仅规则")
+                            startActivity(DriveAccountsActivity.intent(this@CalibrateActivity, r.driveKey))
+                        }
+                        .setNegativeButton(R.string.calib_keep_rules) { _, _ ->
+                            commit(playUrl, "仅规则")
+                            finishOk()
+                        }
+                        .show()
+                }
                 is MediaSource.Error -> {
                     AlertDialog.Builder(this@CalibrateActivity)
                         .setTitle(R.string.calib_title_done)
@@ -374,8 +391,7 @@ class CalibrateActivity : AppCompatActivity() {
                         .setNeutralButton(R.string.calib_play) { _, _ ->
                             commit(playUrl, "仅规则")
                             openSniff(playUrl, emptyMap())
-                        }
-                        // ⚠️ 这里以前直接是 `setNegativeButton(R.string.cancel, null)` ——
+                        }                        // ⚠️ 这里以前直接是 `setNegativeButton(R.string.cancel, null)` ——
                         // 点"取消"**什么都不写就退出**。用户走完四步、只看到一个疑似失败的面板，
                         // 随手点个"取消"，整场校准就白做了：配方没写、返回码也不是 RESULT_OK，
                         // 界面上再没有任何"规则没保存"的痕迹。

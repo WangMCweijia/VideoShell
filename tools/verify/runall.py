@@ -30,7 +30,12 @@
 `runupdlive.py`（应用内自更新端到端对照实验：裸链直打 vs 双通道 `check()`，
 **自带对照组** —— 只有"旧路不通、新路通"才能证明改的是必要的）；
 `runmirrorprobe.py`（GitHub 加速镜像活性实测：从 UpdateMirror.kt 解析候选清单逐个
-Range 探测并验 ZIP 魔数 —— 镜像表会腐化，怀疑"更新变慢/失败"时先跑它）。
+Range 探测并验 ZIP 魔数 —— 镜像表会腐化，怀疑"更新变慢/失败"时先跑它）；
+`panquark_spike.py`（夸克/UC 云盘端到端 spike：匿名段 token→detail→save→download
+四态 + 直链对 UA/Referer/Range/Cookie 的校验强度。用法 `tools/verify/panquark_spike.py`，
+需要 `requests`；`PAN_COOKIE=` 才跑完整链路、`PAN_SHARE=` 换分享链接、`PAN_API=uc` 换桌子。
+它专答"接口还活着吗 / 直链校验多严"这类**只能问真网络**的问题 —— `PanCloudDrive`
+的行为断言在离线做不了，因为 `android.jar` 是桩、`new JSONObject` 抛 `Stub!`）。
 
 ⚠️ 登记这一节不是形式主义：这三个都是**排查工具**而不是断言套件，它们不进 SUITES 是对的
 （零断言会被标 WEAK），但**不登记就会被误以为"跑过了"** —— 本项目已经栽过一次同型的
@@ -86,6 +91,15 @@ SUITES = [
     # v1.0.58：同一事故的**构建产物层**判据（dex 签名片段，片段级！整串搜必 GONE）。
     # 需先 assembleDebug + assembleRelease；APK 缺席时落到源码层兜底断言。
     'rundexsig',
+    # v1.0.65：网盘分享站族 + 网盘层。**纯离线**：PanLink/refOf/PanShareExtract/naturalSort
+    # 都是纯函数，样本是入库的真站截取（samples/panshare/{ky,wg}_detail.html）。
+    # 刻意不碰 PanCloudDrive 的行为 —— 它用 org.json，离线挂的是 android.jar 桩（`Stub!`），
+    # 那一层只能判源码（套件 E 段）。
+    'runpanlink',
+    # v1.0.65：HLS 分片**并发预取**。**真跑逻辑**（拉片动作是注入的，HlsPrefetch 只依赖
+    # JDK + kotlin-stdlib）⇒ 并发度/窗口/字节上限/连败即停/换源作废/直播不预取 全部跑得到，
+    # 不是读源码文本猜。它已经抓到过一个真缺陷（淘汰后重拉 = 无限拉取，P7b）。
+    'runhlsfetch',
 ]
 # 需要真实网络的；**默认不跑**（见文件头）。
 # runbs3 是 v1.0.53 从 SUITES 挪过来的：它跑的是 `https://www.bolyship.com`，

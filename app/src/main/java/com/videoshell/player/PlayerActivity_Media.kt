@@ -156,6 +156,9 @@ internal fun PlayerActivity.subtitleMime(uri: Uri): String {
 
 internal fun PlayerActivity.buildMediaItem(url: String, sub: Uri?): MediaItem {
     val b = MediaItem.fromUri(url).buildUpon()
+    // v1.0.65：解析方知道内容类型时用它，别让 media3 去猜 URI 后缀 ——
+    // 网盘直链（`…/file/download?fid=…`）没有后缀，猜错会把 HLS 当 progressive 解。
+    currentMime?.takeIf { it.isNotBlank() }?.let { b.setMimeType(it) }
     if (sub != null) {
         b.setSubtitleConfigurations(
             listOf(
@@ -170,15 +173,66 @@ internal fun PlayerActivity.buildMediaItem(url: String, sub: Uri?): MediaItem {
     return b.build()
 }
 
+/**
+ * 并发预取的单片上限：正常分片是几 MB。
+ * 超过这个数基本可以断定拿到的不是分片（例如某个站把页面返回在了 .ts 地址上），
+ * 与其把内存和带宽浪费在它身上，不如放弃这一片 —— 播放器自己会去拉。
+ */
+private const val MAX_SEGMENT_BYTES = 24 * 1024 * 1024
+
+/**
+ * 拉一整片分片（**并发预取**用，见 [HlsPrefetch]）。
+ *
+ * 三点是有意为之：
+ *  1. 走**不带 HlsFix 的内层工厂** —— 分片不需要规范化，包一层只是白多一次判断，
+ *     更要紧的是让这条路与"播放器自己的请求"彻底分开，不会自己调自己。
+ *  2. 用**同一个工厂**（同一份默认请求头）⇒ UA / Referer / **网盘 Cookie** 与播放完全一致。
+ *     少一样网盘就回 412，那预取会全失败 —— 但失败是**安全**的：[HlsPrefetch] 连续几次拿不到
+ *     就自己停掉，把带宽让回播放器，播放不受影响。
+ *  3. 整片读进内存（不落盘）：直链带时效，**绝不落盘**是本项目的硬规矩（见 PITFALLS §4.60）。
+ */
+private fun fetchSegment(factory: androidx.media3.datasource.DataSource.Factory, url: String): ByteArray? {
+    val ds = factory.createDataSource()
+    return try {
+        val len = ds.open(androidx.media3.datasource.DataSpec(Uri.parse(url)))
+        val cap = if (len in 1..MAX_SEGMENT_BYTES.toLong()) len.toInt() else 256 * 1024
+        val out = java.io.ByteArrayOutputStream(cap)
+        val buf = ByteArray(64 * 1024)
+        while (true) {
+            val n = ds.read(buf, 0, buf.size)
+            if (n == C.RESULT_END_OF_INPUT) break
+            out.write(buf, 0, n)
+            if (out.size() > MAX_SEGMENT_BYTES) return null
+        }
+        if (out.size() == 0) null else out.toByteArray()
+    } catch (t: Throwable) {
+        // 预取失败不许影响播放：这里必须吞掉（播放器自己会去请求同一片并走它自己的重试）
+        null
+    } finally {
+        runCatching { ds.close() }
+    }
+}
+
 internal fun PlayerActivity.buildSource(
     url: String, sub: Uri?, policy: DefaultLoadErrorHandlingPolicy
 ): androidx.media3.exoplayer.source.MediaSource {
     val item = buildMediaItem(url, sub)
     val factory = OkHttpDataSourceFactory(Http.mediaClient, Http.UA, browserHeaders())
+    // ⚡ 并发预取（v1.0.65，参潇洒 TVBox 的本地代理 + quark_thread_limit 那套思路）：
+    // 网盘转码流的分片在 CDN 上单连接限速，而 ExoPlayer 拉 HLS 是一个 Loader **顺序**拉 ——
+    // 单连接吞吐一旦低于码率就会一顿一顿地转圈（网络诊断还全是绿的）。
+    // 这里在清单到手时就把"接下来那几片"并发拉进内存，播放器读到就命中。
+    // ⚠️ 每建一次媒体源就换一个新实例（换集/换线路/换字幕都会走这里）——
+    //    缓存跟着作废是有意的：不同源的分片地址不同，留着只会白占内存。
+    //    代价只是"换字幕要重新预热一次"，不影响能不能播。
+    val prefetch = HlsPrefetch(
+        fetch = { u -> fetchSegment(factory, u) },
+        onEvent = { PlayLog.record(it) }
+    )
     // DefaultDataSource 按协议分派：http(s)→OkHttp+HlsFix（视频），content/file→系统源（字幕）。
     // 用 DefaultMediaSourceFactory（而非直接 HlsMediaSource.Factory）：它对 HLS 仍走 HlsMediaSource，
     // 但会**额外把 MediaItem 上的外挂字幕轨合并进来**——直连 HlsMediaSource.Factory 不会做这一步。
-    val ds = DefaultDataSource.Factory(this, HlsFixDataSourceFactory(factory))
+    val ds = DefaultDataSource.Factory(this, HlsFixDataSourceFactory(factory, prefetch))
     return DefaultMediaSourceFactory(ds)
         .setLoadErrorHandlingPolicy(policy)
         .createMediaSource(item)

@@ -7,6 +7,7 @@ import com.videoshell.data.model.SiteConfig
 import com.videoshell.data.model.VideoDetail
 import com.videoshell.data.model.VideoItem
 import com.videoshell.data.net.Http
+import com.videoshell.data.pan.PanResolver
 
 /** 站点适配器基类：一个视频站 = 一个适配器 */
 abstract class SiteAdapter(val site: SiteConfig) {
@@ -101,6 +102,7 @@ abstract class SiteAdapter(val site: SiteConfig) {
 
     /**
      * 把剧集地址解析为可直接交给播放器的地址：
+     * 0) 是**网盘分享链接 / 网盘站内引用** -> 交给网盘层（v1.0.65）
      * 1) 本身是 m3u8/mp4 -> 直接用
      * 2) 是播放页 -> 尝试直接从 HTML 里抠真实地址（快，不用 WebView）
      * 3) 集地址本身就是 **JSON 接口**（响应体里带 `url`）-> 直接取用（v1.0.53）
@@ -111,10 +113,23 @@ abstract class SiteAdapter(val site: SiteConfig) {
     open suspend fun resolve(episode: Episode): MediaSource {
         val u = episode.url.trim()
         if (u.isEmpty()) return MediaSource.Error("播放地址为空")
+
+        // ★ 第 0 步（v1.0.65）：网盘分享链接。
+        //
+        // 为什么必须放在**最前面**：网盘分享链接长得不像媒体文件 —— `Media.isDirect` 必返回
+        // false，于是它会白走一轮「抓页面 → 抠地址 → maccms 跟随 → 嗅探」，最后一无所获地
+        // 弹一个 WebView。而这一族（快映/玩偶这类站）的详情页**只有网盘分享链接**，
+        // 没有 `player_aaaa`，嗅探页里也没有播放器可跑。
+        //
+        // 为什么零成本：`PanLink.parse` 是**纯正则、无 IO**，不是网盘链接就返回 null，
+        // 对现有所有站点一次请求都不会多发（与 `Media.isDirect` 同级）。这也让
+        // 「用户直接把 `https://pan.quark.cn/s/xxx` 粘进来」顺带成了能被支持的事。
+        if (PanResolver.handles(u)) return PanResolver.resolve(u)
+
         // ⚠️ 必须过 encodeUrl —— 这是「自检 200、播放 404」的全部原因：
-        // 媒体路径经常含中文（如 /video/bianshuiwangshi/第01集/index.m3u8），
-        // 自检走 OkHttp（自动百分号编码），播放走 ExoPlayer 的 DefaultHttpDataSource
-        // → HttpURLConnection（**不编码**，把中文原样塞进请求行）→ CDN 404。
+        //    媒体路径经常含中文（如 /video/bianshuiwangshi/第01集/index.m3u8），
+        //    自检走 OkHttp（自动百分号编码），播放走 ExoPlayer 的 DefaultHttpDataSource
+        //    → HttpURLConnection（**不编码**，把中文原样塞进请求行）→ CDN 404。
         if (Media.isDirect(u)) return MediaSource.Direct(Media.encodeUrl(u), playHeaders(), Media.isHls(u))
         if (!u.startsWith("http")) return MediaSource.Error("无法识别的播放地址：$u")
 

@@ -50,8 +50,16 @@ import kotlinx.coroutines.sync.withLock
  */
 class FamilyRouter(site: SiteConfig) : SiteAdapter(site) {
 
-    /** 没自证之前先用它。`lazy` 是因为很多站会立刻命中缓存、根本用不着它 */
-    private val html: HtmlAdapter by lazy { HtmlAdapter(site) }
+    /**
+     * 没自证之前先用它。`lazy` 是因为很多站会立刻命中缓存、根本用不着它。
+     *
+     * v1.0.65：外面套了一层 [PanShareAdapter]（网盘分享站族）。它是个**装饰器**，
+     * 只覆盖 `detail()`，其余 14 个契约成员原样委托给内部的 [HtmlAdapter] ——
+     * 所以这里把类型从 `HtmlAdapter` 放宽成 `SiteAdapter`，下面的调用一行都没改。
+     * 链路变成 `SeedRouter → FamilyRouter → PanShareAdapter → HtmlAdapter`，
+     * 离线 harness 的 `Chains` 会沿 `underlying` 剥到底（判据照旧成立）。
+     */
+    private val html: SiteAdapter by lazy { PanShareAdapter(site) }
 
     /** 判定结果（命中 → [YeguoAdapter]；不命中 → [html]）。判定一次，全程复用 */
     @Volatile

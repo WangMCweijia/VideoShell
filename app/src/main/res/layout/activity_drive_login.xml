@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  网盘登录页（v1.0.65）。**全屏** WebView 而不是对话框里塞一个：
+
+  网盘网页版的登录默认是**扫码**。二维码要能被手机扫，就必须有足够尺寸 ——
+  塞进 AlertDialog 后二维码被压成一个小方块，扫不动。所以这里给满屏，
+  并且把「用 App 扫码」这句话写在最上面一行。
+
+  顶部那行提示是**必要的**，不是装饰：扫码登录的失败模式几乎全是"没看到二维码就以为坏了"
+  （页面还在加载 / 默认落在账号密码 tab / 被系统深链拦掉）。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_deep"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="6dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="14dp"
+        android:paddingBottom="4dp">
+
+        <TextView
+            android:id="@+id/btnBack"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="?android:attr/selectableItemBackground"
+            android:paddingStart="10dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="6dp"
+            android:text="‹"
+            android:textColor="@color/text_primary"
+            android:textSize="22sp" />
+
+        <TextView
+            android:id="@+id/tvTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="@color/text_primary"
+            android:textSize="17sp" />
+
+        <TextView
+            android:id="@+id/btnReload"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="?android:attr/selectableItemBackground"
+            android:paddingStart="12dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="6dp"
+            android:text="@string/drive_login_reload"
+            android:textColor="@color/text_hint"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tvHint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:lineSpacingExtra="3dp"
+        android:paddingStart="16dp"
+        android:paddingTop="2dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="8dp"
+        android:textColor="@color/text_hint"
+        android:textSize="12sp" />
+
+    <ProgressBar
+        android:id="@+id/progress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="2dp"
+        android:max="100"
+        android:progressTint="@color/brand" />
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/white">
+
+        <WebView
+            android:id="@+id/web"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+    </FrameLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="14dp">
+
+        <TextView
+            android:id="@+id/tvAuto"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:lineSpacingExtra="2dp"
+            android:text="@string/drive_login_auto_hint"
+            android:textColor="@color/text_hint"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/btnDone"
+            android:layout_width="wrap_content"
+            android:layout_height="34dp"
+            android:background="@drawable/bg_btn_brand"
+            android:gravity="center"
+            android:paddingStart="18dp"
+            android:paddingEnd="18dp"
+            android:text="@string/drive_login_save"
+            android:textColor="@color/white"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+</LinearLayout>

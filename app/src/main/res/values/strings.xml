@@ -420,4 +420,35 @@
     <string name="search_site_failed">%1$s 搜索失败：%2$s</string>
     <string name="search_agg_failed">全部站源都没能返回结果（%1$d 个站失败）</string>
     <string name="search_fail_title">搜索失败的站</string>
+
+    <!-- ======================= 网盘账号（v1.0.65） =======================
+         这一组文案的核心是**说清"为什么要登录"**：网盘分享站的集数不需要登录就能看到
+         （实测列目录匿名可用），但**直链必须登录**才能取到 —— 不解释这一点，
+         用户会认为"你把我能看的弄成要登录了"。 -->
+    <string name="row_drives">网盘账号</string>
+    <string name="drive_title">网盘账号</string>
+    <string name="drive_hint">网盘分享站的集数不需要登录就能看到，但**播放直链必须登录**（服务端要求）。登录信息只保存在本机，不会上传。</string>
+    <string name="drive_login">登录</string>
+    <string name="drive_relogin">重新登录</string>
+    <string name="drive_logout">退出登录</string>
+    <string name="drive_logout_msg">将删除本机保存的登录信息，并清掉内置浏览器的网盘会话。网盘里的文件不受影响。</string>
+    <string name="drive_checking">检查中…</string>
+    <string name="drive_login_title">登录%1$s</string>
+    <string name="drive_login_empty">还没拿到登录信息 —— 扫码或在网页里登录成功后再试</string>
+    <string name="drive_login_ok">%1$s 登录成功</string>
+    <string name="drive_login_bad">%1$s 凭据未能通过校验，请重新登录</string>
+    <string name="drive_logout_ok">已退出 %1$s</string>
+    <string name="drive_unsupported">暂不支持</string>
+    <string name="drive_updated">%1$s 更新</string>
+    <string name="drive_signed_none">未登录任何网盘</string>
+    <string name="drive_signed_count">已登录 %1$d 个</string>
+    <string name="drive_need_login_title">需要登录网盘</string>
+    <string name="drive_go_login">去登录</string>
+
+    <!-- 网盘登录页（v1.0.65）：全屏 WebView + 扫码登录。见 ui/DriveLoginActivity.kt -->
+    <string name="drive_login_reload">重新加载</string>
+    <string name="drive_login_save">网盘里没有？点这里保存</string>
+    <string name="drive_login_auto_hint">扫码成功后自动保存并返回 · 凭据只存本机</string>
+    <string name="drive_login_hint_qr">用 %1$s App 扫下方二维码登录，成功后本页会自动保存并返回。凭据只保存在本机，不会上传。</string>
+    <string name="drive_login_hint_manual">在下方网页里完成登录，然后点右下角按钮保存。凭据只保存在本机，不会上传。</string>
 </resources>

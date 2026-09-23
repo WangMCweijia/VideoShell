@@ -397,6 +397,9 @@ object SiteDoctor {
                 }
             }
             is MediaSource.Error -> L("    失败：${ms.message}")
+            // v1.0.65：网盘未登录。自检报告里必须**分开写**，
+            // 否则「网盘没登录」和「站点解析不出地址」在报告里长得一模一样。
+            is MediaSource.NeedLogin -> L("    需要登录网盘：${ms.message}")
             null -> L("    失败：未返回结果")
         }
 

@@ -290,6 +290,8 @@ class DetailActivity : AppCompatActivity() {
                     SniffActivity.intent(this@DetailActivity, r.pageUrl, label, r.headers)
                 )
                 is MediaSource.Error -> toast(r.message)
+                // v1.0.65：网盘未登录 —— 直接在详情页弹「去登录」，不必先进播放器再被拦
+                is MediaSource.NeedLogin -> askDriveLogin(r)
                 null -> toast("解析播放地址失败")
             }
         }
