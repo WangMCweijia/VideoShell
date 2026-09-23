@@ -107,6 +107,9 @@
 
 | E40 | 网盘/转码流「刚起播很顺、几秒后开始转圈」；加了并发预取后**反而更卡**，而日志里**一条错误都没有** | 两层，逐层剥出来的：① ExoPlayer 拉 HLS 是**一个 Loader 顺序拉**，而网盘分片在 CDN 上**单连接限速** ⇒ 有效吞吐 = 单连接吞吐，低于码率就反复把缓冲耗干；② 预取 4 条 + 播放器自身请求 > OkHttp 默认 `maxRequestsPerHost = 5` ⇒ 播放器的请求被**排进 Dispatcher 队列**等预取腾位。两者症状相同（带宽够却一顿一顿）且**都不产生错误日志**，只能靠"看决策/看计数"分辨 |
 | E41 | 并发预取的字节上限一到就**无限拉取**（离线 harness 记到 5784 片，本该 8 片），把带宽烧光还与播放器抢连接 | 窗口是按**播放位置**算的，缓存是按 **LRU 淘汰**的 ⇒ 被淘汰的片**立刻落回窗口**、被重新拉、再被淘汰…… 死循环。修法：记 `queuedUpTo`（**排过队的不再排**），让窗口只单向前进；seek 到远处仍会自动重开一段窗口（`from = max(cursor+1, queuedUpTo+1)`） |
+| E42 | 用 REST 区间推送脚本推一个**含中文文件名**的提交 ⇒ `FATAL: TREE MISMATCH`，而 47 个 blob **全部上传成功**、没有任何其他线索 | `git ls-tree -r` 默认 `core.quotepath=true`，把 `docs/真果鉴_视频源解析.md` 转义成带引号的 `"docs/\347\234\237\346\236\234..."`；脚本把这个**转义串当路径**发给 GitHub，服务器上就建出一棵**文件名乱码**的 tree。历史上从没撞过 —— 因为这是**首次提交非 ASCII 路径** | 组装 tree 前一律 `git -c core.quotepath=false ls-tree -r`；**并加一道"路径以引号开头就 die"的闸**（`quotepath=false` 只关掉非 ASCII 转义，含空格/引号的路径**仍会**被引号包裹 ⇒ 宁可当场红，也不要静默建错）。诊断手法：逐条目比对本地 tree 与服务器组装出的 tree（`?recursive=1`），差异条目一眼看清。见 §4.62（v1.0.65） |
+| E43 | 验包脚本第一版报 **1 项不符**：对照项 `com.videoshell` 在 `resources.arsc` 里 `NOT FOUND` —— 差点据此认为"新文案没进包"（而中文新文案全 FOUND，更显得像包的问题） | **对照项自己失效**：`AndroidManifest.xml` 的字符串池是 **UTF-16LE**（实测 `videoshell` 出现 **18 次**，UTF-8 里 **0 次**），只搜 UTF-8 必然假 NOT FOUND | **所有**判据（不只是版本号）都要**双编码**（UTF-8 + UTF-16LE）；对照项必须**先证明自己搜得着**（它红了才有意义）。最阴的一层：只搜 UTF-8 时"旧文案 NOT FOUND"会**假绿**，正好放过"新旧两代同名包"这件事本身（§4.38）。见 §4.62（v1.0.65） |
+| E44 | 发版后核 asset：`gh api .../releases/tags/v1.0.65` 报 `assets=0`（`gh release view --json assets` 同样 0），而 CI 日志里两组 `✅ Uploaded` 明明成功 ⇒ 判成"asset 丢了、用户下载不到"，开始准备手动补传 | **读错端点**：`/releases/tags/{tag}` 的 `assets` 数组对**刚创建的 release** 返回**空数组**（一致性延迟）；`/releases/{id}/assets` 与 `/releases/latest` 都正确报 2 个。（另：`/releases/tags/{tag}/assets` 这种写法本身就是 404 —— 该端点只认 **id**，而这个 404 被我当成了"确实没有 asset"的旁证） | **核 asset 用 `/releases/{id}/assets` 或 `/releases/latest`**；更彻底的是直接 HEAD **用户会点的那条 URL**（`/releases/download/<tag>/app-release.apk`，它自己 302 到 asset）—— 已加进 workflow。**代价警示**：差点用 `gh release upload --clobber` 拿**本地包覆盖 CI 包**，而 `version.json` 里的 sha256/size 是 CI 包的 ⇒ App 内自更新会**校验失败**（现象是"提示更新、下完装不上"，离根因十万八千里）。拦下它的是 422 `ReleaseAsset.name already exists` —— **同一个 API 假象顺手救了一次场**。见 §4.63（v1.0.65） |
 
 ---
 
@@ -2327,3 +2330,170 @@ OkHttp 的 `Dispatcher` 默认**每 host 最多 5 个在飞**。预取 4 条 + �
 - **实测并发拐点**：4 是参考值（潇洒给的是 32，那是代理整集的场景），
   没有真机测过"2/4/6/8 哪一档对这类 CDN 最优"。
 - 未做"**多线路**并发择优"（用户话里的"多线"若指多线路而非多线程）：当前只对**同一路**的分片并发。
+
+---
+
+## §4.62 发版链路上两个"看起来不可能是这里"的坑（v1.0.65，E42/E43）
+
+v1.0.65 是**第一次把中文文件名提交进仓库**，也是**第一次按双编码验包**。
+两个坑都落在"过程全绿、结果不对"这一层 —— 同属 §4.34 那个母题。
+
+### 一、E42：`TREE MISMATCH` 不是网络问题，是**路径被 git 转义了**
+
+现象干净得不正常：
+
+```
+已上传 47/47 (8s)
+blob 上传完成：成功 47/47
+FATAL: TREE MISMATCH @ ece0e016df server=f6a8e1f7... local=76973c9b...
+```
+
+blob 一个不少、一次重试都没有，却在组装 tree 时对不上。
+
+**诊断手法**（值得复用）：不要猜，把两侧**逐条目**比出来 ——
+本地 `git -c core.quotepath=false ls-tree -r <commit>`，服务器
+`GET /git/trees/<server_sha>?recursive=1`，按 path 建字典求对称差。结果：
+
+```
+DIFF "docs/\347\234\237\346\236\234\351\211\264_..."   local=None  server=('100644','fcb74237...')
+DIFF docs/真果鉴_视频源解析.md                        local=('100644','fcb74237...') server=None
+差异条目总数 = 4
+```
+
+**4 处差异全是两条中文路径**，而 blob sha 与 mode **两侧完全一致** ⇒ 内容没问题，
+问题在**路径字符串本身**。
+
+根因：`git ls-tree` 默认 `core.quotepath=true`，把非 ASCII 路径**转义**成
+`"docs/\347\234\237..."`（带引号、带反斜杠的八进制）。推送脚本把这个字符串原样发给
+GitHub 当路径 ⇒ 服务器上建出一棵**文件名乱码**的 tree ⇒ sha 必然不匹配。
+
+**为什么现在才炸**：这是仓库**首次**提交非 ASCII 路径。这条链路上跑过几十次发版、
+一次没撞过 —— 不是因为它安全，而是因为**从没被触发**。
+
+修法两条（缺一不可）：
+
+1. `git -c core.quotepath=false ls-tree -r <commit>`；
+2. **加闸**：path 以 `"` 开头就 `die`。因为 `quotepath=false` **只关掉非 ASCII 的转义**，
+   含空格/引号/控制字符的路径**仍然**会被引号包裹 —— 那种情况脚本处理不了，
+   宁可当场红，也不要静默建出一棵错的 tree。
+
+> 也暴露了这类脚本的坏处：它**只在最后一步**才发现不对，前面每一步都是绿的。
+> 所以修完之后要再验一遍 **`commit sha` 与本地逐字节相同**（`commit ok ece0e016df`）——
+> 那才是"对象图完全一致"的判据，`PUSH DONE` 不是。
+
+### 二、E43：验包时**对照项自己先失效**了
+
+验包脚本第一版：
+
+```
+对照·必然存在(包名)   arsc  NOT FOUND  <<< 不符
+新·扫码自动保存提示    arsc  FOUND      OK
+```
+
+对照项红了，中文新文案全绿。**这时最诱人的错误结论是"包有问题"**（对照项本该"必然存在"，
+它找不到 ⇒ 该怀疑包）。实际是**搜法**的问题：
+
+```
+MANIFEST videoshell 出现 0 次          ← UTF-8
+MANIFEST UTF-16 里 videoshell: 18      ← UTF-16LE
+```
+
+`AndroidManifest.xml` 的字符串池是 **UTF-16LE**。于是：
+
+- 只搜 UTF-8 ⇒ 对照项**必然**假 NOT FOUND（于是"对照"变成噪音）；
+- 更要命的是**反方向**：旧文案若也在 UTF-16 池里，"旧文案 NOT FOUND"会**假绿** ——
+  而 §4.38 要防的恰恰是"新旧两代同名同版本号包"，正是靠这条断言吃饭。
+
+修法：**CASES 里每一项都双编码**（UTF-8 + UTF-16LE），不只版本号。判据纪律升级一句：
+
+> **对照项必须能证明自己搜得着。** 一个永远不会红的对照，等于没有对照。
+
+修完（并在 dex 侧也补一个 `com/videoshell` 对照）：
+
+```
+版本串 1.0.65 FOUND            版本串 1.0.64 NOT FOUND
+对照·必然存在(包名)   arsc FOUND  OK     对照·必然存在(dex类名) dex FOUND  OK
+对照·必然不存在       arsc NOT FOUND  OK
+新·扫码自动保存提示   arsc FOUND  OK     旧·我已完成登录(应无)  arsc NOT FOUND  OK
+新·预取观测文案       dex  FOUND  OK     旧·file/download(应无) dex  NOT FOUND  OK
+本包不符项 = 0
+```
+
+### 三、纪律
+
+- **"首次"是坑的放大器**：非 ASCII 路径、双编码、中文文件名 —— 每一样都是"一直都没事"
+  直到第一次。凡"从没失败过"的路径，都要问一句：它是真的稳，还是**从没被触发**？
+- 长链路（上传 → 组装 tree → 提交 → 打 ref）里，**每一步绿灯 ≠ 对象正确**；
+  判据要落到**最终对象**上（commit sha 逐字节相同 / 树逐条目相同）。
+- 验包工具本身也要**带对照、双编码**才算数（E43）。
+
+---
+
+## §4.63 「asset 丢了」是一次假红：观测点自己不可靠（v1.0.65，E44）
+
+发版核 asset（§4.37 第三步）时：
+
+```
+$ gh api repos/.../releases/tags/v1.0.65 --jq '.assets|length'
+0
+$ gh release view v1.0.65 --json assets --jq '.assets|length'
+0          # 而 v1.0.60~v1.0.64 都是 2
+```
+
+CI 日志却是：
+
+```
+08:50:31.151 ✅ Uploaded version.json
+08:50:31.202 ✅ Uploaded app-release.apk
+08:50:31.752 🎉 Release ready at .../releases/tag/v1.0.65
+```
+
+**两侧直接矛盾。** 我选了"CI 日志在骗人"，开始准备手动补传 —— 这个方向差点造成真实损坏：
+
+- `gh release upload --clobber` 会**先删同名 asset 再传**；
+- 我手上只有**本地包**（3,219,575 B），而 release 上是**CI 包**（3,219,578 B，§4.38 记过这类 3 字节差）；
+- `version.json` 里的 `sha256` / `size` 是**CI 包**的 ⇒ 覆盖后 **App 内自更新会校验失败**，
+  而现象是"提示更新、下载完装不上"，离根因十万八千里。
+
+真正拦下它的是：
+
+```
+HTTP 422: Validation Failed (.../releases/394464710/assets?...name=version.json)
+ReleaseAsset.name already exists
+```
+
+**asset 一直都在。** 换端点立刻证实：
+
+```
+$ gh api repos/.../releases/394464710/assets --jq '.[] | "\(.name) \(.size)"'
+app-release.apk  3219578
+version.json     428
+
+$ gh api repos/.../releases/latest --jq '"\(.tag_name) assets=\(.assets|length)"'
+v1.0.65 assets=2
+```
+
+### 根因
+
+`/releases/tags/{tag}` 的 `assets` 字段对**刚创建的 release** 返回**空数组**（一致性延迟）：
+列表端点里 v1.0.65 是 `assets=0`、v1.0.64 是 2 —— **同一个字段、两个 release 表现不同**，
+说明问题在读数那一刻，不在 release 本身。
+
+另有一个**我自己的用法错误**被当成了旁证：`GET /releases/tags/v1.0.65/assets` 返回 404 ——
+那个端点**只认 release id**，不认 tag。我把这个 404 读成了"assets 确实没有"。
+
+### 纪律
+
+- **两个观测点打架时，先怀疑观测点**（§4.45「只看决策不看结果」的姊妹条）。
+  尤其当一方是**间接字段**（`assets` 数组长度）、另一方是**动作的回执**（上传接口返回的 asset 对象）时，
+  **回执更接近事实**。正确顺序是：**先找一个能直接证伪的端点**（这里 `/releases/{id}/assets`），
+  再决定要不要"修"。
+- **"会删东西的修复"必须先证伪**：`--clobber` / `--force` / 覆盖式上传这类动作，
+  在证据链有矛盾时**一律先停**。上文那个 422 只是运气好。
+- **核 asset 的正确姿势**：`/releases/{id}/assets`、`/releases/latest`，
+  或**直接 HEAD 用户会点的那条 URL**（`/releases/download/<tag>/app-release.apk`）。
+  后者最贴近"用户拿得到"，已加进 workflow（`Verify user-facing download URL`，带 5 次重试等 CDN 传播）。
+- **拿不到包本身时的替代核对**：CI 日志里 `Generate version.json` 打印了
+  `sha256=7a0cbeb9… size=3219578`，与 release 上 asset 的 size **逐字节一致** ⇒
+  既证明 asset 是 CI 那份，也证明 `version.json` 与它**自洽**（自更新可用）。
+  （本机直连 `github.com` 的下载 CDN 会被 reset，所以"下载下来扫一遍"这条路走不通 —— 见 §4.62 同源环境限制。）

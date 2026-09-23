@@ -115,3 +115,21 @@ jobs:
             app/build/outputs/apk/release/*.apk
             app/build/outputs/apk/release/version.json
           generate_release_notes: true
+
+      # 判据落到**用户真实入口**上（§4.37）：release 出现 ≠ 用户下得到。
+      # ⚠️ 别用 `/releases/tags/<tag>` 的 `assets` 字段来核 —— 刚创建的 release 该字段会返回
+      #    **空数组**（最终一致性），于是"发布成功"被读成"asset 丢了"，而 `/releases/<id>/assets`
+      #    与 `/releases/latest` 都是对的。见 docs/PITFALLS.md §4.63 / E44（v1.0.65 实测）。
+      #    所以这里直接 HEAD 用户会点的那条 URL —— 它自己会 302 到 asset，最贴近"用户拿得到"。
+      - name: Verify user-facing download URL
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -eu
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/app-release.apk"
+          for i in 1 2 3 4 5; do
+            code=$(curl -sIL -o /dev/null -w '%{http_code}' "$url" || true)
+            if [ "$code" = "200" ]; then echo "OK  $url -> $code"; exit 0; fi
+            echo "try $i: got '$code'，5s 后重试（CDN 传播需要一点时间）"
+            sleep 5
+          done
+          echo "::error::用户入口拿不到包：$url"; exit 1
