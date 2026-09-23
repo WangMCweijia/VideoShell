@@ -8,6 +8,7 @@ import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.Dns
 import okhttp3.HttpUrl
+import okhttp3.Interceptor
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -77,6 +78,74 @@ object Http {
             val now = System.currentTimeMillis()
             return store.values.filter { it.expiresAt > now && it.matches(url) }
         }
+    }
+
+    /**
+     * # 显式 Cookie 优先（v1.0.66）—— 修「扫码登录成功、过一会儿就提示登录已过期」
+     *
+     * ## 症状与机理
+     *
+     * 网盘的登录态是 `DriveStore` 里的一整份 cookie（`__pus` / `__puus` / `__uid` …），
+     * 由调用方以**显式 `Cookie` 头**挂上去（[com.videoshell.data.pan.PanCloudDrive]）——
+     * 它属于「与站点解耦的另一套凭据」，刻意不进下面这个 CookieJar。
+     *
+     * 但 OkHttp 的 `BridgeInterceptor` 是**无条件**用 CookieJar 覆盖 `Cookie` 头的：
+     *
+     * ```java
+     * List<Cookie> cookies = cookieJar.loadForRequest(userRequest.url());
+     * if (!cookies.isEmpty()) requestBuilder.header("Cookie", cookieHeader(cookies));
+     * ```
+     *
+     * 于是链条是：**第 1 次请求** jar 还空着 ⇒ 手写头生效 ⇒ 登录校验通过（用户看到"登录成功"）；
+     * 而那次响应里服务端**必定**会 `Set-Cookie`（刷新 `__puus`、或只是下个埋点 cookie）
+     * ⇒ jar 对该 host 非空 ⇒ **从第 2 次请求起，整份登录态被 jar 里那点 cookie 替换掉**
+     * ⇒ 服务端回 `31001 require login` ⇒ 账号页显示「登录已过期」。
+     *
+     * 「服务端不会提前作废旧 cookie」这一点是**已排除过**的：PC 侧 spike 用同一份 cookie
+     * 连打十几个接口（token→detail→save→task→play→delete）全部成功（见 PITFALLS §4.60）。
+     * 所以"过期"不是服务端翻脸，是我们的头被换掉了。
+     *
+     * ## 为什么不用「换个没有 jar 的 client」绕过
+     *
+     * CookieJar 是站点解析与播放防盗链**必需**的（红果那种跨子域签名 cookie，见上面
+     * `cookieJar` 的说明），而播放走的 [mediaClient] 是 `client.newBuilder()` 派生的同一套配置。
+     * 单独给网盘拆一个 client，等于把「跨子域 cookie」这条能力在别的路径上悄悄关掉 ——
+     * 又是"改一处漏一处"。
+     *
+     * ## 做法：tag 暂存 + network 位写回
+     *
+     * 请求若自带显式 `Cookie`，就把它另存进 `Request.tag`（[ExplicitCookie]）；
+     * 在 **network 拦截器位**（`BridgeInterceptor` **之后**、真正发出之前）写回去 ——
+     * 那里是最后写入者，必然生效。
+     *
+     * 用 tag 而不是"再塞一个自定义头"：后者会把这份凭据**多发给服务端一遍**，
+     * 有的站会直接因此 400。
+     *
+     * 离线判定见 `tools/verify/OkHttpCookieJarTest.java`（本机起 HTTP 服务、不联网）：
+     * 现状第 2 次服务器只收到 `srvmark=1`，修后每次都收到完整的登录态（含 `__puus`）；
+     * 另有一组对照证明「不带显式 Cookie 时 jar 照常工作」（站点解析不受影响）。
+     */
+    private class ExplicitCookie(val value: String)
+
+    /** application 位：把手写的 Cookie 收进 tag（必须早于 BridgeInterceptor） */
+    private val stashExplicitCookie = Interceptor { chain ->
+        val req = chain.request()
+        val mine = req.header("Cookie")
+        if (mine.isNullOrBlank()) {
+            chain.proceed(req)
+        } else {
+            chain.proceed(
+                req.newBuilder().tag(ExplicitCookie::class.java, ExplicitCookie(mine)).build()
+            )
+        }
+    }
+
+    /** network 位：把它写回 `Cookie` 头（晚于 BridgeInterceptor ⇒ 覆盖它） */
+    private val restoreExplicitCookie = Interceptor { chain ->
+        val req = chain.request()
+        val mine = req.tag(ExplicitCookie::class.java)
+        if (mine == null) chain.proceed(req)
+        else chain.proceed(req.newBuilder().header("Cookie", mine.value).build())
     }
 
     /**
@@ -249,6 +318,10 @@ object Http {
             .retryOnConnectionFailure(true)
             .followRedirects(true)
             .cookieJar(cookieJar)
+            // 显式 Cookie 优先：网盘那份整份凭据不能被 jar 里"服务端顺手下的"覆盖
+            // （症状＝登录当次成功、之后永久 401，见 [stashExplicitCookie] 的说明）
+            .addInterceptor(stashExplicitCookie)
+            .addNetworkInterceptor(restoreExplicitCookie)
             .addInterceptor(uaFallback)
             // 加密图床（野果那类）：图片本身是 AES 密文，必须在这里解一层，
             // 否则 Coil 拿到的是「200 + 一坨非图片字节」，界面永远没有封面。
@@ -304,6 +377,8 @@ object Http {
             .retryOnConnectionFailure(false)
             .followRedirects(true)
             .cookieJar(cookieJar)
+            .addInterceptor(stashExplicitCookie)
+            .addNetworkInterceptor(restoreExplicitCookie)
             .build()
     }
 

@@ -100,6 +100,7 @@ SUITES = [
     # JDK + kotlin-stdlib）⇒ 并发度/窗口/字节上限/连败即停/换源作废/直播不预取 全部跑得到，
     # 不是读源码文本猜。它已经抓到过一个真缺陷（淘汰后重拉 = 无限拉取，P7b）。
     'runhlsfetch',
+    'runokcookie',
 ]
 # 需要真实网络的；**默认不跑**（见文件头）。
 # runbs3 是 v1.0.53 从 SUITES 挪过来的：它跑的是 `https://www.bolyship.com`，

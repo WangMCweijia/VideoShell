@@ -514,6 +514,37 @@ public class PanLinkTest {
                 leakWhere.length() == 0, "命中：" + leakWhere);
 
         // ------------------------------------------------------------------ 汇总
+        // ------------------------------------------------ 网盘凭据不能被 CookieJar 覆盖（v1.0.66）
+        // 症状：扫码登录**当次**校验通过，之后每次请求都 401 ⇒ 账号页显示"登录已过期"。
+        // 机理与判定见 tools/verify/OkHttpCookieJarTest.java（本机起 HTTP 服务**真跑**，
+        // 不联网）：OkHttp 的 BridgeInterceptor 会用 CookieJar 无条件覆盖手写的 Cookie 头，
+        // 第一次请求后 jar 被服务端 Set-Cookie 填上 ⇒ 整份登录态被替换。
+        // 这里守的是**接线**：两个拦截器都在，且 restore 必须挂 network 位。
+        String netCode = read(PROJ + "/app/src/main/java/com/videoshell/data/net/Http.kt");
+        netCode = netCode == null ? null : stripComments(netCode);
+        ok("E18a Http.kt 有「显式 Cookie 优先」的两个拦截器（stash + restore）",
+                netCode != null && netCode.contains("stashExplicitCookie")
+                        && netCode.contains("restoreExplicitCookie"), "");
+
+        // ★ 位置守卫：restore 必须在 **network** 位。挂成 application 位**不报错、编译也过**，
+        //   只是完全无效（它跑在 BridgeInterceptor 之前，照旧被覆盖）——
+        //   OkHttpCookieJarTest 的 E1 组就是专门把这条钉死的对照组。
+        ok("E18b restoreExplicitCookie 挂在 **network** 位（挂 application 位＝静默失效）",
+                netCode != null && netCode.contains("addNetworkInterceptor(restoreExplicitCookie)")
+                        && !netCode.contains("addInterceptor(restoreExplicitCookie)"), "");
+
+        ok("E18c stash 挂在 application 位（必须早于 BridgeInterceptor 才拿得到手写值）",
+                netCode != null && netCode.contains("addInterceptor(stashExplicitCookie)"), "");
+
+        // 两个自己建的 client 都要挂：client（网盘接口 / 站点解析）+ fastClient（探测）。
+        // mediaClient 是 client.newBuilder() 派生的 ⇒ 自动继承，所以播放侧不用再挂一遍
+        //（但派生关系一旦被改成"新 Builder"，播放侧的网盘凭据就会静默丢）。
+        int stashHooks = netCode == null ? 0 : countOf(netCode, ".addInterceptor(stashExplicitCookie)");
+        ok("E18d client 与 fastClient 两个挂载点都在（少一个，那条路径上的凭据就静默丢）",
+                stashHooks == 2, "挂载点=" + stashHooks);
+        ok("E18e mediaClient 由 client 派生（写死成独立 Builder 会漏掉播放侧）",
+                netCode != null && netCode.contains("client.newBuilder()"), "");
+
         System.out.println();
         System.out.println("==== pass=" + pass + " fail=" + fail + " ====");
         if (fail > 0) {
@@ -527,6 +558,14 @@ public class PanLinkTest {
         if (s == null) return false;
         for (String k : keys) if (s.contains(k)) return true;
         return false;
+    }
+
+    /** 子串出现次数（用来钉"挂载点有几个"这类计数不变量） */
+    static int countOf(String s, String needle) {
+        if (s == null || needle == null || needle.isEmpty()) return 0;
+        int n = 0, i = 0;
+        while ((i = s.indexOf(needle, i)) >= 0) { n++; i += needle.length(); }
+        return n;
     }
 
     /** 递归列出源码文件（用来做"全仓范围内不许出现 Cookie 值"这类扫描） */

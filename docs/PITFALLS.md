@@ -110,6 +110,7 @@
 | E42 | 用 REST 区间推送脚本推一个**含中文文件名**的提交 ⇒ `FATAL: TREE MISMATCH`，而 47 个 blob **全部上传成功**、没有任何其他线索 | `git ls-tree -r` 默认 `core.quotepath=true`，把 `docs/真果鉴_视频源解析.md` 转义成带引号的 `"docs/\347\234\237\346\236\234..."`；脚本把这个**转义串当路径**发给 GitHub，服务器上就建出一棵**文件名乱码**的 tree。历史上从没撞过 —— 因为这是**首次提交非 ASCII 路径** | 组装 tree 前一律 `git -c core.quotepath=false ls-tree -r`；**并加一道"路径以引号开头就 die"的闸**（`quotepath=false` 只关掉非 ASCII 转义，含空格/引号的路径**仍会**被引号包裹 ⇒ 宁可当场红，也不要静默建错）。诊断手法：逐条目比对本地 tree 与服务器组装出的 tree（`?recursive=1`），差异条目一眼看清。见 §4.62（v1.0.65） |
 | E43 | 验包脚本第一版报 **1 项不符**：对照项 `com.videoshell` 在 `resources.arsc` 里 `NOT FOUND` —— 差点据此认为"新文案没进包"（而中文新文案全 FOUND，更显得像包的问题） | **对照项自己失效**：`AndroidManifest.xml` 的字符串池是 **UTF-16LE**（实测 `videoshell` 出现 **18 次**，UTF-8 里 **0 次**），只搜 UTF-8 必然假 NOT FOUND | **所有**判据（不只是版本号）都要**双编码**（UTF-8 + UTF-16LE）；对照项必须**先证明自己搜得着**（它红了才有意义）。最阴的一层：只搜 UTF-8 时"旧文案 NOT FOUND"会**假绿**，正好放过"新旧两代同名包"这件事本身（§4.38）。见 §4.62（v1.0.65） |
 | E44 | 发版后核 asset：`gh api .../releases/tags/v1.0.65` 报 `assets=0`（`gh release view --json assets` 同样 0），而 CI 日志里两组 `✅ Uploaded` 明明成功 ⇒ 判成"asset 丢了、用户下载不到"，开始准备手动补传 | **读错端点**：`/releases/tags/{tag}` 的 `assets` 数组对**刚创建的 release** 返回**空数组**（一致性延迟）；`/releases/{id}/assets` 与 `/releases/latest` 都正确报 2 个。（另：`/releases/tags/{tag}/assets` 这种写法本身就是 404 —— 该端点只认 **id**，而这个 404 被我当成了"确实没有 asset"的旁证） | **核 asset 用 `/releases/{id}/assets` 或 `/releases/latest`**；更彻底的是直接 HEAD **用户会点的那条 URL**（`/releases/download/<tag>/app-release.apk`，它自己 302 到 asset）—— 已加进 workflow。**代价警示**：差点用 `gh release upload --clobber` 拿**本地包覆盖 CI 包**，而 `version.json` 里的 sha256/size 是 CI 包的 ⇒ App 内自更新会**校验失败**（现象是"提示更新、下完装不上"，离根因十万八千里）。拦下它的是 422 `ReleaseAsset.name already exists` —— **同一个 API 假象顺手救了一次场**。见 §4.63（v1.0.65） |
+| E45 | **扫码登录成功、过一会儿再进就报「登录已过期」**（凭据校验不通过）；重登也一样，只要"再进"一次就过期 | **OkHttp 的 `BridgeInterceptor` 会用 CookieJar 无条件覆盖手写的 `Cookie` 头**：网盘登录态是 `DriveStore` 里的一整份 cookie，由调用方以显式 `Cookie` 头挂上；第 1 次请求时 jar 还空着 ⇒ 手写头生效 ⇒ 校验通过；而那次响应里服务端**必定** `Set-Cookie`（刷新 `__puus` / 下埋点 cookie）⇒ jar 对该 host 非空 ⇒ **从第 2 次请求起整份登录态被替换成 jar 里那点东西** ⇒ `31001 require login`。离线实验（本机起 HTTP 服务）第 1 次收到 `__puus=bbb`、第 2 次只剩 `srvmark=1` | 显式 Cookie 优先：请求自带 `Cookie` 就把它收进 `Request.tag`（application 位），在 **network 拦截器位**（晚于 BridgeInterceptor）写回。**位置不能错** —— 挂成 application 位不报错、编译也过，只是完全无效（有专门对照组钉住）。不能用"换成无 jar 的 client"绕过：jar 是站点解析/播放防盗链必需的，而 mediaClient 是 `client.newBuilder()` 派生。见 §4.64（v1.0.66） |
 
 ---
 
@@ -2497,3 +2498,99 @@ v1.0.65 assets=2
   `sha256=7a0cbeb9… size=3219578`，与 release 上 asset 的 size **逐字节一致** ⇒
   既证明 asset 是 CI 那份，也证明 `version.json` 与它**自洽**（自更新可用）。
   （本机直连 `github.com` 的下载 CDN 会被 reset，所以"下载下来扫一遍"这条路走不通 —— 见 §4.62 同源环境限制。）
+
+---
+
+## §4.64 扫码登录"没多久就过期"：手写的 Cookie 被 CookieJar 覆盖（v1.0.66）
+
+### 一、症状（用户上报，真机）
+
+扫码登录 → 界面提示"登录成功" → **过一会儿**（用户那次约 15 分钟）再打开「网盘账号」：
+
+```
+夸克网盘    登录已过期 · 09-23 17:30 更新      退出登录 / 重新登录
+toast：夸克网盘 凭据未能通过校验，请重新登录
+```
+
+关键在"**登录当次是通过的**"（`DriveLoginActivity.captureAndFinish` 只有在 `verify()` 返回 `Valid` 时才
+`finish()`，否则会 toast `drive_login_bad` 并留在页面上）。所以不是"没登上"，而是**登上之后凭据被弄坏了**。
+
+### 二、机理：OkHttp 无条件用 CookieJar 覆盖手写 `Cookie` 头
+
+网盘登录态是 `DriveStore` 里的一整份 cookie（`__pus` / `__puus` / `__uid` …），
+由 `PanCloudDrive` 以**显式 `Cookie` 头**挂上去 —— 这是刻意的：它属于"与站点解耦的另一套凭据"，
+不进 `Http` 里那个服务于站点解析的 CookieJar。
+
+而 OkHttp 的 `BridgeInterceptor` 是**无条件**覆盖：
+
+```java
+List<Cookie> cookies = cookieJar.loadForRequest(userRequest.url());
+if (!cookies.isEmpty()) requestBuilder.header("Cookie", cookieHeader(cookies));
+```
+
+于是时间线是：
+
+| 时刻 | jar 状态 | 服务器实际收到的 Cookie | 结果 |
+|---|---|---|---|
+| 第 1 次请求（登录后的 `verify()`） | 空 | 我们手写的整份（`__puus` 在内） | ✅ 通过 |
+| 该次响应 | 被服务端 `Set-Cookie` 填上 | — | （此时已埋雷） |
+| 第 2 次请求起（每次进账号页、每次列目录） | 非空 | **只有 jar 里那点**（`srvmark` 之类） | ❌ `31001 require login` ⇒ `markExpired` |
+
+### 三、判定：本机起 HTTP 服务真跑，不靠读文档
+
+`tools/verify/OkHttpCookieJarTest.java`（`runokcookie` 套件，**不联网**）把机理钉死：
+
+```
+A 第 1 次服务器收到 : __pus=aaa; __puus=bbb; __uid=ccc
+A 第 2 次服务器收到 : srvmark=1        ← 整份登录态被替换
+B 修后三次          : 每次都收到 __pus=aaa; __puus=bbb; __uid=ccc
+C 摘掉 jar（对照）  : 每次都收到手写值（证明观察点有效）
+D 不带显式 Cookie   : 收到 srvmark=1（jar 照常工作，站点解析不受影响）
+E 把 restore 挂错位 : 第 2 次仍被覆盖（**静默失效**，编译无警告）
+```
+
+**E 组是最值钱的一条**：`restore` 挂 `addInterceptor`（application 位）与挂 `addNetworkInterceptor`
+（network 位）**代码看起来一样、编译都过**，但前者跑在 `BridgeInterceptor` 之前 ⇒ 完全无效。
+所以 PanLinkTest 的 `E18b` 守卫专门钉"必须是 network 位"，且**禁止** application 位那种写法出现。
+
+### 四、排除掉的假设（都认真查过）
+
+| 假设 | 为什么不是它 |
+|---|---|
+| cookie 被服务端提前作废（轮换 `__puus`） | PC 侧 spike 用**同一份** cookie 连打十几个接口（token→detail→save→task→play→delete）全部成功（§4.60）⇒ 短时内旧值仍有效。而且"登录当次通过"正好对应"jar 还空着" |
+| 存盘坏了（加密/读回丢字段） | 同一份字符串存盘前后一致；如果是存储问题，**当次**校验就该失败 |
+| 校验判据太严（`/member` 接口变了） | `verify()` 只在 `isNeedLogin(code)` 或 HTTP 401/403 时判过期；模型/其他错误码都返回 `Valid`。而且"当次通过、之后永远不过"是**状态相关**的，不是判据相关 |
+| cookie 里少了某个键 | `readCookies()` 多 host 合并后落的是完整快照；且当次校验用的是同一份 |
+
+### 五、修法
+
+`Http.kt` 加两个拦截器（`stashExplicitCookie` / `restoreExplicitCookie`）：
+
+- **application 位**：请求若自带非空 `Cookie`，把它的值收进 `Request.tag`（`ExplicitCookie`）。
+- **network 位**：从 tag 取回来，`header("Cookie", …)` 写回 —— 此时晚于 `BridgeInterceptor`，必然生效。
+
+**为什么不用"塞一个自定义头"**：那会把这份凭据**多发给服务端一遍**，有的站直接 400。
+
+**为什么不用"换个没有 jar 的 client"**：jar 是站点解析与播放防盗链**必需**的
+（§4.53 那类跨子域签名 cookie），而 `mediaClient` 是 `client.newBuilder()` 派生的同一套配置，
+拆 client 等于把这条能力在别的路径上悄悄关掉 —— 又是"改一处漏一处"。所以修在**拦截器层**，
+`client` / `fastClient` 显式挂、`mediaClient` 靠派生继承（守卫 `E18d/E18e` 钉住这两点）。
+
+### 六、纪律沉淀
+
+1. **"改了 A 却影响 B"最典型的形态是"第三方库替你改了 B"**：这里没有任何一行我们的代码动过 `Cookie` 头，
+   是 OkHttp 的 BridgeInterceptor 干的。凡是"显式传的头"与"库自己管理的状态"**同名**，就要问一句谁后写。
+2. **拦截器顺序 = 语义**。application 位与 network 位差一个词，行为完全相反且**零报错**。
+   凡是"必须晚于某个内置拦截器"的逻辑，一律配一个**错位对照组**（E1 那种）。
+3. **症状里的时间信息是判据**（"登录**当次**是好的"）—— 它把"凭据没用"与"凭据被弄坏"分开了，
+   直接排除了一半假设。上报 bug 时把"什么时候是好的"写清楚，价值极高。
+4. **实验装置要带"证明观察点有效"的对照组**（C 组摘 jar）—— 否则"第 2 次收到 `srvmark`"也可能
+   只是探针写错了。
+
+### 七、未做
+
+- **真机验证**：`adb devices` 仍为空。"修好后登录不再掉"只能在设备上确认（逻辑上有实验支撑）。
+- **`DriveStore.state()` 的 `bad_` 标记是粘性的**（只有 `verify()` 成功或重新登录才清）。
+  已经处于"过期"的用户装新版后，进账号页会触发一次 `verify()` → 成功即自动恢复；真失效的仍需重登一次。
+- **多域名回退**：一个站配多个域名时，App 不会在域名间自动回退（清单 `docs/网盘站源清单.md` 里给了全部域名，
+  目前靠用户手换）。
