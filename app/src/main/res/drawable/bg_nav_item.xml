@@ -1,22 +1,47 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-  底部导航条目背景（v1.0.61）：选中 = 琥珀 12% 圆角胶囊，未选中 = 透明。
-  v1.0.60 之前选中态只有"图标+文字变琥珀"，在实底 Dock 上几乎没有面积感
-  —— 这是"tab 栏质感不好"的另一半来源。胶囊用 <inset> 内缩，
-  否则会铺满整格变成"选中了一整格"而不是一枚药丸。
-  amber 双主题同值 ⇒ 胶囊也同值，无需 night 变体。
+  底部 Dock 条目背景（v1.0.62）：选中 = 琥珀胶囊，未选中 = 透明 + 涟漪。
+
+  ⚠️ 状态键是 state_selected，**不是** state_checked —— Dock 从
+     BottomNavigationView 换成手写三格后，没有 menu 的 checked 状态机，
+     选中态由容器 View.setSelected 驱动；它会向下传播给子 ImageView/TextView，
+     所以图标与文字的 tint/textColor selector 会同步进入选中态（无需逐个设置）。
+
+  胶囊用 <inset> 内缩 8dp：贴满整格会变成"选中了一整格"而不是一枚药丸。
+  圆角 16dp 与栏高 64dp 相配 —— 胶囊高 48dp，圆角再大就成椭圆了。
 -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:state_checked="true">
-        <inset
-            android:insetBottom="6dp"
-            android:insetLeft="14dp"
-            android:insetRight="14dp"
-            android:insetTop="6dp">
-            <shape android:shape="rectangle">
-                <corners android:radius="12dp" />
-                <solid android:color="@color/amber_pill" />
-            </shape>
-        </inset>
+
+    <item android:state_selected="true">
+        <ripple android:color="@color/dock_ripple">
+            <item>
+                <inset
+                    android:insetBottom="8dp"
+                    android:insetLeft="8dp"
+                    android:insetRight="8dp"
+                    android:insetTop="8dp">
+                    <shape android:shape="rectangle">
+                        <corners android:radius="16dp" />
+                        <solid android:color="@color/dock_pill" />
+                    </shape>
+                </inset>
+            </item>
+        </ripple>
     </item>
-    <item android:drawable="@android:color/transparent" />
+
+    <item>
+        <ripple android:color="@color/dock_ripple">
+            <item>
+                <inset
+                    android:insetBottom="8dp"
+                    android:insetLeft="8dp"
+                    android:insetRight="8dp"
+                    android:insetTop="8dp">
+                    <shape android:shape="rectangle">
+                        <corners android:radius="16dp" />
+                        <solid android:color="#00000000" />
+                    </shape>
+                </inset>
+            </item>
+        </ripple>
+    </item>
 </selector>

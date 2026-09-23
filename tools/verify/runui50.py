@@ -204,8 +204,13 @@ ok("★ MainActivity 用 OnBackPressedCallback（覆写 onBackPressed 做不到�
 ok("★ MainActivity 返回键第一优先是退出搜索",
    "if (currentPage == PAGE_HOME && browserHome.exitSearch()) return" in main_kt)
 ok("MainActivity 非首页时返回键回首页", "currentPage != PAGE_HOME" in main_kt)
-ok("回首页时同步底栏选中态（避免内容回首页、底栏还亮着站源）",
-   "binding.bottomNav.selectedItemId = R.id.nav_home" in main_kt)
+# v1.0.62：底栏从 BottomNavigationView 换成手写 Dock，menu 的 checked 状态机随之消失，
+# 选中态的唯一定义处变成 selectTab。判据跟着改锁**机制**（一个入口管两件事），
+# 而不是原来那行 setter —— 锁 setter 等于锁实现，机制一换就红（见 PITFALLS §4.41）。
+ok("★ 回首页经 selectTab 同步底栏选中态（避免内容回首页、底栏还亮着站源）",
+   "selectTab(PAGE_HOME)" in main_kt)
+ok("★ selectTab 同时刷三格选中态并切页（手写 Dock 后没有 menu 状态机代管）",
+   "tab.isSelected = p == page" in main_kt and "showPage(page)" in main_kt)
 ok("★ SiteActivity 返回键也先退搜索", "if (browser.exitSearch()) return" in site_kt)
 ok("★ 二级站源页标题栏的返回也先退搜索（界面上有返回、按了却整页退掉最迷惑）",
    "if (!browser.exitSearch()) finish()" in site_kt)

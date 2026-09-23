@@ -272,15 +272,13 @@ class MainActivity : AppCompatActivity() {
             toast(if (checked) getString(R.string.bg_play_on) else getString(R.string.bg_play_off))
         }
 
-        // ---- 底部导航 ----
-        binding.bottomNav.setOnItemSelectedListener { item ->
-            when (item.itemId) {
-                R.id.nav_sites -> showPage(PAGE_SITES)
-                R.id.nav_mine -> showPage(PAGE_MINE)
-                else -> showPage(PAGE_HOME)
-            }
-            true
-        }
+        // ---- 底部导航（v1.0.62：手写 Dock）----
+        // BottomNavigationView 的 icon↔label 间距是库内固定值、没有对外属性可调
+        // （用户反馈的"图标与文字挤在一起"就是它造成的）⇒ 换成手写三格。
+        // 代价是丢了 menu 的 checked 状态机：选中态从此由 selectTab 一个入口负责。
+        binding.tabHome.setOnClickListener { selectTab(PAGE_HOME) }
+        binding.tabSites.setOnClickListener { selectTab(PAGE_SITES) }
+        binding.tabMine.setOnClickListener { selectTab(PAGE_MINE) }
         // 底部导航现在是**浮**在内容之上的一层，各列表得自己让出它的高度
         // （实测高度而不是写死，理由见 applyNavClearance 的注释）
         applyNavClearance()
@@ -358,6 +356,30 @@ class MainActivity : AppCompatActivity() {
 
         if (page == PAGE_SITES) refresh()
         if (page == PAGE_HOME) bindHome()
+    }
+
+    /**
+     * 切页 + 同步 Dock 选中态（v1.0.62）。
+     *
+     * 两者必须**同进同出**：只切页不刷底栏会出现"内容回首页了、底栏还亮着站源"的
+     * 分裂状态。这条不变量原来由 BottomNavigationView 的 menu 状态机代管，
+     * 手写 Dock 之后没有任何东西代管了，所以必须做成一个入口 —— 返回键回首页
+     * 走的也是这里。
+     *
+     * 选中态用 `isSelected` 而不是自定义布尔字段：View 的 selected 状态会
+     * **自动向下传播**给子 View，所以格子里图标的 tint（nav_item 是 ColorStateList）
+     * 与文字色会跟着变，不需要逐个设置 —— 这也正是 bg_nav_item / nav_item 两个
+     * selector 都判 state_selected 的原因。
+     */
+    private fun selectTab(page: Int) {
+        for ((tab, p) in listOf(
+            binding.tabHome to PAGE_HOME,
+            binding.tabSites to PAGE_SITES,
+            binding.tabMine to PAGE_MINE
+        )) {
+            tab.isSelected = p == page
+        }
+        showPage(page)
     }
 
     // ------------------------------------------------------------------ 底部导航让位
@@ -439,9 +461,8 @@ class MainActivity : AppCompatActivity() {
             override fun handleOnBackPressed() {
                 if (currentPage == PAGE_HOME && browserHome.exitSearch()) return
                 if (currentPage != PAGE_HOME) {
-                    // 设 selectedItemId 会触发 listener ⇒ showPage；这里的显式调用只是兜底
-                    binding.bottomNav.selectedItemId = R.id.nav_home
-                    showPage(PAGE_HOME)
+                    // selectTab 一个入口管两件事：刷底栏选中态 + showPage
+                    selectTab(PAGE_HOME)
                     return
                 }
                 isEnabled = false

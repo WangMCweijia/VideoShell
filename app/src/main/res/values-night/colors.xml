@@ -41,6 +41,20 @@
     <!-- 底部导航选中态（亮 Dock 上用烫金，暗 Dock 上用亮琥珀） -->
     <color name="nav_active">#FFFFC46B</color>
 
+    <!-- ============================================================
+         底部 Dock（v1.0.62 · "墨岛"）。暗色主题沿用 e1 面板 95%：
+         黑场上把 Dock 再压暗 = 等于没有 Dock。与亮色的墨底是**同一套
+         设计意图的两种表达**（把 Dock 从画布里"分出来"），
+         只是亮色靠压暗、暗色靠提亮一档 + 白发丝线。
+         ============================================================ -->
+    <color name="dock_fill">#F212161D</color>
+    <color name="dock_fill_2">#F20E121A</color>
+    <color name="dock_stroke">#14FFFFFF</color>
+    <color name="dock_inactive">#FF7E8794</color>
+    <color name="dock_active">#FFFFC46B</color>
+    <color name="dock_pill">#24E8862C</color>
+    <color name="dock_ripple">#14FFFFFF</color>
+
     <!-- 玻璃四层 → 实底材质兼容映射（退役期）：
          fill = e1 面板 88%（Dock 压在滚动内容上仍留一线暗影），
          stroke = 8% 白发丝线，glow/edge/ambient 退役置透明。 -->

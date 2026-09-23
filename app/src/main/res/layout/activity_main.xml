@@ -600,7 +600,7 @@
                 </LinearLayout>
             </LinearLayout>
         </ScrollView>
-        <!-- ======================= 底部导航（浮岛，v1.0.49 起真正浮起） =======================
+        <!-- ======================= 底部 Dock（v1.0.62 起手写，v1.0.49 起真正浮起） =======================
              ⚠️ 必须放在这个 FrameLayout **里面**（= 内容层的末尾），不能当成外层
              LinearLayout 的第二个子元素 —— 那样它是"流式占位"，内容区到它上方就
              截止了，列表永远延伸不到导航栏底下，玻璃再透也无物可透。
@@ -613,22 +613,110 @@
              与 themes 里的 navigationBarColor 同色，所以不会出现一条色带。
              ⚠️ 浮起之后各列表必须自己让出高度（见 MainActivity.applyNavClearance）。
              让位要加在**列表自己的 paddingBottom** 上，不能加在容器上 ——
-             加在容器上只会把内容整体上推，内容依旧不会从玻璃下面穿过。 -->
-        <com.google.android.material.bottomnavigation.BottomNavigationView
+             加在容器上只会把内容整体上推，内容依旧不会从玻璃下面穿过。
+
+             v1.0.62 为什么不再用 BottomNavigationView：它的 icon↔label 间距是库内
+             固定值（约 4dp）、**没有对外属性可调** —— 用户反馈的"图标与文字挤在一起"
+             就是它造成的，而此前两轮"调描边 / 加选中胶囊"也改不动整体观感。手写三格后
+             图标 22dp / 间距 5dp / 栏高 64dp 全部是自有 Token，选中态改由
+             View.setSelected 驱动（状态自动传播给子 ImageView/TextView，因此
+             bg_nav_item 与 nav_item 两个 selector 都改判 state_selected）。
+             材质也一并换了：亮色 Dock 由"白面板"改为"墨岛"（dock_* Token）——
+             白 Dock 压暖纸画布永远只是一块白，层次只能靠材质对比一次拉满。
+             ⚠️ @menu/menu_main 自本版起不再被引用（文件保留以便回退），
+             资源收缩会把它从包里剔除。 -->
+        <LinearLayout
             android:id="@+id/bottomNav"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="@dimen/dock_h"
             android:layout_gravity="bottom"
             android:layout_marginStart="@dimen/island_gap"
             android:layout_marginEnd="@dimen/island_gap"
             android:layout_marginBottom="@dimen/island_gap"
             android:background="@drawable/bg_glass_nav"
-            android:elevation="8dp"
-            app:itemBackground="@drawable/bg_nav_item"
-            app:itemIconTint="@color/nav_item"
-            app:itemTextColor="@color/nav_item"
-            app:labelVisibilityMode="labeled"
-            app:menu="@menu/menu_main" />
+            android:elevation="12dp"
+            android:orientation="horizontal"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp">
+
+            <!-- 三格结构完全一致：图标 + @dimen/dock_icon_gap + 文字，整组垂直居中。
+                 选中态 = 该格 isSelected ⇒ bg_nav_item 出琥珀胶囊、nav_item 让图标
+                 与文字转琥珀（状态从容器自动传播到子 View，不需要逐格设置）。 -->
+            <LinearLayout
+                android:id="@+id/tabHome"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@drawable/bg_nav_item"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <ImageView
+                    android:layout_width="@dimen/dock_icon"
+                    android:layout_height="@dimen/dock_icon"
+                    android:contentDescription="@string/nav_home"
+                    android:src="@drawable/ic_home"
+                    app:tint="@color/nav_item" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dock_icon_gap"
+                    android:text="@string/nav_home"
+                    android:textColor="@color/nav_item"
+                    android:textSize="@dimen/text_caption" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tabSites"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@drawable/bg_nav_item"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <ImageView
+                    android:layout_width="@dimen/dock_icon"
+                    android:layout_height="@dimen/dock_icon"
+                    android:contentDescription="@string/nav_sites"
+                    android:src="@drawable/ic_grid"
+                    app:tint="@color/nav_item" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dock_icon_gap"
+                    android:text="@string/nav_sites"
+                    android:textColor="@color/nav_item"
+                    android:textSize="@dimen/text_caption" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tabMine"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@drawable/bg_nav_item"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <ImageView
+                    android:layout_width="@dimen/dock_icon"
+                    android:layout_height="@dimen/dock_icon"
+                    android:contentDescription="@string/nav_mine"
+                    android:src="@drawable/ic_person"
+                    app:tint="@color/nav_item" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dock_icon_gap"
+                    android:text="@string/nav_mine"
+                    android:textColor="@color/nav_item"
+                    android:textSize="@dimen/text_caption" />
+            </LinearLayout>
+        </LinearLayout>
     </FrameLayout>
 
 </LinearLayout>

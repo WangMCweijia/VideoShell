@@ -61,6 +61,20 @@
     <dimen name="island_min_h">52dp</dimen>
     <dimen name="glass_stroke_w">1dp</dimen>
 
+    <!-- ============================================================
+         底部 Dock（v1.0.62 起手写，不再用 BottomNavigationView）。
+         64dp = 上 10 + 图标 22 + 图标文字间距 5 + 文字 ~17 + 下 10。
+         ⚠️ 为什么不用 BottomNavigationView：它的 icon↔label 间距是库内
+            固定值（约 4dp），**没有对外属性可调**，用户反馈的"图标与文字
+            挤在一起"正是它造成的。手写三格后三项尺寸全是自有 Token，
+            并且顺带能做出"选中胶囊包住整格"这种库做不到的形态。
+         ⚠️ 改 dock_h 不用同步任何地方：各列表的让位高度是 applyNavClearance
+            实测 Dock 高度算出来的（不是写死）。
+         ============================================================ -->
+    <dimen name="dock_h">64dp</dimen>
+    <dimen name="dock_icon">22dp</dimen>
+    <dimen name="dock_icon_gap">5dp</dimen>
+
     <!-- 平板适配（UI-3）：values-sw600dp 里覆盖这套，手机沿用默认 -->
     <dimen name="surface_padding">14dp</dimen>
 

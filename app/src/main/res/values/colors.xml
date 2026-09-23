@@ -45,10 +45,31 @@
     <color name="amber_text">#FFB87A10</color>
     <!-- 进度/滑杆专用：亮底需要 ≥3:1 的图形对比度，故压深一档 -->
     <color name="amber_progress">#FFC9830F</color>
-    <!-- 底部导航选中态（亮 Dock 上用烫金，暗 Dock 上用亮琥珀） -->
-    <color name="nav_active">#FFB87A10</color>
-    <!-- 导航选中胶囊底：琥珀 12% 面积色（amber 双主题同值 ⇒ 胶囊同值，无 night 变体） -->
+    <!-- 底部导航选中态：**双主题同值亮琥珀**（v1.0.62）——
+         亮色 Dock 改成墨底后，原来那支烫金 #B87A10 在墨上只有 2.4:1，
+         根本看不见；墨底/黑底用的是同一支亮琥珀，这是刻意的。 -->
+    <color name="nav_active">#FFFFC46B</color>
+    <!-- 导航选中胶囊底：琥珀 12% 面积色（旧值，面板类保留引用） -->
     <color name="amber_pill">#1FE8862C</color>
+
+    <!-- ============================================================
+         底部 Dock（v1.0.62 · "墨岛"）。
+         亮色主题下 Dock 用**深墨**而不是白：白 Dock 压在暖纸画布上，
+         无论怎么加描边/投影，观感永远只是"一块白" —— 这是"tab 栏质感
+         不好"的真正根因：材质之间没有对比。深度来自材质对比，
+         画布（暖纸）→ Dock（墨岛）一次拉满。
+         暗色主题沿用 e1 面板（黑场上把 Dock 再压暗 = 等于没有 Dock）。
+         ⚠️ 未选中色必须按**自家底色**取：dock_inactive 在墨底 6.3:1、
+            黑场 5.0:1，都过 AA；不能沿用 text_hint（亮色 #6E7888 落在
+            墨底只有 3.6:1，11sp 小字不达标）。
+         ============================================================ -->
+    <color name="dock_fill">#FF1B2028</color>
+    <color name="dock_fill_2">#FF15191F</color>
+    <color name="dock_stroke">#26FFFFFF</color>
+    <color name="dock_inactive">#FF98A1AE</color>
+    <color name="dock_active">#FFFFC46B</color>
+    <color name="dock_pill">#2EFFC46B</color>
+    <color name="dock_ripple">#1FFFFFFF</color>
 
     <!-- 玻璃四层 → 实底材质的兼容映射（色名退役期，引用方不用改）：
          fill/fill_2 = 实白面板（底部留一丝暖差当"漫反射"残影），

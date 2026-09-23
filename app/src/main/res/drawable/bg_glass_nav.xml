@@ -1,18 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-  磨砂玻璃 · 底部导航浮岛。
+  底部 Dock 底（v1.0.62 · 墨岛）。
 
-  圆角取 radius_xl（20dp）：导航条高 56dp，20dp 圆角已经很接近"药丸"形，正是要的效果 ——
-  底栏是整屏最下面一块，方角会立刻露出"贴边"的廉价感。
-  ⚠️ 这里以前注释写的是 radius_hero（24dp），但 dimens 里从来没有这个名字、
-     代码里也确实是 radius_xl —— 典型的"注释说的和代码做的不一样"（v1.0.49 修正）。
-     按代码判断：圆角就是 20dp。
+  两层：
+    ① 主体   dock_fill → dock_fill_2，自上而下微深（保留浮岛时代那道"漫反射"残影）
+    ② 1px 描边 dock_stroke —— 亮色是 15% 白：深墨盘上只有白发丝线勾得出上棱，
+              用旧的 glass_stroke（浅墨 #D9D5CA）会变成一圈突兀的亮边。
 
-  ⚠️ 不要在这里加 <padding>：高度由 BottomNavigationView 自己按 item 撑，
-     这里塞 padding 会把图标行往上挤，与系统导航区冲突。
+  圆角取 radius_xl（20dp）：Dock 高 64dp，20dp 已经很接近药丸形，方角立刻露出"贴边"的廉价感。
 
-  v1.0.49：导航栏从"流式占位"改成**浮在内容之上**的一层（见 activity_main.xml），
-  它底下会真的滑过影片卡片 —— 这一版的玻璃透明度下调、加砂质层，都是为了这一刻
-  才看得出来。之前它背后只有一块静态渐变，调什么参数都白搭。
+  ⚠️ 不要在这里加 <padding>：高度由 Dock 自己定（dock_h），塞 padding 会把图标行挤歪。
+
+  v1.0.49→v1.0.62 的演变：玻璃浮岛（半透明 + 砂质 + 棱）→ 实底白面板 → 墨岛。
+  亮色主题的白 Dock 压在暖纸画布上，怎么调都是"一块白"，这不是参数问题而是材质
+  没有对比；墨岛把"画布 → Dock"的层次一次性拉满，这也解释了为什么之前两轮
+  "调描边 / 加胶囊"用户都说质感没变。
 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -21,27 +22,11 @@
             <corners android:radius="@dimen/radius_xl" />
             <gradient
                 android:angle="270"
-                android:endColor="@color/glass_fill_2"
-                android:startColor="@color/glass_fill"
+                android:endColor="@color/dock_fill_2"
+                android:startColor="@color/dock_fill"
                 android:type="linear" />
         </shape>
     </item>
-
-    <item>
-        <shape android:shape="rectangle">
-            <corners android:radius="@dimen/radius_xl" />
-            <gradient
-                android:angle="270"
-                android:centerColor="#00000000"
-                android:centerY="0.22"
-                android:endColor="#00000000"
-                android:startColor="@color/glass_glow"
-                android:type="linear" />
-        </shape>
-    </item>
-
-    <!-- 砂质层（glass_grain）v1.0.60 退役：实底材质下颗粒只会把白面板糊脏
-         （亮色主题尤甚），深度改由色阶/描边/投影承担。 -->
 
     <item>
         <shape android:shape="rectangle">
@@ -49,7 +34,7 @@
             <solid android:color="#00000000" />
             <stroke
                 android:width="@dimen/glass_stroke_w"
-                android:color="@color/glass_stroke" />
+                android:color="@color/dock_stroke" />
         </shape>
     </item>
 </layer-list>
