@@ -222,7 +222,18 @@ object AggSearch {
     /** 失败的站名，供界面点开看原因 */
     fun failures(hits: List<SiteHits>): List<SiteHits> = hits.filter { !it.ok }
 
-    /** 单站执行：并发扇出与流式都用它 ⇒ 超时/异常的判据只有一份 */
+    /**
+     * 单站执行：并发扇出与流式都用它 ⇒ 超时/异常的判据只有一份。
+     *
+     * v1.0.67 两处改动，都跟"域名轮换"有关：
+     *
+     *  - 先 [MirrorRace.of] 拿到**活地址**再建适配器（没有备用地址的站零开销）；
+     *  - 失败时 [MirrorRace.invalidate] 作废这次的选中 —— 下次搜索会重新赛马，
+     *    这就是"主域名死了会自动换到备用地址"的自愈路径。
+     *
+     * ⚠️ 赛马必须在 [withTimeoutOrNull] **外面**：那个 12 秒是给"站点搜索"的，
+     * 把赛马算进去的话，一个慢候选就能把一个本来正常的站逼到超时。
+     */
     private suspend fun oneSite(
         s: SiteConfig,
         keyword: String,
@@ -230,13 +241,17 @@ object AggSearch {
         perSiteTimeoutMs: Long
     ): SiteHits {
         val name = s.name.ifBlank { RecipeStore.hostOf(s.baseUrl) }
+        // 赛马自己失败（探测抛异常等）不该让这个站整条挂掉 —— 拿原地址继续试
+        val live = runCatching { MirrorRace.of(s) }.getOrDefault(s)
         return runCatching {
             withTimeoutOrNull(perSiteTimeoutMs) {
-                AdapterFactory.create(s).search(keyword, page)
+                AdapterFactory.create(live).search(keyword, page)
             } ?: throw IllegalStateException("超时未返回")
         }.fold(
             onSuccess = { SiteHits(s.key, name, it) },
             onFailure = {
+                // 失败 ⇒ 这次的"活地址"判断作废，下一轮重新赛马（自愈）
+                MirrorRace.invalidate(s)
                 SiteHits(s.key, name, emptyList(), it.javaClass.simpleName + ": " + it.message)
             }
         )

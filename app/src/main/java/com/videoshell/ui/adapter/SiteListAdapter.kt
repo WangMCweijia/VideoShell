@@ -87,7 +87,13 @@ class SiteListAdapter(
             // 在展示侧解码而不是存储侧：老数据不用迁移，新数据错了也还能救。
             b.tvName.text = org.jsoup.parser.Parser.unescapeEntities(s.name, false)
                 .ifBlank { s.baseUrl }
-            b.tvUrl.text = s.baseUrl
+            // 备用地址（域名轮换，v1.0.67）：有就在地址后面点出来。
+            // 没有这一句的话，用户根本看不出自己填的第二、第三个地址有没有被存进去 ——
+            // 而"填了没生效"正是这个功能最容易让人怀疑的地方。
+            val mirrors = s.mirrorList()
+            b.tvUrl.text =
+                if (mirrors.isEmpty()) s.baseUrl
+                else s.baseUrl + "  ·  另 " + mirrors.size + " 个地址"
             b.tvMode.text = listOf(s.note, s.apiMode).filter { it.isNotBlank() }.joinToString(" · ")
             b.root.setOnClickListener { onClick(s) }
             b.root.setOnLongClickListener { onLongClick(s); true }

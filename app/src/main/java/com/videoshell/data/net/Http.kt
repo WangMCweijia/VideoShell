@@ -382,6 +382,62 @@ object Http {
             .build()
     }
 
+    /**
+     * 探活专用：比 [fastClient] 再短一档。
+     *
+     * 探活是"顺手做的一件事"（在几个备用地址里挑最快的），**绝不能反过来拖住用户**。
+     * 所以整体封顶 4 秒：连不上就认输，让别的候选去赢。
+     */
+    private val probeClient: OkHttpClient by lazy {
+        fastClient.newBuilder()
+            .connectTimeout(3, TimeUnit.SECONDS)
+            .readTimeout(3, TimeUnit.SECONDS)
+            .callTimeout(4, TimeUnit.SECONDS)
+            .build()
+    }
+
+    /**
+     * 轻量探活（v1.0.67）：这个地址现在**通不通、有多快**。
+     *
+     * 返回耗时**毫秒**；失败返回 **-1**。
+     *
+     * ## 判据只有两条
+     *
+     * **HTTP 2xx**（重定向已跟随）+ **正文非空**（只 peek 前 1KB —— 首页可能几百 KB，
+     * 探活不该把整页读下来，`peekBody` 恰好只把这一小段拉进内存）。
+     *
+     * 刻意**不做更严的判据**（比如"正文像不像一个影视站"）：探活的用途是在
+     * **用户自己给的**几个地址里挑最快的一个，不是给外部输入做资格审查。
+     * 判太严会把一个真活着、只是先说"正在检查浏览器"的站**判死**，
+     * 那比"挑到慢的那个"糟得多 —— 慢还能用，判死等于把可选地址删了。
+     *
+     * ## 为什么不给 suspend 版本
+     *
+     * 它要在"并发赛马"里被**多个线程同时拿住**（见 [com.videoshell.data.site.MirrorRace]），
+     * suspend 化在这里只多一层 Continuation。所以是**阻塞调用，须在 IO 线程上跑**。
+     *
+     * 刻意**不写 NetLog**：探活是后台噪声（一次搜索可能十几个），
+     * 把性能日志冲掉之后，"刚才那次卡顿"就再也查不出来了。
+     */
+    fun probeMs(url: String, referer: String? = null): Long {
+        val t0 = System.currentTimeMillis()
+        val b = Request.Builder().url(url)
+            .header("User-Agent", UA)
+            .header(
+                "Accept",
+                "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+            )
+        if (!referer.isNullOrBlank()) b.header("Referer", referer)
+        return try {
+            probeClient.newCall(b.build()).execute().use { r ->
+                val head = r.peekBody(1024).bytes()
+                if (r.isSuccessful && head.isNotEmpty()) System.currentTimeMillis() - t0 else -1L
+            }
+        } catch (e: Exception) {
+            -1L
+        }
+    }
+
     suspend fun get(
         url: String,
         referer: String? = null,

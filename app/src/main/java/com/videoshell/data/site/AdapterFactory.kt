@@ -55,9 +55,21 @@ import com.videoshell.data.model.SiteConfig
  * （`CryptFamily.State.Absent` 落盘）不该再被包一层只为读缓存的外壳 ——
  * 该规矩仍然生效，只是现在由 [SeedRouter] 的 `familyAbsent` 落点体现（Absent ⇒ 直接从 [HtmlAdapter] 起）。
  * v1.0.53 第一次改这一步时把它删掉了，是 `Family.java` 的 D4 源码守卫把它抓回来的。
+ *
+ * ## v1.0.67：进来先把"当前该用的地址"套上
+ *
+ * 站点可以带一串备用地址（[SiteConfig.mirrors]，域名轮换用），而**挑哪一个是运行时才知道的**
+ * （见 [MirrorRace]）。本函数必须保持同步、又在 15 处被调，所以做法是在**第一行**把参数换成
+ * [MirrorRace.withCached] 的结果：本会话已经挑好的活地址就换上，没挑过 / 没有备用地址就原样。
+ *
+ * 收口在这一处有个额外的好处：**下面每一条分支拿到的都是同一个地址** ——
+ * 白名单 / 家族缓存 / 配方 / 详情页拼接全都自动对齐，不会有"某一条分支还在用死域名"。
  */
 object AdapterFactory {
-    fun create(site: SiteConfig): SiteAdapter {
+    fun create(config: SiteConfig): SiteAdapter {
+        // ★ 域名轮换：优先用本会话已经赛马挑好的活地址（零网络；没得挑就原样返回）
+        val site = MirrorRace.withCached(config)
+
         // ① 加密接口站：白名单命中即生效（密钥与算法见 CryptRecipes 的实测表）
         CryptRecipes.forUrl(site.baseUrl)?.let { recipe ->
             return YeguoAdapter(site, recipe)

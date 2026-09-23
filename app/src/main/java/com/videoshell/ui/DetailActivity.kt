@@ -20,6 +20,7 @@ import com.videoshell.data.model.VideoDetail
 import com.videoshell.data.model.VideoItem
 import com.videoshell.data.net.NetLog
 import com.videoshell.data.site.AdapterFactory
+import com.videoshell.data.site.MirrorRace
 import com.videoshell.data.site.SiteAdapter
 import com.videoshell.databinding.ActivityDetailBinding
 import com.videoshell.player.PlayQueue
@@ -140,6 +141,12 @@ class DetailActivity : AppCompatActivity() {
         binding.pb.visibility = View.VISIBLE
         showState(null)
         lifecycleScope.launch {
+            // 域名轮换（v1.0.67）：进来第一件事是把地址定下来再重建适配器 ——
+            // 详情页的每个请求（详情 / 播放页抠链）都用 site.baseUrl 拼，
+            // 晚一步套上就等于整条链路还打在死域名上。
+            // 同一个地址时 withCached/of 是零成本的，重建一次适配器可以忽略。
+            val fresh = Store.find(this@DetailActivity, siteKey)
+            if (fresh != null) adapter = AdapterFactory.create(MirrorRace.of(fresh))
             val a = adapter ?: return@launch
             val res = runCatching { a.detail(id) }
             var d = res.getOrNull()

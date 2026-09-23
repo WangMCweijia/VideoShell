@@ -414,7 +414,10 @@ ok("★ 因此必须在 onConfigurationChanged 里重排列数",
 ok("★ railSites[0] == null 就是聚合（约定只在这一处建立）",
    "railSites.add(null)" in search_kt)
 ok("左栏第一项文案是聚合", "railNames.add(getString(R.string.search_rail_agg))" in search_kt)
-ok("起始选中：全站范围进来则取 0 号（聚合）", "wantAgg -> 0" in search_kt)
+# ⚠️ v1.0.67 起这两条的**字面量**变了：进入时那个局部量 `wantAgg` 并进了字段 `aggMode`
+#（聚合模式还要决定"左栏铺不铺站点格"，所以它得是字段）。要守的语义没变 —— 进来时
+# 若是全站范围（聚合）就选 0 号，否则定位到来时的那个站。
+ok("起始选中：聚合模式进来则取 0 号（聚合）", "aggMode -> 0" in search_kt)
 ok("起始选中：否则定位到来时的那个站", "found > 0 -> found" in search_kt)
 
 print("== H. 二级页列数（左栏吃掉宽度，不能沿用首页的 3 列） ==")
@@ -436,7 +439,14 @@ ok("★ 两个 TextView 都 duplicateParentState（chip_text 认的是控件自�
    rail_xml.count('android:duplicateParentState="true"') == 2)
 ok("选中态复用 bg_chip（它已有 state_selected = 品牌实心那一支）",
    'android:background="@drawable/bg_chip"' in rail_xml)
-ok("selected 设在根布局上", "b.root.isSelected = index == selected" in rail_kt)
+# v1.0.67 起左栏末尾多一格「显示全部」，它**不参与选中态** ⇒ 原表达式
+# `index == selected` 变成 `!isFooter && index == selected`。
+# 所以这里**别钉那个表达式**，钉它的语义：选中态设在**根布局**上，且两个子 TextView
+# 一个都没自己设 —— 设在子控件上会让 `duplicateParentState` 白设（这条是本次顺手加的）。
+ok("selected 设在根布局上（不是在两个子 TextView 上）",
+   "b.root.isSelected" in code(rail_kt)
+   and "b.tvRailName.isSelected" not in code(rail_kt)
+   and "b.tvRailCount.isSelected" not in code(rail_kt))
 ok("★ 计数用 notifyItemChanged（聚合逐站到达，整表刷新会闪）",
    "notifyItemChanged(index)" in body_of(code(rail_kt), "fun setCount("))
 ok("点击用 bindingAdapterPosition 并挡 NO_POSITION",

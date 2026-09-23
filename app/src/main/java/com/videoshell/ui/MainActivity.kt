@@ -36,6 +36,7 @@ import com.videoshell.data.pan.DriveStore
 import com.videoshell.data.pan.PanProviders
 import com.videoshell.data.pan.PanType
 import com.videoshell.data.site.Media
+import com.videoshell.data.site.MirrorRace
 import com.videoshell.data.site.SearchEngine
 import com.videoshell.data.site.SearchScope
 import com.videoshell.data.site.SiteDetector
@@ -620,6 +621,12 @@ class MainActivity : AppCompatActivity() {
         siteAdapter.defaultKey = Store.defaultKey(this).ifBlank { list.firstOrNull()?.key.orEmpty() }
         siteAdapter.submit(list)
         binding.tvEmpty.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+        // ★ 域名轮换（v1.0.67）：后台把这批站点的备用地址赛马一遍，挑出最快能用的那个。
+        //   放在这里是因为**首页一进来就会调它** —— 等用户点进某个站时，
+        //   "当前该用哪个地址"已经躺在会话缓存里了（[AdapterFactory] 会自己套上）。
+        //   ⚠️ 对没有备用地址的站点它**一个请求都不发**（见 MirrorRace.warmUp），
+        //   所以对现有用户是零开销。
+        MirrorRace.warmUp(list)
     }
 
     private fun setDefaultSite(site: SiteConfig) {
@@ -721,7 +728,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateDirectButton() {
         val url = binding.inputUrl.text.toString().trim()
-        binding.btnPlayDirect.visibility = if (Media.isDirect(url)) View.VISIBLE else View.GONE
+        // 一格里写了**多个网址**（v1.0.67）= 这是同一个站的几个入口，绝不是一条直链 ——
+        // 不排除的话，「直接播放」会拿着 "http://a/x.m3u8 http://b/y.m3u8" 这串东西去播。
+        val single = SiteDetector.splitUrls(url).size <= 1
+        binding.btnPlayDirect.visibility =
+            if (single && Media.isDirect(url)) View.VISIBLE else View.GONE
     }
 
     private fun detect() {
@@ -730,7 +741,7 @@ class MainActivity : AppCompatActivity() {
             toast(getString(R.string.err_empty_url))
             return
         }
-        if (Media.isDirect(url)) {
+        if (SiteDetector.splitUrls(url).size <= 1 && Media.isDirect(url)) {
             playDirect()
             return
         }
@@ -751,7 +762,11 @@ class MainActivity : AppCompatActivity() {
                 val added = Store.add(this@MainActivity, site)
                 refresh()
                 if (added) {
-                    toast("已适配：${site.name}")
+                    val n = site.mirrorList().size
+                    toast(
+                        if (n > 0) getString(R.string.site_added_mirrors, site.name, n)
+                        else "已适配：${site.name}"
+                    )
                     binding.inputUrl.setText("")
                     openSite(site)
                 } else {

@@ -18,6 +18,8 @@ import com.videoshell.data.model.VideoItem
 import com.videoshell.data.model.VideoRow
 import com.videoshell.data.site.AdapterFactory
 import com.videoshell.data.site.AggSearch
+import com.videoshell.data.site.MirrorRace
+import com.videoshell.data.site.RailGrowth
 import com.videoshell.data.site.SiteAdapter
 import com.videoshell.databinding.ActivitySearchBinding
 import com.videoshell.ui.adapter.SearchRailAdapter
@@ -41,6 +43,26 @@ import kotlinx.coroutines.launch
  *
  * `railSites[0] == null` 表示「聚合」（= 全部站源，[AggSearch]），之后依次是已保存站点。
  * 索引与 [SearchRailAdapter] 的位置一一对应 —— 计数回填也是按这个索引找位置的。
+ *
+ * ## v1.0.67：聚合模式下左栏**只显示有结果的站**，而且是随到达长出来的
+ *
+ * 用户的原话是「**没有结果的站源直接不在左侧显示，哪个站源出来了就展示哪一个站源，
+ * 后续出来的就增量展示**」。
+ *
+ * 于是左栏分成两种形态，由 [aggMode] 决定，**进入时就定死不再变**：
+ *
+ *  - **聚合模式**（从"全站"范围搜进来）：只铺「聚合」一格，其余站由 [revealRail]
+ *    在它返回时按需长出 —— 十个站里八个没货时，左栏就只剩两格，不再是一片空格子。
+ *    补救入口是末尾那格「显示全部」（[expandRail]）。
+ *  - **单站模式**：照旧铺满全部站点。那一栏的用途就是"这个站没有、换个站看看"
+ *    （v1.0.50 建这一页的全部理由），藏起来等于把功能删掉。
+ *
+ * 两件跟着来的事，缺一个就会出"看起来像坏了"的现象：
+ *
+ *  - **插入位置按站点顺序算**（[RailGrowth.insertAt]），不是按到达顺序 ——
+ *    否则同一个站在左栏与网格里的相对位置不一致，来回对照时会以为点错了；
+ *  - **[SearchRailAdapter.insert] 要同步右移选中下标** —— 新格插在选中格之前时，
+ *    "位置"变了而"身份"没变；不同步的症状是高亮跳到隔壁那个站上。
  *
  * ## 列数为什么是 2（横屏 4）而不是首页的 3 / 5
  *
@@ -122,6 +144,27 @@ class SearchActivity : AppCompatActivity() {
     private val railSites = ArrayList<SiteConfig?>()
     private val railNames = ArrayList<String>()
     private val railCounts = ArrayList<String?>()
+
+    /**
+     * 左栏是不是「聚合模式」（= 只显示有结果的站，随到达长出来）。
+     *
+     * **进入页面时定死**（`EXTRA_AGG`），之后不再变：它决定左栏是"按需长"还是"一次铺满"，
+     * 中途切换的话 [railSites] 里那些格子算谁的都说不清。
+     */
+    private var aggMode = false
+
+    /**
+     * 已保存站点的**快照**（顺序 = 站点顺序）。[railSites] 是它按需长出来的子集。
+     *
+     * 为什么要留一份全量：聚合模式下站没上栏不代表它不存在 —— [expandRail] 要靠它铺回全部，
+     * [revealRail] 也要靠它把 `SiteHits.key` 还原成可点的 [SiteConfig]。
+     * 每次都回读 `Store.sites()` 也行，但那样"搜索期间站点列表变了"会让同一趟搜索里的
+     * 顺序前后不一致。
+     */
+    private val allSites = ArrayList<SiteConfig>()
+
+    /** 左栏是否已经被「显示全部」展开过（展开是单向的，不收回） */
+    private var railExpanded = false
 
     private var selected = 0
 
@@ -228,19 +271,24 @@ class SearchActivity : AppCompatActivity() {
             }
         })
 
+        // ⚠️ **先说清这是哪种模式，再铺左栏**：聚合模式不铺站点格（见 [aggMode]）。
+        //    顺序写反的症状正是本版要改掉的那个 —— "聚合搜索的左栏仍然一次铺满"。
+        aggMode = intent.getBooleanExtra(EXTRA_AGG, false)
         buildRail()
+        railAdapter.onFooterClick = { expandRail() }
 
         // 起始选中哪一项：全站范围进来 ⇒ 聚合；否则 ⇒ 来时的那个站（找不到就取第一个站）
-        val wantAgg = intent.getBooleanExtra(EXTRA_AGG, false)
         val wantKey = intent.getStringExtra(EXTRA_SITE).orEmpty()
         val found = railSites.indexOfFirst { it?.key == wantKey }
         selected = when {
-            wantAgg -> 0
+            aggMode -> 0
             found > 0 -> found
             railSites.size > 1 -> 1
             else -> 0
         }
         railAdapter.submit(railNames, railCounts, selected)
+        // 左栏末尾那格「显示全部」不在这里收（[syncFooter] 只在"确实搜过之后"调）：
+        // 一进页面就摆一格"显示全部"，会让人以为"还没搜就已经被藏了东西"。
         load(1, false)
     }
 
@@ -257,17 +305,104 @@ class SearchActivity : AppCompatActivity() {
         railNames.clear()
         railCounts.clear()
         siteNames.clear()
+        allSites.clear()
         val sites = Store.sites(this)
+        allSites.addAll(sites)
         sites.forEach { siteNames[it.key] = it.name.ifBlank { Store.hostOf(it.baseUrl) } }
 
         railSites.add(null)                     // ← 「聚合」必须占 0 号位
         railNames.add(getString(R.string.search_rail_agg))
         railCounts.add(getString(R.string.search_rail_sites, sites.size))
+        // ★ v1.0.67：**聚合模式不铺站点格** —— 它们由 [revealRail] 在返回时按需长出来
+        //   （理由见类注释）。单站模式必须铺满：那一栏的用途就是"这个站没有、换个站看看"。
+        if (aggMode) return
         sites.forEach {
             railSites.add(it)
             railNames.add(it.name.ifBlank { Store.hostOf(it.baseUrl) })
             railCounts.add(null)                // 计数等搜出来再填
         }
+    }
+
+    /**
+     * 聚合流式：一个站返回时，左栏该不该为它长出一格（v1.0.67）。
+     *
+     * 三道门，缺一道都会出"看起来像坏了"的现象：
+     *  - **[aggMode]**：单站模式的左栏是一份固定名单，不该增删（见类注释）；
+     *  - **[RailGrowth.shouldShow]**：没内容的站（含失败站）不占格 —— 这是本版的核心诉求；
+     *  - **已在栏里就跳过**：用户点过「显示全部」之后，藏起来的站本来就都在栏里了。
+     *
+     * ⚠️ 与 [commitArrived] 不同，这里**不看 `paintSeq`**：左栏说的是"聚合这一趟哪些站有货"，
+     * 属于整趟搜索的公共信息，用户切到别的栏去看了也一样成立（[fillRailCount] 同理）。
+     */
+    private fun revealRail(h: AggSearch.SiteHits) {
+        if (!aggMode) return
+        if (!RailGrowth.shouldShow(h)) return
+        if (railSites.any { it?.key == h.key }) return
+        val s = allSites.firstOrNull { it.key == h.key } ?: return
+        val at = RailGrowth.insertAt(
+            allSites.map { it.key }, railSites.mapNotNull { it?.key }, h.key
+        )
+        insertRail(
+            at, s, s.name.ifBlank { Store.hostOf(s.baseUrl) },
+            getString(R.string.search_count, AggSearch.block(h).size)
+        )
+        syncFooter()
+    }
+
+    /**
+     * 运行期往左栏插一格 —— **数据与适配器一起动，这是唯一入口**。
+     *
+     * 分两处写的话，[railSites] 的下标与界面会在某次到达顺序下错开一格，
+     * 那是"点左边的站、右边显示的是另一个站"这类最难复现的 bug。
+     */
+    private fun insertRail(at: Int, s: SiteConfig, name: String, count: String?) {
+        val pos = at.coerceIn(0, railSites.size)
+        railSites.add(pos, s)
+        railNames.add(pos, name)
+        railCounts.add(pos, count)
+        railAdapter.insert(pos, name, count)
+    }
+
+    /** 收一下末尾那格「显示全部」：**有站被藏着才在**（判据在 [RailGrowth.needFooter]） */
+    private fun syncFooter() {
+        val need = RailGrowth.needFooter(
+            railSites.mapNotNull { it?.key }, allSites.map { it.key }
+        )
+        railAdapter.setFooter(if (need) getString(R.string.search_rail_show_all) else null)
+    }
+
+    /**
+     * 尾巴被点了：把藏起来的站全部铺回左栏（v1.0.67）。
+     *
+     * 这是**聚合模式下点回"没结果的站"的唯一入口** —— 少了它，那些站从此在这一页里
+     * 够不着，只能退出去重走"换默认站 → 再搜一遍"，也就是 v1.0.50 建这一页时要消灭的那几步。
+     *
+     * 走整表 [SearchRailAdapter.submit] 而不是逐个 insert：这是一次显式的展开动作，
+     * 一口气铺完最直观（逐个插会有 N 段动画），顺序也天然回到站点顺序。
+     * 已经搜到过的站把条数带上（[cache] 里有），没搜过的**留空** ——
+     * 那不是"0 条"，是"还没搜过"，写 0 就成了假结论。
+     */
+    private fun expandRail() {
+        if (railExpanded) return
+        railExpanded = true
+        val curKey = railSites.getOrNull(selected)?.key
+        railSites.clear()
+        railNames.clear()
+        railCounts.clear()
+        railSites.add(null)
+        railNames.add(getString(R.string.search_rail_agg))
+        railCounts.add(getString(R.string.search_rail_sites, allSites.size))
+        for (s in allSites) {
+            railSites.add(s)
+            railNames.add(s.name.ifBlank { Store.hostOf(s.baseUrl) })
+            railCounts.add(cache[s.key]?.count)
+        }
+        // ⚠️ 下标整体挪位了（原来在第 2 格的那个站现在可能在第 5 格）⇒ 按 **key** 重新定位，
+        //    绝不能沿用旧下标。聚合那格 key 为 null，0 号位永远是它。
+        selected = if (curKey == null) 0
+        else railSites.indexOfFirst { it?.key == curKey }.coerceAtLeast(0)
+        railAdapter.submit(railNames, railCounts, selected)
+        syncFooter()
     }
 
     /** 左栏下标 → 缓存键。**第 0 项是聚合**（[railSites] 里那一项为 null） */
@@ -331,8 +466,21 @@ class SearchActivity : AppCompatActivity() {
         binding.rvVideos.adapter = videoAdapter
     }
 
-    private fun adapterFor(s: SiteConfig): SiteAdapter =
-        adapters.getOrPut(s.key) { AdapterFactory.create(s) }
+    /**
+     * 取本站的适配器（同一站在一次会话里来回切时复用）。
+     *
+     * v1.0.67：先 [MirrorRace.of] 把地址定下来 —— 站点可以带一串备用地址，哪个快用哪个。
+     * 没有备用地址的站**零开销**（直接返回原地址，一个包都不多发）。
+     *
+     * ⚠️ 必须**先查缓存再走赛马**：`getOrPut` 的 lambda 不是 suspend 的，
+     * 所以这里展开成三步写；顺带避免"每次绑定都赛一次马"。
+     */
+    private suspend fun adapterFor(s: SiteConfig): SiteAdapter {
+        adapters[s.key]?.let { return it }
+        val a = AdapterFactory.create(MirrorRace.of(s))
+        adapters[s.key] = a
+        return a
+    }
 
     /**
      * 铺一整栏：网格 + 周边文字。**不动归属**，调用方决定要不要顺手推（见 [render]）。
@@ -447,6 +595,8 @@ class SearchActivity : AppCompatActivity() {
                 } else {
                     val res = runCatching { adapterFor(site).search(q, p) }
                     val items = res.getOrElse { emptyList() }
+                    // 失败 ⇒ 这次"哪个地址能用"的判断作废，下回重新赛马（域名轮换的自愈路径）
+                    if (res.isFailure) MirrorRace.invalidate(site)
                     if (append && items.isEmpty()) {
                         // 翻到底了：这一栏的状态不动，只提示一句
                         if (seq == paintSeq) {
@@ -490,13 +640,15 @@ class SearchActivity : AppCompatActivity() {
      * 插入位置由 [AggSearch.insertAt] 按**行**算），差别只在收尾 —— 这里只补字，
      * 不整表重铺（重铺会让所有封面重绑、集体闪一下）。
      *
-     * 每有一个站返回就做三件事，**顺序不能变**：
+     * 每有一个站返回就做四件事，**顺序不能变**：
      *
+     *  ⓪ [revealRail]：有内容的站才在左栏占一格（v1.0.67，本版新增）——
+     *     必须在 ① 之前，因为 ① 是"往已有的格子里填数字"，格子得先在；
      *  ① [fillRailCount]：把它的条数回填给左栏徽标；
      *  ② [prefill]：拿全了的站顺手存成单站缓存 ⇒ 之后点它就是零请求；
      *  ③ [commitArrived]：把它的那一块插进网格。
      *
-     * ①②与③刻意分开：①②**必须做**（用户切走了也做，回来就是现成的），
+     * ①②③与③刻意分开：①②③**必须做**（用户切走了也做，回来就是现成的），
      * ③只在"界面此刻还归这一轮"时做。①②反过来的话，预填刚写下的那些站会被回填
      * 当成"已有结果"跳过，徽标要等到点进去才有数字 —— 正是 v1.0.51 要消灭的等待。
      */
@@ -512,6 +664,7 @@ class SearchActivity : AppCompatActivity() {
         val hits = AggSearch.runStreaming(sites, q, 1) { i, h ->
             slots[i] = h
             arrived++
+            revealRail(h)
             fillRailCount(h)
             prefill(h, q)
             commitArrived(index, key, slots, i, h, arrived, sites.size, seq)
@@ -531,6 +684,9 @@ class SearchActivity : AppCompatActivity() {
             count = getString(R.string.search_count, n), state = msg, failures = f
         )
         remember(key, st)
+        // 左栏尾巴在这里**无条件**收一次：一个站都没出结果时它尤其重要 ——
+        // 那种情况下左栏只剩「聚合」，用户连站源名单都看不到，而那正是他最需要它的时候。
+        syncFooter()
         if (seq == paintSeq) {
             // 网格此刻装的就是 rows（逐块插出来的，与它逐行相同）⇒ 只补周边文字
             commitChrome(index, st)

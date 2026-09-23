@@ -15,6 +15,17 @@ import org.json.JSONObject
  * 识别顺序：
  *  1. 苹果CMS/海洋CMS 的标准 JSON / XML 采集接口（覆盖绝大多数视频站，识别后即完整可用）
  *  2. 都没有 -> 用通用 HTML 适配（尽力而为，配合嗅探播放）
+ *
+ * ## v1.0.67：一次可以给**多个网址**
+ *
+ * 影视站的域名会轮换，用户手上常有一串地址（潇洒 TVBox 本地包就是这么配的，
+ * 实测清单见 `docs/网盘站源清单.md`）。所以这里先 [splitUrls] 把输入拆开：
+ * **所有候选一起探首页**，最先拿到的那个（按列表顺序）当主地址，其余进
+ * [SiteConfig.mirrors]，运行时由 [MirrorRace] **并发赛马挑最快的**那个。
+ *
+ * 识别阶段为什么取"列表顺序里第一个成功的"而不是"最快的那个"：这一步只要求
+ * **找到一个能用的**；而"哪个最快"是运行时的事（那时候选已确定、比较才有意义）。
+ * 但探针本身是**并发**发出去的 —— 顺序里排第一的地址若是个死域名，用户不必先干等它超时。
  */
 object SiteDetector {
 
@@ -44,22 +55,29 @@ object SiteDetector {
     )
 
     suspend fun detect(rawInput: String): Result = withContext(Dispatchers.IO) {
-        val url = normalize(rawInput) ?: return@withContext Result(null, "网址格式不正确，请检查后重试", false)
-        val bases = buildBases(url)
-        if (bases.isEmpty()) return@withContext Result(null, "网址格式不正确，请检查后重试", false)
+        val raws = splitUrls(rawInput)
+        if (raws.isEmpty()) return@withContext Result(null, "网址格式不正确，请检查后重试", false)
 
-        // 1) 首页探活 + 取站点标题
-        var base = bases.first()
-        var homeHtml: String? = null
-        for (b in bases) {
-            val h = Http.getOrNull(b, referer = b, fast = true)
-            if (!h.isNullOrBlank()) {
-                homeHtml = h
-                base = b
-                break
-            }
+        // 所有输入 → 各自的 base 候选（深层页面会**多**产生一个 origin 候选），去重保序
+        val bases = LinkedHashSet<String>()
+        for (r in raws) {
+            val u = normalize(r) ?: continue
+            bases.addAll(buildBases(u))
         }
+        if (bases.isEmpty()) return@withContext Result(null, "网址格式不正确，请检查后重试", false)
+        val basesList = bases.toList()
+
+        // 1) 首页探活 + 取站点标题。
+        //    并发探、按**列表顺序**取第一个成功的（写法与下面第 2 步一致）：
+        //    死域名只要不是在最后，用户就不会为它多等一轮。
+        val probed = coroutineScope {
+            basesList.map { b -> async { b to Http.getOrNull(b, referer = b, fast = true) } }
+                .firstNotNullOfOrNull { p -> p.await().takeIf { !it.second.isNullOrBlank() } }
+        }
+        val base = probed?.first ?: basesList.first()
+        val homeHtml: String? = probed?.second
         val siteName = homeHtml?.let { titleOf(it) }.orEmpty().ifBlank { hostOf(base) }
+        val spare = spareOf(basesList, base)
 
         // 2) 并发探测采集接口
         val hit = coroutineScope {
@@ -85,7 +103,8 @@ object SiteDetector {
                 apiMode = mode,
                 fixedParams = p.fixed,
                 note = if (mode == SiteConfig.MODE_MACCMS_JSON) "苹果CMS JSON" else "苹果CMS XML",
-                createdAt = System.currentTimeMillis()
+                createdAt = System.currentTimeMillis(),
+                mirrors = spare
             )
             return@withContext Result(site, "识别成功：${p.label}（${p.path}）", true)
         }
@@ -99,7 +118,8 @@ object SiteDetector {
                 apiUrl = "",
                 apiMode = SiteConfig.MODE_HTML,
                 note = "HTML 通用适配",
-                createdAt = System.currentTimeMillis()
+                createdAt = System.currentTimeMillis(),
+                mirrors = spare
             )
             return@withContext Result(
                 site,
@@ -108,10 +128,41 @@ object SiteDetector {
             )
         }
 
-        Result(null, "未能识别为视频站。可点「用网页嗅探打开」直接嗅探播放。", false, pageUrl = url)
+        Result(null, "未能识别为视频站。可点「用网页嗅探打开」直接嗅探播放。", false, pageUrl = sniffTarget(rawInput))
     }
 
     // ---------------- 内部工具 ----------------
+
+    /**
+     * 把一段输入拆成多个网址（v1.0.67）。
+     *
+     * 分隔符取「换行 / 空格 / 制表符 / 中英文逗号 / 分号 / 竖线」—— 用户从清单里复制粘贴
+     * 过来时这几种都出现过。**去重保序**，空段丢掉。
+     *
+     * 不做"是不是合法网址"的过滤：那是 [normalize] 的事，两处各判一次只会多一个不一致点。
+     * 代价是"网址里带未编码逗号"的极端情况会被拆错 —— 影视站首页地址里不会出现它。
+     */
+    fun splitUrls(raw: String): List<String> =
+        raw.split(Regex("[\\s,，;；|]+")).map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+
+    /** 某个输入的第一个地址（给"不是视频站"时的嗅探兜底用） */
+    private fun sniffTarget(rawInput: String): String =
+        normalize(splitUrls(rawInput).firstOrNull().orEmpty()) ?: rawInput.trim()
+
+    /**
+     * 备用地址 = 探过的候选里**除选中那个之外**的（v1.0.67）。
+     *
+     * 按 host 去重：同一个 host 的深层页面（`/watch/1`）与它的 origin 是同一个入口，
+     * 都塞进备用列表只会让运行时白探一遍。
+     *
+     * 一条都没有时返回 **null** 而不是空列表：让"这个站有没有备用地址"在存储里
+     * 一眼可判，也免得给单地址的站在配置里留一个永远为空的字段。
+     */
+    private fun spareOf(bases: List<String>, chosen: String): List<String>? {
+        val ch = hostOf(chosen)
+        val out = bases.filter { it != chosen && hostOf(it) != ch }
+        return out.ifEmpty { null }
+    }
 
     private fun normalize(raw: String): String? {
         var s = raw.trim()

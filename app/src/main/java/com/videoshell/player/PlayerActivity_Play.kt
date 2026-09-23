@@ -71,6 +71,7 @@ import com.videoshell.data.net.NetLog
 import com.videoshell.data.pan.PanResolver
 import com.videoshell.data.site.AdapterFactory
 import com.videoshell.data.site.Media
+import com.videoshell.data.site.MirrorRace
 import com.videoshell.databinding.ActivityPlayerBinding
 import com.videoshell.ui.adapter.EpisodeAdapter
 import com.videoshell.ui.askDriveLogin
@@ -427,7 +428,10 @@ internal fun PlayerActivity.playEpisode(index: Int, autoHeal: Boolean = false) {
     lifecycleScope.launch {
         binding.pbBuffering.visibility = View.VISIBLE
         val r = runCatching {
-            if (site != null) AdapterFactory.create(site).resolve(ep)
+            // MirrorRace.of：站点若带备用地址，这里用"当前最快的那个"去解析集地址（v1.0.67）。
+            // **必须在 resolve 之前**：解析链里那些页面地址都是用 site.baseUrl 拼的，
+            // 挑出来的地址晚一步套上就等于这一整条链路还打在死域名上。
+            if (site != null) AdapterFactory.create(MirrorRace.of(site)).resolve(ep)
             else PanResolver.resolve(ep.url)
         }.getOrNull()
         binding.pbBuffering.visibility = View.GONE

@@ -3,7 +3,10 @@
     <string name="back">返回</string>
     <string name="source">播放源</string>
 
-    <string name="hint_url">输入视频站网址，例如 https://www.example.com</string>
+    <string name="hint_url">输入视频站网址，多个地址用空格隔开</string>
+    <!-- 一次粘了多个地址时用这句（v1.0.67）：让"备用地址真的被存下来了、会自动挑快的用"
+         这件事当场可见 —— 否则用户无从知道多填的那几个有没有生效。 -->
+    <string name="site_added_mirrors">已适配：%1$s（含 %2$d 个备用地址，会自动择优）</string>
     <string name="btn_detect">识别并适配</string>
     <string name="btn_play_direct">直接播放该直链</string>
     <string name="btn_sniff">网页嗅探</string>
@@ -411,6 +414,9 @@
     <string name="search_result_title">「%1$s」的结果</string>
     <string name="search_rail_agg">聚合</string>
     <string name="search_rail_agg_hint">全部站源</string>
+    <!-- 左栏末尾那格：把"没有结果所以没显示"的站源放回来（v1.0.67）。
+         字数必须短（栏宽只有 76dp，见 dimens/search_rail_w），所以不写"还有 N 个站源"。 -->
+    <string name="search_rail_show_all">显示全部</string>
     <string name="search_rail_sites">%1$d 站</string>
     <string name="search_count">%1$d 条</string>
     <string name="search_rail_tip">点左侧站源可切换查看该站的结果</string>
