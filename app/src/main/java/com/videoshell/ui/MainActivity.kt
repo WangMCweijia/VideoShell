@@ -1,8 +1,11 @@
 package com.videoshell.ui
 
 import android.content.Intent
+import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -12,6 +15,9 @@ import com.videoshell.App
 import android.graphics.drawable.LayerDrawable
 import androidx.activity.OnBackPressedCallback
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.doOnLayout
 import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.lifecycleScope
@@ -161,8 +167,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // ⚠️ 必须在 setContentView **之前**：让内容从第一帧起就按整屏布局。
+        //    放到后面的话开屏会先闪一下"内容被系统栏挤在里面"的样子。
+        applyEdgeToEdge()
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        applySystemBarInsets()
 
         // 版本号只在「我的」页展示一份 —— 顶部那行的版本号随整行一起去掉了（v1.0.26）
         binding.tvVersionMine.text = "v" + versionName()
@@ -285,7 +295,12 @@ class MainActivity : AppCompatActivity() {
         // 边缘折射层（v1.0.50）：透明度管"看得见背后"，这一层管"像不像玻璃"
         applyNavRefraction()
         setupBack()
-        showPage(PAGE_HOME)
+        // v1.0.64：这里原本是 showPage(PAGE_HOME) —— 只切页、**不刷 Dock 选中态**，
+        // 于是冷启动时首页那格没有任何选中视觉（既没琥珀也没胶囊），要等到
+        // 点一下别的 tab 再点回来才"活"过来。底栏选中态只有一个入口
+        // （selectTab），初始化也必须走它，否则那个"唯一入口"形同虚设。
+        // 首次进入不播切页动画这件事由 showPage 自己判断（currentPage == -1）。
+        selectTab(PAGE_HOME)
     }
 
     override fun onResume() {
@@ -382,6 +397,83 @@ class MainActivity : AppCompatActivity() {
         showPage(page)
     }
 
+    // ------------------------------------------------------------------ 系统栏（沉浸式，v1.0.64）
+
+    /**
+     * 让画布铺满整屏（edge-to-edge）。
+     *
+     * 修的是什么：用户原话「小白条没沉浸」。此前两条系统栏都不是"沉浸"，而是
+     * **各自填一条同色**：主题里 `statusBarColor = @color/bg`、
+     * `navigationBarColor = @color/bg_deep`，加上 decorFitsSystemWindows 默认 true，
+     * 内容被系统限制在两条系统栏之间。于是屏幕底部永远杵着一条独立色带
+     * （暖灰 bg_deep 压在暖纸 bg 之下，差一点点、而且不随内容滚动）——
+     * 那不是沉浸，是贴了条胶带。
+     *
+     * 沉浸 = 三件事同时做，缺一不可：
+     *   ① `setDecorFitsSystemWindows(false)` —— 内容按整屏布局，画布铺到屏幕边缘
+     *   ② 两条系统栏色置为**透明** —— 让画布自己透出来，不再叠一层人造色
+     *   ③ 关掉系统的"对比度护航"（API 29+ `*ContrastEnforced`）——
+     *      系统栏透明时系统会自作主张加一层半透明 scrim 兜底；不关掉的话 ①②
+     *      全白做，用户看到的仍是一条灰带（最常见的"改了没用"）
+     *
+     * ⚠️ 代价必须自己还：内容不再被系统让位，得手动吃 inset —— 见 [applySystemBarInsets]。
+     * ⚠️ 只在本 Activity 的 window 上做，**不写进 themes.xml**：主题是全局的，
+     *    另外几个 Activity（历史 / 收藏 / 投屏）没有配套的 inset 处理，
+     *    改成透明后它们的内容会直接钻进系统栏里，比现在更糟。
+     * ⚠️ 状态栏图标的明暗不在这里管：由 values-v23(-v27) / values-night-v23(-v27)
+     *    覆盖 windowLightStatusBar / windowLightNavigationBar 决定，切深浅色重建
+     *    Activity 时自动生效。这里再设一次反而会在两处打架。
+     */
+    private fun applyEdgeToEdge() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        @Suppress("DEPRECATION")
+        run {
+            window.statusBarColor = Color.TRANSPARENT
+            window.navigationBarColor = Color.TRANSPARENT
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isStatusBarContrastEnforced = false
+            window.isNavigationBarContrastEnforced = false
+        }
+    }
+
+    /** 底部系统栏（手势条 / 三键导航）高度；0 = 当前设备或模式没上报 */
+    private var navBarInset = 0
+
+    /**
+     * 把系统栏 inset 各自安排到该去的地方。
+     *
+     * 两边去向**不同**，这是刻意的：
+     *   顶部 → 根布局的 `paddingTop`。不给的话首页第一行（站源输入框）顶进状态栏里。
+     *   底部 → **不加 paddingBottom**，而是算进 Dock 的 `marginBottom`（见 [applyNavClearance]）。
+     *          画布要一路铺到屏幕底，导航栏区域露出的正是画布 —— 这才是"沉浸"的样子；
+     *          若给根布局加 paddingBottom，画布会提前截止，又变回一条色带。
+     *
+     * ⚠️ 只在值变了才写回：inset 回调在布局、旋转、切深浅色、软键盘弹出时都会重发，
+     *    无条件 setPadding 会把上层拖进「改 padding → 重布局 → 再分发」的回环。
+     * ⚠️ 必须返回 `insets` 本身而不是 CONSUMED：子 View 仍然需要知道系统栏在哪。
+     * ⚠️ API < 29 的手势导航**可能上报 0**（当时的系统不要求 app 处理底部），
+     *    此时退回原来的固定 10dp 间距 —— 观感与 v1.0.63 一致，不会更差。
+     */
+    private fun applySystemBarInsets() {
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            if (v.paddingTop != bars.top || v.paddingLeft != bars.left ||
+                v.paddingRight != bars.right
+            ) {
+                v.setPadding(bars.left, bars.top, bars.right, 0)
+            }
+            if (navBarInset != bars.bottom) {
+                navBarInset = bars.bottom
+                applyNavClearance()
+            }
+            insets
+        }
+        ViewCompat.requestApplyInsets(binding.root)
+    }
+
     // ------------------------------------------------------------------ 底部导航让位
 
     /**
@@ -401,7 +493,18 @@ class MainActivity : AppCompatActivity() {
     private fun applyNavClearance() {
         binding.bottomNav.doOnLayout { nav ->
             val gap = resources.getDimensionPixelSize(R.dimen.island_gap)
-            val pad = nav.height + gap * 2
+            // 底距 = 浮岛间距 + 系统栏高度（v1.0.64 沉浸式）：导航栏区域由此**露出画布**，
+            // 而不是被 Dock 压住（贴脸）或被一条人造色填掉（假沉浸）。
+            // 只在变了才写回 —— 这个函数会被 inset 回调反复调用（旋转/切深浅色/软键盘）。
+            val lp = nav.layoutParams as ViewGroup.MarginLayoutParams
+            val wantBottom = gap + navBarInset
+            if (lp.bottomMargin != wantBottom) {
+                lp.bottomMargin = wantBottom
+                nav.layoutParams = lp
+            }
+            // 内容让位要把系统栏一起算进去：Dock 是"浮"着的，
+            // 真正挡住内容的是 自身高度 + 上下两段间距 + 它下方的系统栏。
+            val pad = nav.height + gap * 2 + navBarInset
             browserHome.setBottomInset(pad)
             binding.rvSites.setPadding(
                 binding.rvSites.paddingStart,

@@ -154,10 +154,12 @@ ok("bg_glass_nav 仍带描边，且走 dock_stroke（v1.0.63 起描边极性随�
 
 
 def _lum(text, name):
-    """相对亮度（WCAG）。argb 拿到的是 ARGB，这里只看 RGB 通道。
+    """相对亮度（WCAG）。argb 拿到的是 ARGB，这里**只看 RGB 通道**（把 alpha 丢掉）。
 
-    带 alpha 的 Dock 底（暗色 #F212161D）按 95% 压在画布上估算时差异 < 1%，
-    直接当不透明处理不会影响判据，故不额外做合成。
+    ⚠️ 这个函数回答的是「这支色本身有多亮」，不是「它盖在什么上面看起来多亮」。
+       带 alpha 的 Dock 底压在**自家画布**上时差异 < 1%，当不透明处理不影响判据；
+       但压在**深色内容**上时完全不是一回事 —— 那种"最坏情况"必须合成，
+       见下面的 _mix_lum（v1.0.64 起 Dock 两主题都半透明，这条从"可选"变成"必须"）。
     """
     v = argb(text, name)
     if not v:
@@ -202,6 +204,112 @@ for _t, _tag in ((light, "亮色"), (dark, "暗色")):
         _r = _ratio(_t, _name, "dock_fill")
         ok("★ %s Dock %s色在自家底上过 AA 4.5:1（实测 %.2f:1）" % (_tag, _what, _r or 0),
            _r is not None and _r >= 4.5)
+
+
+def _mix_lum(text, name, over):
+    """把一支带 alpha 的色**合成到某个底色**上，返回合成后的相对亮度。
+
+    Dock 是浮层：内容会滚到它正后方，那时文字色的对比基准既不是"Dock 自身"
+    也不是"画布"，而是「alpha × 自身 + (1-alpha) × 背后内容」的合成色。
+    over 传 (r, g, b) 三元组。见 docs/PITFALLS.md §4.57。
+    """
+    v = argb(text, name)
+    if not v:
+        return None
+
+    def ch(c):
+        c = c / 255.0
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    a = v[0] / 255.0
+    return sum(w * ch(a * v[i] + (1 - a) * over[i - 1])
+               for w, i in ((0.2126, 1), (0.7152, 2), (0.0722, 3)))
+
+
+def _ratio_of(x, y):
+    hi, lo = max(x, y), min(x, y)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+# ---- v1.0.64 新增：Dock 的**透明度**本身也是不变量 ----
+# 用户反馈「tab 栏可以适当增加类似暗色模式下的透明效果」⇒ 从此「两个主题的
+# Dock 都是半透明的」是设计约束，不再是亮色侧的实现细节。不守住这条，
+# 下一个人很容易把亮色改回 #FFFFFFFF（全不透明）而没有任何东西报警。
+for _t, _tag in ((light, "亮色"), (dark, "暗色")):
+    _dv_a, _dv_b = alpha_of(_t, "dock_fill"), alpha_of(_t, "dock_fill_2")
+    ok("★ %s Dock 底是半透明（实测 alpha %.2f —— 这是「看得见背后」的前提）"
+       % (_tag, _dv_a or 0),
+       _dv_a is not None and _dv_a < 1.0)
+    # 下段（fill_2）**不允许比上段更实**：那会让 Dock 的下沿突然"变厚"，
+    # 从浮岛变成一块贴到底的板。两主题达标的方式不同，这里只锁结果：
+    #   亮色 = 下段再降 alpha（93% → 88%，越靠近内容越化开）
+    #   暗色 = alpha 持平，改用 RGB 压深（黑场上再降 alpha 会让浮岛边界消失）
+    ok("%s Dock 下段不比上段更实（下沿不能比上沿厚）" % _tag,
+       _dv_a is not None and _dv_b is not None and _dv_b <= _dv_a)
+ok("★ 亮色 Dock 下段确实更透（「越靠近内容越化开」是亮色的分层手段）",
+   (alpha_of(light, "dock_fill_2") or 9) < (alpha_of(light, "dock_fill") or 0))
+
+# 底一变透，对比基准就从"Dock 自身"变成"合成色"，而且**只测自家画布是不够的**：
+# Dock 是浮层，深色海报会整块滚到它正后方，那才是真正会砸锅的情况。
+# 这条不是补一条漂亮话 —— 它是"文字色必须跟着压深"的唯一依据：
+# 旧值 #64707F 4.31:1、#9E6709 4.08:1 都会被它当场抓住（v1.0.64 实测）。
+for _t, _tag in ((light, "亮色"), (dark, "暗色")):
+    _dv_base = _mix_lum(_t, "dock_fill", (0, 0, 0))
+    for _name, _what in (("dock_active", "选中"), ("dock_inactive", "未选中")):
+        _dv_L = _lum(_t, _name)
+        _dv_r = _ratio_of(_dv_base, _dv_L) \
+            if (_dv_base is not None and _dv_L is not None) else None
+        ok("★ %s Dock %s色在**最坏情况**（深色内容正从背后滚过）仍过 AA 4.5:1"
+           "（实测 %.2f:1）" % (_tag, _what, _dv_r or 0),
+           _dv_r is not None and _dv_r >= 4.5)
+
+print("== A3. 沉浸式系统栏 + Dock 初始选中态（v1.0.64 用户反馈）==")
+# 用户真机看到的两个现象：「小白条没沉浸」「冷启动时首页那格没有选中视觉」。
+# 两条都属于"没有守卫就会静默回来"的形态 —— 沉浸式少写一行也不报错，
+# 只是又变回一条色带；初始化走错入口也不报错，只是少一枚胶囊。
+# ⚠️ 一律用 code()（剥注释）判：这两件事在注释里被反复描述过，
+#    不剥的话"注释里提一句"就能假通过（§4.54 弱校验）。
+main_code = code(main_kt)
+ok("★ 开了 edge-to-edge（setDecorFitsSystemWindows(false) 是沉浸的前提）",
+   "WindowCompat.setDecorFitsSystemWindows(window, false)" in main_code)
+ok("★ 两条系统栏色都置为透明（否则还是「填一条同色」，不是沉浸）",
+   "window.statusBarColor = Color.TRANSPARENT" in main_code
+   and "window.navigationBarColor = Color.TRANSPARENT" in main_code)
+ok("★ 关掉系统自带的对比度护航（不关的话透明会被系统 scrim 盖掉 = 改了没用）",
+   "isStatusBarContrastEnforced = false" in main_code
+   and "isNavigationBarContrastEnforced = false" in main_code)
+
+_dv_insets = body_of(main_code, "fun applySystemBarInsets(")
+ok("★ 顶部 inset 加在根布局 paddingTop 上（否则首页首行顶进状态栏）",
+   "setPadding(bars.left, bars.top, bars.right, 0)" in _dv_insets)
+ok("★ 底部 inset 交给 Dock 的 marginBottom，**不加** paddingBottom"
+   "（画布要一直铺到屏幕底，这才是沉浸的样子）",
+   "navBarInset = bars.bottom" in _dv_insets and "applyNavClearance()" in _dv_insets)
+
+_dv_nav = body_of(main_code, "fun applyNavClearance(")
+ok("★ Dock 底距含系统栏高度（否则贴住/盖住手势条）",
+   "gap + navBarInset" in _dv_nav)
+ok("★ 内容让位也算上系统栏（少了它最后一行会被手势条压住）",
+   "gap * 2 + navBarInset" in _dv_nav)
+
+_dv_oncreate = body_of(main_code, "override fun onCreate(")
+# ⚠️ 这条断言踩了**两遍** vacuous，两次都是证伪实测抓出来的，很值得照抄：
+#    ① 判据写成 `"selectTab(PAGE_HOME)" in _dv_oncreate` ⇒ 恒真。因为 onCreate 里
+#       本来就有 `tabHome.setOnClickListener { selectTab(PAGE_HOME) }` ——
+#       收尾那行无论写 selectTab 还是 showPage，它都过。
+#    ② 改成"看末尾 8 个非空行" ⇒ 还是恒真。窗口太宽，**tabHome 那行点击回调
+#       正好落在倒数第 8 行以内**，又一次蒙对。
+#    要表达的是「**收尾那一步**是 selectTab」，所以窗口必须收到函数真正的收尾
+#    （现有实现就 2 行），并且先剔掉纯花括号行。见 §4.57 与 §4.45（判机制生效
+#    只看决策、不看结果；同理，判"某处调用了什么"必须钉住**位置**）。
+_dv_lines = [l.strip() for l in _dv_oncreate.splitlines()
+             if l.strip() and l.strip() not in ("{", "}")]
+_dv_tail = _dv_lines[-3:]
+ok("★ onCreate 收尾（最后 3 行代码）是 selectTab(PAGE_HOME)"
+   "（冷启动首页由此拿到选中视觉；写 showPage 就只剩切页、没有胶囊）",
+   any("selectTab(PAGE_HOME)" in l for l in _dv_tail))
+ok("★ onCreate 里不再有裸 showPage(PAGE_HOME)（那正是漏刷选中态的老写法）",
+   "showPage(PAGE_HOME)" not in _dv_oncreate)
 
 print("== B. 折射配色（UI 2.0「暗场 Spotlight」起退役）：三支棱色双主题全透明 ==")
 la, lb, lc = alpha_of(light, "glass_edge_a"), alpha_of(light, "glass_edge_b"), alpha_of(light, "glass_edge_c")

@@ -20,6 +20,10 @@
         <item name="android:colorBackground">@color/bg</item>
         <item name="colorError">@color/bad</item>
         <item name="android:windowBackground">@color/bg</item>
+        <!-- ⚠️ 这两条只对**没做沉浸的 Activity** 生效（历史 / 收藏 / 投屏等）。
+             MainActivity 在 onCreate 里把两个色都覆盖成透明了（applyEdgeToEdge）——
+             沉浸式下系统栏区域要露出画布，不能有人造色。
+             别看到这里写着 bg / bg_deep 就以为主界面还是"两条同色带"。 -->
         <item name="android:statusBarColor">@color/bg</item>
         <item name="android:navigationBarColor">@color/bg_deep</item>
         <item name="android:textColorPrimary">@color/text_primary</item>
