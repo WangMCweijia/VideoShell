@@ -623,8 +623,10 @@
              bg_nav_item 与 nav_item 两个 selector 都改判 state_selected）。
              材质也一并换了：亮色 Dock 由"白面板"改为"墨岛"（dock_* Token）——
              白 Dock 压暖纸画布永远只是一块白，层次只能靠材质对比一次拉满。
-             ⚠️ @menu/menu_main 自本版起不再被引用（文件保留以便回退），
-             资源收缩会把它从包里剔除。 -->
+             ⚠️ @menu/menu_main 自本版起不再被引用（文件保留以便回退）。
+             发包实测：zip 里 res/menu 条目已被资源收缩剔除，但 resources.arsc 的
+             字符串池仍残留 "menu_main" 这个名字（字符串池不做逐条回收）——
+             别据此以为"文件还在包里"。 -->
         <LinearLayout
             android:id="@+id/bottomNav"
             android:layout_width="match_parent"
