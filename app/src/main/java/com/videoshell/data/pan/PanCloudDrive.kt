@@ -852,7 +852,7 @@ class PanCloudDrive private constructor(
             // 只剩一句"分享已失效"，而链路上 5 个端点（取分享令牌/列目录/转存/等任务/取播放入口）
             // 都可能报它，等于又回到"只好再扒一遍 bundle"。
             deadEnvelope(code, msg) ->
-                PanError.Dead("分享已失效$stepAt()（code $code：$msg）")
+                PanError.Dead("分享已失效${stepAt()}（code $code：$msg）")
             // 信封自称 404 却没说是"没了"：按"接口异常"处理，**不断言原因**，只给动作
             status == 404 ->
                 PanError.Broken("${type.label}接口信封回 404 / code $code：$msg（未识别的 404，可重试）")

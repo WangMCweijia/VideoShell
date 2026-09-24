@@ -627,8 +627,13 @@ public class PanLinkTest {
         int deadAt = pcdCode == null ? -1 : pcdCode.indexOf("PanError.Dead(");
         String deadTail = deadAt < 0 ? ""
                 : pcdCode.substring(deadAt, Math.min(pcdCode.length(), deadAt + 120));
+        // ⚠️ 必须断 `${stepAt()}`（**带花括号的调用**），不能只断 `stepAt()`：
+        //    Kotlin 的 `$stepAt()` 里 `$stepAt` 只是个**变量引用**、`()` 是字面量文本
+        //    ⇒ 编译不过（`e: Function invocation 'stepAt()' expected`）。而 `contains("stepAt()")`
+        //    对**两种写法都成立** —— v1.0.74 首轮就是这样"守卫全绿、Build APKs 红"，
+        //    成了一条只会粉饰的恒真断言（见 docs/PITFALLS.md §4.74）。
         ok("E19 Dead 文案必须带「哪一步」+ 信封 code（终态不重试 ⇒ 文案是唯一的定位线索）",
-                deadTail.contains("stepAt()") && deadTail.contains("code $code"),
+                deadTail.contains("${stepAt()}") && deadTail.contains("code $code"),
                 "Dead 文案退回成只说「分享已失效」⇒ 5 个端点都会报它，用户截回来也定位不了");
         ok("E19b 解析失败要落 PlayLog（站点自检的报告尾部会带上它 —— 「某一部」唯一的出口）",
                 plCode != null && plCode.contains("PlayLog.record(\"✗ 解析失败：${r.message}\")"),
