@@ -83,6 +83,12 @@ object HtmlTemplates {
         Regex("vodtype/(\\d+)"),
         Regex("vod/type/id/(\\d+)"),
         Regex("type/id/(\\d+)"),
+        // v1.0.68（E48 补）：listCandidates 里有 `index.php/vod/show/id/{id}/page/{page}.html`
+        // 这条模板，但反向提 id 的表漏了它 —— 形状不对称 ⇒ 该形状的站从首页
+        // href 里永远提不出分类 id，分类页一条都点不出来。与 detail 的 vodshow 同理，
+        // `show/id/` 放在 `vodshow/id/` 之后：先长后短，避免子串抢匹配。
+        Regex("vod/show/id/(\\d+)"),
+        Regex("show/id/(\\d+)"),
         Regex("vod/list/(\\d+)"),
         Regex("/list/(\\d+)"),
         Regex("/type/(\\d+)"),

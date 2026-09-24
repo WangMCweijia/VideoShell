@@ -188,13 +188,46 @@ object SiteDetector {
         return out.filter { it.length > 8 }.toList()
     }
 
-    private fun hostOf(url: String): String =
-        Regex("^https?://([^/]+)", RegexOption.IGNORE_CASE).find(url)?.groupValues?.get(1).orEmpty()
-
     private fun titleOf(html: String): String {
         val m = Regex("<title[^>]*>([\\s\\S]*?)</title>", RegexOption.IGNORE_CASE).find(html) ?: return ""
-        return stripHtml(m.groupValues[1]).replace(Regex("\\s+"), " ").trim().take(30)
+        return cleanSiteName(stripHtml(m.groupValues[1]).replace(Regex("\\s+"), " ").trim())
     }
+
+    /**
+     * 站名净化（v1.0.68，E49）：别把站长的反爬牢骚当站名。
+     *
+     * 实测（2026-09-24，网盘站族大巡查）：这一族站长爱把牢骚写进 `<title>` ——
+     * 「再见，我们跑路了」（木偶）、「随机接口纯自用，求大佬们别爬了」（快映）、
+     * 「自用求大佬不要爬！」（蜡笔）、「网站关闭」（欧哥）—— 而站本身**活得好好的**
+     * （首页 2000+ 卡片）。旧逻辑原样采纳 ⇒ 用户在站点列表里看到的是
+     * 「跑路了」「已关站」，以为站全死了（实际是我们/网络的问题）。
+     *
+     * 做法：按标点与空白**切子句**，含牢骚词的子句整段剔除；剔完为空 ⇒ 返回空串，
+     * 调用方回落 `hostOf(base)` —— 一个朴素的域名比一句「跑路了」诚实得多。
+     * 词表刻意收窄（「跑路/别爬/关站/自用/再见…」在正经站名里几乎不出现），
+     * **不写域名白名单**：判据是词汇形状，换域名的站照样命中。
+     *
+     * ⚠️ 必须 public + `@JvmOverloads`：`internal` 在 JVM 侧有名字修饰、
+     * 且 Kotlin 默认参数对 Java 不可见 —— 守卫 harness（Java）要直接调它。
+     */
+    @JvmOverloads
+    fun cleanSiteName(raw: String, hostFallback: String = ""): String {
+        if (raw.isBlank()) return hostFallback
+        val gripes = listOf(
+            "跑路", "别爬", "不要爬", "勿爬", "禁止爬", "关站", "网站关闭", "关闭",
+            "自用", "再见", "断更", "失联", "停止运营", "停止更新", "求大佬"
+        )
+        val kept = raw.split(Regex("[，,。！!？?；;|·…\\-—\\s]+"))
+            .filter { p ->
+                val t = p.trim()
+                t.isNotEmpty() && gripes.none { t.contains(it) }
+            }
+        val name = kept.joinToString(" ").trim().take(30)
+        return name.ifBlank { hostFallback }
+    }
+
+    internal fun hostOf(url: String): String =
+        Regex("^https?://([^/]+)", RegexOption.IGNORE_CASE).find(url)?.groupValues?.get(1).orEmpty()
 
     private fun classify(body: String): String? {
         val t = body.trim()

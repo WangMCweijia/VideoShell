@@ -289,8 +289,11 @@ public class Bs4 {
                 BASE + "/api.php/provide/vod/", SiteConfig.MODE_MACCMS_JSON, "at=json", "", 0L);
 
         RecipeStore.INSTANCE.clear(BASE);
-        ok("未校准的采集接口站点 -> MaccmsAdapter",
-                AdapterFactory.INSTANCE.create(maccms) instanceof MaccmsAdapter);
+        // v1.0.68（E48）：④ 不再裸返回 MaccmsAdapter —— 接口死了要能回落 HTML
+        //（死锁：apiUrl 落盘 + 站方关接口 ⇒ 静默空 ⇒ 兜底链/自证永远走不到）。
+        // 守卫从"类型是 MaccmsAdapter"改成"类型是回落包装（内含接口链）"。
+        ok("未校准的采集接口站点 -> MaccmsFallbackAdapter（接口链 + HTML 回落）",
+                AdapterFactory.INSTANCE.create(maccms) instanceof MaccmsFallbackAdapter);
 
         RecipeStore.INSTANCE.save(BASE, new SiteRecipe(
                 SiteRecipe.VER, true, BASE + "/bspvd/{id}.html", BASE + "/bspvp/{id}-1-1.html",
@@ -307,8 +310,8 @@ public class Bs4 {
         RecipeStore.INSTANCE.save(BASE, new SiteRecipe(
                 SiteRecipe.VER, true, BASE + "/bspvd/{id}.html", null,
                 null, null, null, null, /*homeCat*/ null, null, /*learnedCatAt*/ 0L, 0L, null, 0L));
-        ok("只有自动学习的配方（calibAt=0）-> 仍按 apiMode 走 MaccmsAdapter",
-                AdapterFactory.INSTANCE.create(maccms) instanceof MaccmsAdapter);
+        ok("只有自动学习的配方（calibAt=0）-> 仍按 apiMode 走接口链（现带回落包装）",
+                AdapterFactory.INSTANCE.create(maccms) instanceof MaccmsFallbackAdapter);
         ok("apiUrl 为空的站点 -> 走网页解析（原有行为不变）",
                 worksAs(AdapterFactory.INSTANCE.create(new SiteConfig("k2", "站2", BASE, "",
                         SiteConfig.MODE_MACCMS_JSON, "", "", 0L)), HtmlAdapter.class));

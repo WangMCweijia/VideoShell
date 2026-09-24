@@ -100,11 +100,13 @@ object AdapterFactory {
 
         // ④ 站点自己的采集接口：有自己的原生数据源，不参与家族探测
         //    （⚠️ `apiUrl` 为空一律走 HTML —— 见文件头的说明）
+        //    v1.0.68：JSON 接口套一层回落（E48）—— 接口被站方关掉后 `apiUrl` 还躺在
+        //    老配置里，裸 [MaccmsAdapter] 会静默空且兜底链永远走不到（自证死锁）。
         if (!calibrated && site.apiUrl.isNotBlank()) {
             when (site.apiMode) {
                 SiteConfig.MODE_MACCMS_XML -> return MaccmsXmlAdapter(site)
                 SiteConfig.MODE_HTML -> Unit
-                else -> return MaccmsAdapter(site)
+                else -> return MaccmsFallbackAdapter(site)
             }
         }
 

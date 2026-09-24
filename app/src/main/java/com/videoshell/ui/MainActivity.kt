@@ -617,7 +617,7 @@ class MainActivity : AppCompatActivity() {
     // ------------------------------------------------------------------ 站源管理
 
     private fun refresh() {
-        val list = Store.sites(this)
+        val list = sanitizeNames(Store.sites(this))
         siteAdapter.defaultKey = Store.defaultKey(this).ifBlank { list.firstOrNull()?.key.orEmpty() }
         siteAdapter.submit(list)
         binding.tvEmpty.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
@@ -627,6 +627,26 @@ class MainActivity : AppCompatActivity() {
         //   ⚠️ 对没有备用地址的站点它**一个请求都不发**（见 MirrorRace.warmUp），
         //   所以对现有用户是零开销。
         MirrorRace.warmUp(list)
+    }
+
+    /**
+     * 站名自愈（v1.0.68，E49）：老配置里存下的站名可能是站长的反爬牢骚
+     * （「再见，我们跑路了」「求大佬们别爬了」—— 站明明活着）。识别层已经净化
+     * （[SiteDetector.cleanSiteName]），但**落盘的旧名字不会自己变** ⇒ 在首页刷新时
+     * 顺手把可净化的存量名字修掉并回写。词表窄 ⇒ 正常站名（「玩偶哥哥网盘站」）
+     * 逐字节不变；只有真含牢骚词的名字会被改写。
+     */
+    private fun sanitizeNames(list: MutableList<SiteConfig>): List<SiteConfig> {
+        var changed = false
+        val out = list.map { s ->
+            val c = SiteDetector.cleanSiteName(s.name, SiteDetector.hostOf(s.baseUrl))
+            if (c.isNotBlank() && c != s.name) {
+                changed = true
+                s.copy(name = c)
+            } else s
+        }
+        if (changed) Store.save(this, out)
+        return out
     }
 
     private fun setDefaultSite(site: SiteConfig) {
