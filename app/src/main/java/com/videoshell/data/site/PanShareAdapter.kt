@@ -8,6 +8,7 @@ import com.videoshell.data.model.SiteConfig
 import com.videoshell.data.model.VideoDetail
 import com.videoshell.data.model.VideoItem
 import com.videoshell.data.pan.PanLink
+import com.videoshell.data.pan.PanProviders
 import com.videoshell.data.pan.PanResolver
 import com.videoshell.util.resolveUrl
 import kotlinx.coroutines.CancellationException
@@ -126,7 +127,27 @@ class PanShareAdapter(
             null
         }
         if (normal != null) {
-            // 它成功了 ⇒ 至少"详情页有可解析的分集锚点"，所以不是这一族。
+            // ⚠️ 「原链路成功」**不再是**"这一页不是网盘分享页"的证据。
+            //
+            // 它还可能只是**兜底**：认不出容器结构时，`HtmlExtractor` 会把页面上所有像播放
+            // 地址的链接兜成一条「默认线路」（`HtmlExtractor.FALLBACK_LINE`）。木偶站的
+            // 详情页里有个「立刻播放」锚点，于是**每个标题**都"成功"返回一条播不了的
+            // 「默认线路 · 1 集」，而它真正的线路（夸克/UC/百度分享链接）一条都走不到 ——
+            // 真机症状就是「木偶全部无法播放」（见 docs/PITFALLS.md E54）。
+            //
+            // 判据用**决策标记** `lastDetailFlatFallback`，不是"结果像不像分集" ——
+            // 后者会随着主题变化漂移，而"这次走了兜底"是代码里确定的事实。
+            val doc = html.lastDetailDoc
+            if (html.lastDetailFlatFallback && doc != null && PanShareExtract.isPanSharePage(doc)) {
+                claim(id, doc, page = doc.outerHtml(), where = "原链路只兜底出「默认线路」的候选页")
+                    ?.let { return it }
+                // 认领失败（是网盘页，但一条线路都没展开出来）时**不能**回落那条假线路：
+                // 它播不了，而"详情页看着有内容"只会掩盖真正的失败原因。
+                throw IOException(panDiag.ifBlank { "网盘线路解析失败：${PanResolver.lastNote}" })
+            }
+            // 真的解析出了分集（模板命中 / 播放页兜底拿到多集）⇒ 至少说明它有可解析的
+            // 分集锚点，所以不是这一族。混合站（既有真分集又挂网盘链接）落到这里，那是**对的**：
+            // 否定只关掉"抄近路"，关不掉"原链路失败才认领"那条兜底。
             PanShareFamily.markAbsent(site.baseUrl)
             return normal
         }
@@ -190,13 +211,21 @@ class PanShareAdapter(
 
         // ⚠️ "线路数"要按**真展开出来的**算：全是兜底时写 "✓ 1 条线路（1 集）"，
         //    等于把一次失败伪装成成功 —— 自检里就再也看不出问题（2026-09-24 修）。
-        panDiag = if (built.expanded == 0) {
-            "⚠️ 网盘分享页 $where：一条线路都没展开出来（只有兜底集，点它会重试）｜" +
-                    PanResolver.lastNote + "｜判据：" + PanShareExtract.evidence(doc, page)
-        } else {
-            "✓ 网盘分享页 $where → ${built.groups.size} 条线路 " +
-                    "（${built.groups.sumOf { it.episodes.size }} 集）｜判据：" +
-                    PanShareExtract.evidence(doc, page)
+        //    另外要**把"这个盘还没做"和"这个盘的分享/接口出了问题"分开**：前者不是故障，
+        //    用户该做的是别选那条线路；后者才需要我们留痕（E54）。
+        val allUnsupported = built.unsupported == built.groups.size
+        panDiag = when {
+            built.expanded > 0 ->
+                "✓ 网盘分享页 $where → ${built.groups.size} 条线路 " +
+                        "（${built.groups.sumOf { it.episodes.size }} 集）｜判据：" +
+                        PanShareExtract.evidence(doc, page)
+            allUnsupported ->
+                "⚠️ 网盘分享页 $where：${built.groups.size} 条线路都是**尚未支持的网盘**" +
+                        "（P0 只做了夸克/UC）—— 站点结构没问题，是适配没做｜判据：" +
+                        PanShareExtract.evidence(doc, page)
+            else ->
+                "⚠️ 网盘分享页 $where：一条线路都没展开出来（只有兜底集，点它会重试）｜" +
+                        PanResolver.lastNote + "｜判据：" + PanShareExtract.evidence(doc, page)
         }
         PanShareFamily.markHit(site.baseUrl)
         return html.buildDetail(id, doc, built.groups)
@@ -221,11 +250,12 @@ class PanShareAdapter(
      */
     private suspend fun buildPanGroups(doc: Document): PanGroups {
         val links = PanShareExtract.shareLinks(doc)
-        if (links.isEmpty()) return PanGroups(emptyList(), 0)
+        if (links.isEmpty()) return PanGroups(emptyList(), 0, 0)
         val names = PanShareExtract.lineNames(doc)
         val used = HashMap<String, Int>()
         val out = ArrayList<PlayGroup>()
         var expanded = 0
+        var unsupported = 0
 
         for ((i, u) in links.withIndex()) {
             val link = PanLink.parse(u) ?: continue
@@ -235,24 +265,33 @@ class PanShareAdapter(
             // 同名线路（玩偶站实测两条都叫"夸克网盘"）加序号区分，否则界面上两个 tab 一模一样
             if (n > 1) name = "$name $n"
 
+            val supported = PanProviders.of(link.type).supported
+            if (!supported) unsupported++
             val ex = PanResolver.episodes(link)
             if (ex.episodes.isEmpty()) continue
             if (ex.expanded) expanded++
             // ⚠️ 兜底那一集**不是**"1 集"：它是「打开分享（未展开）」，写成"（1 集）"
             //    会把一次失败伪装成一次成功 —— 用户看到"夸克（1 集）"点进去才发现不对劲。
             //    说成"（未展开）"，用户至少知道点它是"重试"（2026-09-24 修）。
+            //    而未实现的盘（115/百度…）连"重试"都不该提 —— 那一集的名字里已经写着
+            //    「XX（暂不支持）」，再叠一个"（未展开）"只会让用户去点它（E54）。
             val suffix = when {
+                !supported -> ""
                 !ex.expanded -> "（未展开）"
                 ex.truncated -> "（已截断）"
                 else -> "（${ex.episodes.size} 集）"
             }
             out.add(PlayGroup(name + suffix, ex.episodes))
         }
-        return PanGroups(out, expanded)
+        return PanGroups(out, expanded, unsupported)
     }
 
-    /** [buildPanGroups] 的汇总：[groups] 交给 UI，[expanded] = 真展开出来的线路条数（0 ⇒ 全是兜底） */
-    private class PanGroups(val groups: List<PlayGroup>, val expanded: Int)
+    /**
+     * [buildPanGroups] 的汇总：[groups] 交给 UI；[expanded] = 真展开出来的线路条数
+     * （0 ⇒ 全是兜底）；[unsupported] = 其中"这个盘我们还没做"的条数（用于把
+     * "站点结构没问题、是适配没做"与"这个盘的分享/接口出问题了"在诊断里分开）。
+     */
+    private class PanGroups(val groups: List<PlayGroup>, val expanded: Int, val unsupported: Int)
 
     // ------------------------------------------------------------------ 契约（其余全部委托）
 

@@ -18,17 +18,27 @@ import java.util.Map;
  *
  *  - v1.0.69 / E50「直链 403」：媒体凭据合成（{@link PanCloudDrive#mediaCookie}）
  *    + 403 自愈判域（{@link PanResolver#isPanMediaUrl}）；
- *  - v1.0.70 / E51「选集不显示 / 分享已失效」：HTTP 状态码归类（{@link PanCloudDrive#errorForHttp}）。
+ *  - v1.0.70 / E51「选集不显示」：HTTP 状态码归类（{@link PanCloudDrive#errorForHttp}）；
+ *  - v1.0.71 / E52「取流 404」：取流请求体形状（`resolutions` 复数 + `supports`）；
+ *  - **v1.0.72 / E54「个别剧集播不了 + 整站播不了」**：Dead 的判据改成
+ *    {@link PanCloudDrive#deadEnvelope}（**按服务端信封说的那句**）。
  *
- * ## E 组为什么是这一版最值钱的断言
+ * ## E 组为什么是这两版最值钱的断言
  *
  * 真机把一条**活着的**分享报成"分享链接已失效"，靠的就是 `404 -> PanError.Dead` 这条归因。
- * 它错在两层：
- *  ① 事实层：分享被删时夸克回的是 HTTP **200 + 信封 code:41006**（P0 实测表），而
- *     `file/v2/play` 这些端点匿名打是 **401**（2026-09-24 免凭据探针）—— 端点压根没消失；
- *  ② 语义层：**Dead 是终态**（提示换线路、不再重试）。把可重试的"这次请求被拒"判成终态，
- *     用户唯一能得到的结论就是一个**错误的方向**。
- * ⇒ 所以这里钉一条**全量**断言：任何 HTTP 状态码都不产生 Dead。
+ * 于是一整条被反转：**任何 HTTP 状态码都不产生 Dead**，404 的文案还写死了
+ * 「不是分享失效」。这条反转**又被真机证伪了一次**（同一个"404"）：
+ *
+ * | 服务端原话 | HTTP | code | 谁在说 |
+ * |---|---|---|---|
+ * | `分享地址已失效` | 404 | 41011 | 夸克，分享被删/取消 |
+ * | `文件不存在` | 404 | 41004 | 夸克，分享根指向的东西没了 |
+ * | `分享不存在` | 404 | 41006 | 夸克，id 本身不存在 |
+ * | `分享不存在` | **403** | 41027 | **UC**（所以 403 也不能默认当"要登录"） |
+ *
+ * ⇒ 两次翻车的共同点是**想用一个 HTTP 状态码回答一个状态码回答不了的问题**。
+ * 现在的纪律：**归因只看服务端信封里说的那句**（J 组），状态码只在"服务端一个字都没说"
+ * 时兜底（E 组），且兜底文案**不许断言任何一端**、必须给出可执行动作。
  */
 public class PanMediaCookieTest {
 
@@ -166,16 +176,25 @@ public class PanMediaCookieTest {
                 !PanResolver.isPanMediaUrl("https://evildrive.quark.cn.example.com/a.m3u8"), "");
         ok("D8 空串/null 拒绝", !PanResolver.isPanMediaUrl("") && !PanResolver.isPanMediaUrl(null), "");
 
-        System.out.println("-- E. HTTP 状态码归类：Dead 只留给信封 41006 --");
-        ok("E1 404 ⇒ 归到 Broken（真凶：原归因把可重试的问题判成终态）",
+        System.out.println("-- E. HTTP 状态码归类（**兜底**：服务端一个字都没说时才轮到它） --");
+        ok("E1 404 ⇒ 归到 Broken，不是 Dead（终态语义不能被状态码冒充）",
                 PanCloudDrive.errorForHttp(404, PanType.QUARK) instanceof PanError.Broken,
                 PanCloudDrive.errorForHttp(404, PanType.QUARK).getMessage());
-        ok("E2 404 文案必须自己说清「不是分享失效」",
-                PanCloudDrive.errorForHttp(404, PanType.QUARK).getMessage().contains("不是分享失效"),
-                PanCloudDrive.errorForHttp(404, PanType.QUARK).getMessage());
+        // ★ E2 是 v1.0.72 改掉的一条断言：它原先要求 404 文案**写死**「不是分享失效」——
+        //   而实测 404 恰恰就是"分享已失效/文件不存在"的形状（41011 / 41004）。
+        //   没有服务端的话时，唯一诚实的话是"不知道" + "该怎么办"。
+        String m404 = PanCloudDrive.errorForHttp(404, PanType.QUARK).getMessage();
+        ok("E2 404 文案不许断言任何一端（既不说「失效」也不说「不是失效」）",
+                !m404.contains("失效"), m404);
+        ok("E2b 404 文案必须给出可执行动作（重试 / 换线路）",
+                m404.contains("重试") && m404.contains("换线路"), m404);
+        ok("E2c 404 文案必须带上「哪一步」（否则用户给了完整自检，我们仍不知道是哪个接口）",
+                PanCloudDrive.errorForHttp(404, PanType.QUARK, "取分享令牌").getMessage()
+                        .contains("取分享令牌"),
+                PanCloudDrive.errorForHttp(404, PanType.QUARK, "取分享令牌").getMessage());
         ok("E3 401 ⇒ NeedLogin（要能引导去「网盘账号」重登）",
                 PanCloudDrive.errorForHttp(401, PanType.QUARK) instanceof PanError.NeedLogin, "");
-        ok("E4 403 ⇒ NeedLogin（与 E50 的媒体域 403 区分：那是分片，这是接口）",
+        ok("E4 403（**没有信封时**）⇒ NeedLogin 兜底；有信封时由信封说了算（见 J 组）",
                 PanCloudDrive.errorForHttp(403, PanType.QUARK) instanceof PanError.NeedLogin, "");
         ok("E5 500/503 ⇒ Broken（服务端错误，可稍后重试）",
                 PanCloudDrive.errorForHttp(500, PanType.QUARK) instanceof PanError.Broken
@@ -185,8 +204,9 @@ public class PanMediaCookieTest {
         ok("E7 UC 走同一套（同后端）且文案带品牌",
                 PanCloudDrive.errorForHttp(404, PanType.UC).getMessage().contains("UC"), "");
         // ★ 全量：100..599 里**没有任何**状态码会产生 Dead。
-        //   这是「Dead 是终态、不能由 HTTP 状态码冒充」这条纪律的机器化表达：
+        //   这是「Dead 是终态、只能由服务端信封说了算」这条纪律的机器化表达：
         //   以后谁再写 `某状态码 -> PanError.Dead(...)`，这条立刻红。
+        //   （注意它守的是**兜底函数**；信封那条路在 J 组。）
         List<Integer> deadFromHttp = new ArrayList<>();
         for (int c = 100; c <= 599; c++) {
             if (PanCloudDrive.errorForHttp(c, PanType.QUARK) instanceof PanError.Dead) {
@@ -203,9 +223,9 @@ public class PanMediaCookieTest {
                 "app/src/main/java/com/videoshell/data/pan/PanCloudDrive.kt"));
         ok("F0 源码读得到（路径/编码没变）", pcd != null && pcd.length() > 1000,
                 pcd == null ? "读不到" : (pcd.length() + " 字符"));
-        // 否定断言必须能证明"被否定的东西确实不在"，且正例仍在（否则可能是文件读错/被剥空）
-        ok("F1 剥注释后仍含正例 `code == 41006`（说明剥注释没把真代码吃掉）",
-                pcd != null && pcd.contains("code == 41006"), "");
+        // 正例锚点：**剥注释后**必须还能看到真实判定代码（否则下面的否定断言可能只是"文件被剥空了"）
+        ok("F1 剥注释后仍含正例 `deadEnvelope(code, msg)`（说明剥注释没把真代码吃掉）",
+                pcd != null && pcd.contains("deadEnvelope(code, msg) ->"), "");
         ok("F2 已无 `HTTP 404 ⇒ Dead` 那条归因（剥注释后）",
                 pcd != null && !pcd.contains("PanError.Dead(\"分享链接已失效（HTTP 404）\")"), "");
         ok("F3 已无「信封 status 404 即 Dead」的归因（剥注释后）",
@@ -261,6 +281,67 @@ public class PanMediaCookieTest {
                 !PanCloudDrive.retryablePlay(null), "");
         ok("I6 Net（抖动）⇒ 补",
                 PanCloudDrive.retryablePlay(new PanError.Net("网络请求失败")), "");
+
+        // ---------------------------------------------------------------- J
+        // Dead 的判据：**服务端信封里说的那句**。这张表是 2026-09-24 逐条打真接口得到的，
+        // 不是推理出来的 —— 每一条都可以用 `panquark_spike.py` 重放。
+        System.out.println("-- J. deadEnvelope：Dead 只能由服务端的话判定（v1.0.72 的真凶） --");
+        int[][] deadCases = {
+                {41004, 0},   // 文件不存在（蜡笔「天赐的声音第二季」实测：HTTP 404 + 这句）
+                {41006, 0},   // 分享不存在（id 打错）
+                {41011, 0},   // 分享地址已失效（分享被删 —— 蜡笔「第四季」实测）
+                {41027, 0},   // 分享不存在（**UC 用 HTTP 403 说这件事**）
+        };
+        for (int[] c : deadCases) {
+            ok("J" + c[0] + " 信封 code " + c[0] + " ⇒ Dead", PanCloudDrive.deadEnvelope(c[0], ""), "");
+        }
+        // ★ 对照组：不能把"没毛病"的码也判成终态 —— 那会让用户被引导去换线路
+        for (int c : new int[]{0, 31001, 14001, 23004, 15000, 41000, 41001, 41002, 41003}) {
+            ok("J-neg code " + c + " 不 ⇒ Dead", !PanCloudDrive.deadEnvelope(c, ""), "");
+        }
+        // 认话不认码：码会加、话不会乱说（但必须"没了" + "是谁"两个词同时出现）
+        ok("J-msg 「分享地址已失效」（码没见过）⇒ Dead",
+                PanCloudDrive.deadEnvelope(49999, "分享地址已失效"), "");
+        ok("J-msg 「该文件已被删除」⇒ Dead",
+                PanCloudDrive.deadEnvelope(49999, "该文件已被删除"), "");
+        ok("J-msg-neg 「require login [guest]」不 ⇒ Dead",
+                !PanCloudDrive.deadEnvelope(49999, "require login [guest]"), "");
+        ok("J-msg-neg 「Bad Parameter: [fid]」不 ⇒ Dead",
+                !PanCloudDrive.deadEnvelope(49999, "Bad Parameter: [fid]"), "");
+        ok("J-msg-neg 只说「失效」不说是什么 ⇒ 不判 Dead（半句话不算）",
+                !PanCloudDrive.deadEnvelope(49999, "签名已失效"), "签名已失效");
+        ok("J-msg-neg 空 message 不 ⇒ Dead", !PanCloudDrive.deadEnvelope(49999, ""), "");
+
+        // ---------------------------------------------------------------- K
+        System.out.println("-- K. 源码级：v1.0.72 的四条新纪律 --");
+        ok("K1 Dead 的码表只有一处定义（deadEnvelope 在 PanCloudDrive 内）",
+                pcd != null && pcd.contains("private val DEAD_CODES = setOf(")
+                        && pcd.contains("fun deadEnvelope("), "");
+        ok("K1b 四个实测码都在那张表里（写错任一个，J 组会红）",
+                pcd != null && pcd.contains("41004") && pcd.contains("41006")
+                        && pcd.contains("41011") && pcd.contains("41027"), "");
+        ok("K1c 403 不再无条件落「凭据过期」（UC 用 403 说「分享不存在」）",
+                pcd != null && !pcd.contains("if (code == 401 || code == 403) DriveStore.markExpired")
+                        && pcd.contains("if (code == 401) DriveStore.markExpired"), "");
+        ok("K1d 每个请求都带「哪一步」标签（失败文案才定位得了端点）",
+                pcd != null && pcd.contains("\"取分享令牌\"") && pcd.contains("\"列目录\"")
+                        && pcd.contains("\"取播放入口\""), "");
+        String psa = code(readSrc("app/src/main/java/com/videoshell/data/site/PanShareAdapter.kt"));
+        ok("K2 ★ 兜底假线路不再充当「这一页不是网盘分享页」的证据",
+                psa != null && psa.contains("lastDetailFlatFallback"), "");
+        String hd = code(readSrc(
+                "app/src/main/java/com/videoshell/data/site/HtmlAdapter_Detail.kt"));
+        ok("K2b 那个标记来自唯一的成功出口 buildDetail（三处成功都经过它）",
+                hd != null && hd.contains("lastDetailFlatFallback = groups.size == 1"), "");
+        String he = code(readSrc("app/src/main/java/com/videoshell/data/site/HtmlExtractor.kt"));
+        ok("K3 兜底线路名是常量（可断言），不再各处拼字面量",
+                he != null && he.contains("const val FALLBACK_LINE"), "");
+        ok("K4 展开的「补一次」与取流的「补一次」共用终态判据",
+                code(readSrc("app/src/main/java/com/videoshell/data/pan/PanResolver.kt"))
+                        .contains("!p.lastError.isTerminal()"), "");
+        ok("K5 115 已进 PanLink 的识别表（否则整站会被判成「不是网盘分享站族」）",
+                code(readSrc("app/src/main/java/com/videoshell/data/pan/PanLink.kt"))
+                        .contains("PanType.CLOUD115"), "");
 
         System.out.println();
         System.out.println("PASS=" + pass + "  FAIL=" + fail);

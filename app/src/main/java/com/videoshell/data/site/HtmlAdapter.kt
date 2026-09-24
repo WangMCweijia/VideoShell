@@ -74,6 +74,26 @@ class HtmlAdapter(site: SiteConfig) : SiteAdapter(site) {
     internal var lastDetailDoc: Document? = null
 
     /**
+     * 上一次 `detail()` 的成功，是不是靠 [HtmlExtractor.FALLBACK_LINE]（"整页链接当一条线路"）
+     * 那条**兜底**拿到的。
+     *
+     * ### 为什么必须记这个"决策"而不是看"结果"
+     *
+     * 调用方 [PanShareAdapter] 原先的判据是「原链路成功返回 ⇒ 这一页不是网盘分享页」。
+     * 这条判据在**结果**上看着严丝合缝，实际漏了第三种情况：原链路**成功但只兜底**
+     * —— 木偶站的详情页有个「立刻播放」锚点，兜底链就把它当成一集，产出一条
+     * 「默认线路 · 1 集」，于是每个标题都"成功"返回、每条网盘线路都被挡在门外
+     * （真机症状：木偶全部无法播放；见 docs/PITFALLS.md E54）。
+     *
+     * ⚠️ 与 [lastDetailDoc] 一样是**每实例、非线程安全**的瞬时状态：调用方必须在
+     * `detail()` 返回后**立刻**读它（这正是 [PanShareAdapter] 的写法）。
+     * 不挂到 [com.videoshell.data.model.VideoDetail] 上，是因为它是"我们怎么得到的"，
+     * 不是"影片是什么" —— 混进模型会被缓存、被跨页面复用，然后变成一条说不清的旧结论。
+     */
+    @Volatile
+    internal var lastDetailFlatFallback = false
+
+    /**
      * 详情页 HTML 里拿到的封面。
      *
      * 留着它是为了「分集只能去播放页拿」的那条路径：详情页的 `og:image` 是真海报，

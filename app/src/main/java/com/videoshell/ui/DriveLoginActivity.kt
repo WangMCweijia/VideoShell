@@ -88,6 +88,9 @@ class DriveLoginActivity : AppCompatActivity() {
             PanType.GUANGYA -> "https://www.guangyapan.com/"
             PanType.BAIDU -> "https://pan.baidu.com/"
             PanType.MOBILE -> "https://caiyun.139.com/"
+            // 115：P0 之外（`UnsupportedPan`），但登录页照样给 —— 与阿里/百度/移动一致：
+            // "这个盘还没做"是一句明确的话，而不是一个点不动的空白入口（v1.0.72）
+            PanType.CLOUD115 -> "https://115.com/"
         }
 
         /** 该盘相关的域名（取 cookie 时逐个取、按名去重） */
@@ -101,6 +104,7 @@ class DriveLoginActivity : AppCompatActivity() {
             PanType.GUANGYA -> listOf("https://www.guangyapan.com/", "https://api.guangyapan.com/")
             PanType.BAIDU -> listOf("https://pan.baidu.com/")
             PanType.MOBILE -> listOf("https://caiyun.139.com/")
+            PanType.CLOUD115 -> listOf("https://115.com/", "https://115cdn.com/")
         }
 
         /**

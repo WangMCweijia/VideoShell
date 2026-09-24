@@ -74,6 +74,19 @@ sealed class PanError(val message: String) {
     override fun toString(): String = message
 }
 
+/**
+ * 这个失败是不是**终态**（再试一次也是同一结论）。
+ *
+ * 为什么抽成顶层的纯函数：它有**两个**消费者，而它们分散在两个文件里 ——
+ * 取流时要不要补一次（[PanCloudDrive.retryablePlay]）、展开目录时要不要补一次
+ * （[PanResolver.expand]）。两处各写一遍 `when`，就一定会有一天只改了其中一处，
+ * 而症状是"详情页要转 3 秒"这种没人会去查的小毛病。
+ *
+ * [PanError.NeedLogin] 与 [PanError.Dead] 都是终态：前者要用户去登录，后者分享真没了。
+ * 其余（[PanError.Broken] / [PanError.Net]）都含"这次不巧"的成分。
+ */
+fun PanError?.isTerminal(): Boolean = this is PanError.Dead || this is PanError.NeedLogin
+
 /** 供 Provider 内部拼接错误文案：`未登录夸克网盘` */
 internal fun needLoginMsg(t: PanType) = "未登录${t.label}（登录后可播放网盘直链）"
 

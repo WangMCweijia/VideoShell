@@ -118,7 +118,7 @@ public class PanLinkTest {
         PanLink.Companion L = PanLink.Companion;
 
         // ------------------------------------------------------------------ A
-        banner("A. PanLink.parse —— 9 类分享链接（自门控入口的唯一判据）");
+        banner("A. PanLink.parse —— 各类分享链接（自门控入口的唯一判据）");
 
         Object[][] pos = {
                 // 链接, 期望 type, 期望 id, 期望 pwd
@@ -138,6 +138,11 @@ public class PanLinkTest {
                 {"https://pan.baidu.com/s/1P4_20eORxopHzDUgW9weew?pwd=6107",
                         PanType.BAIDU, "1P4_20eORxopHzDUgW9weew", "6107"},
                 {"https://yun.139.com/w/i/abc123xyz", PanType.MOBILE, "abc123xyz", ""},
+                // 115（v1.0.72 补）：木偶站「115臻享」分类贴的全是这一家，且提取码参数叫
+                // `password` 而不是 `pwd` —— 认不出它会让**整站**被判成「不是网盘分享站族」（E54）
+                {"https://115cdn.com/s/swsagii36dh?password=f9e3",
+                        PanType.CLOUD115, "swsagii36dh", "f9e3"},
+                {"https://115.com/s/swsagii36dh", PanType.CLOUD115, "swsagii36dh", ""},
         };
         // 每个类型**至少**有一条正例 —— 少一条就是"某类分享链接静默无法播放"
         Set<PanType> covered = new HashSet<>();
@@ -166,6 +171,9 @@ public class PanLinkTest {
                 "https://pan.quark.cn/s/ab",                       // id 太短（<4）
                 "https://drive.uc.cn/",                            // 没有 /s/
                 "https://www.123pan.com/",                         // 没有分享段
+                "https://115.com/",                                // 115 表里没有 /s/ 段 → 拒
+                "https://115.com/s/ab",                            // 115 分享 id 太短（<4）→ 拒
+                "https://115cdn.com/s/",                           // 115 表里 id 为空 → 拒
                 "139.com/linkID=1234567890",                       // ★ 移动云盘正则刻意收紧挡掉的那一类
                 "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567",
                 "https://cdn.example.com/video/第01集/index.m3u8",
@@ -265,6 +273,65 @@ public class PanLinkTest {
                 + "</body></html>";
         ok("C 负例：普通 maccms 详情页（player_aaaa 有值、无 downtab）⇒ 不算网盘分享页",
                 !PanShareExtract.INSTANCE.isPanSharePage(Jsoup.parse(maccms)), "");
+
+        // ------------------------------------------------------------------ P
+        // v1.0.72 / E54：木偶站的形状 + 那条把整站挡在门外的「兜底假线路」。
+        // 木偶页面的 D1/D2 长这样（实测 2026-09-24，`/index.php/vod/detail/id/8623.html`）：
+        // 一个「立刻播放」锚点指向**本站播放页**，剪贴板里挂着 **115 网盘**分享链接
+        // （而 115 曾经不在 `PanLink` 的识别表里 ⇒ D2 不成立 ⇒ **整站**被判「不是网盘分享站族」）。
+        banner("P. 木偶站的形状：只贴 115 的页面也必须被认成网盘分享页 + 兜底假线路的对照组");
+        String moHead = "<html><body>"
+                + "<h1>话事人</h1>"
+                + "<div class=\"video-cover\"><div class=\"module-item-pic\">"
+                + "<a href=\"/index.php/vod/play/id/8623/sid/1/nid/1.html\" title=\"立刻播放话事人\">"
+                + "<i class=\"icon-play\"></i></a></div></div>";
+        String moDownload = "<div class=\"module\" id=\"download-list\">"
+                + "<div class=\"module-tab-content\">"
+                + "<div class=\"module-tab-item downtab-item selected\">"
+                + "<span data-dropdown-value=\"115网盘\">115网盘</span></div></div>"
+                + "<div class=\"module-list module-downlist selected\"><div class=\"scroll-box-y\">"
+                + "<div class=\"module-row-one\">"
+                + "<a class=\"module-row-text copy\" "
+                + "data-clipboard-text=\"https://115cdn.com/s/swsagii36dh?password=f9e3\">115网盘</a>"
+                + "<a class=\"btn-copyurl copy\" "
+                + "data-clipboard-text=\"https://115cdn.com/s/swsagii36dh?password=f9e3\">复制链接</a>"
+                + "</div>"
+                // 诱饵：真实页面上还有一个"复制本页链接"的剪贴板（值指向本站详情页）——
+                // 它绝不能被当成一条线路（PanDrift D4 在真样本上锁的是同一件事）
+                + "<div class=\"module-row-one\"><a class=\"copy\" "
+                + "data-clipboard-text=\"/index.php/vod/detail/id/8623.html 我正在自用求大佬不要爬\">"
+                + "复制本页</a></div>"
+                + "</div></div></div></body></html>";
+        String moA = moHead + moDownload;
+        String moB = moDownload + "</body></html>";      // ★ 对照组：只删掉那个「立刻播放」锚点
+
+        PanLink mo115 = L.parse("https://115cdn.com/s/swsagii36dh?password=f9e3");
+        ok("P1 115 分享能被认出来（415cdn 那条实测链接）",
+                mo115 != null && mo115.getType() == PanType.CLOUD115
+                        && "swsagii36dh".equals(mo115.getId())
+                        && "f9e3".equals(mo115.getPwd()),
+                "got=" + pan(mo115));
+        Document dmoA = Jsoup.parse(moA, "https://666.666291.xyz");
+        ok("P2 ★ 只贴 115 的页面也算网盘分享页（否则整站被判「不是这一族」，连累它贴夸克的标题）",
+                PanShareExtract.INSTANCE.isPanSharePage(dmoA), "");
+        eq("P2b 那一条诱饵剪贴板不算线路（按值去重后只有 1 条）",
+                PanShareExtract.INSTANCE.shareLinks(dmoA).size(), 1);
+
+        List<com.videoshell.data.model.PlayGroup> gA =
+                HtmlExtractor.INSTANCE.parseGroups(dmoA, "https://666.666291.xyz");
+        eq("P3 原链路在这个页面上「成功」了 —— 但只成功了一条兜底线路", gA.size(), 1);
+        ok("P4 ★ 那条兜底线路的名字就是 FALLBACK_LINE（PanShareAdapter 的判据锚在它上面）",
+                gA.size() == 1 && HtmlExtractor.FALLBACK_LINE.equals(gA.get(0).getName()),
+                gA.isEmpty() ? "(空)" : gA.get(0).getName());
+        // ★ 对照组：**只删掉那个播放页锚点**，兜底就不该再产出任何线路 ——
+        //   证明 P3/P4 观测到的是"那个锚点造成的兜底"，不是这个方法无脑返回一条线路。
+        List<com.videoshell.data.model.PlayGroup> gB =
+                HtmlExtractor.INSTANCE.parseGroups(Jsoup.parse(moB, "https://666.666291.xyz"),
+                        "https://666.666291.xyz");
+        eq("P5 ★ 对照组：删掉播放页锚点后 parseGroups 不再产出线路", gB.size(), 0);
+        // 字面量锁：`buildDetail` 是靠 == 比较这个名字的，改了常量而这里没跟着改就会**静默失效**
+        eq("P6 FALLBACK_LINE 的值被锁住（改名必须同时改这里，否则判据静默失效）",
+                HtmlExtractor.FALLBACK_LINE, "默认线路");
 
         // ------------------------------------------------------------------ D
         banner("D. PanResolver 自然序（纯函数：第100集 < 第10集 是选集乱序的唯一成因）");

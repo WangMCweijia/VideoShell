@@ -19,6 +19,15 @@ enum class PanType(val label: String, val key: String) {
     XUNLEI("迅雷云盘", "xunlei"),
     GUANGYA("光鸭云盘", "guangya"),
     BAIDU("百度网盘", "baidu"),
+    /**
+     * 115 网盘（v1.0.72 补）。
+     *
+     * ⚠️ 它不是"顺手加的第九个盘"，而是**一个判据缺陷的解药**：木偶站在「115臻享」分类
+     * 里贴的全是 `115cdn.com/s/…`，而 `PanLink` 认不出它 ⇒ 那一页的 D2 不成立 ⇒
+     * **整站被判成"不是网盘分享站族"**（判定按 host 落盘，一票否决）⇒ 它自己那些
+     * 贴夸克/UC 的标题也跟着走不到网盘路径。见 docs/PITFALLS.md E54。
+     */
+    CLOUD115("115网盘", "115"),
     MOBILE("移动云盘", "mobile");
 
     companion object {
@@ -121,6 +130,13 @@ data class PanLink(
                 Regex("""pan\.baidu\.com/s/1([^/\s?#"'<>&\\.]+)""", RegexOption.IGNORE_CASE),
                 prefix = "1"
             ),
+            // 115：实测（2026-09-24）木偶站「115臻享」分类贴的是
+            // `https://115cdn.com/s/swsagii36dh?password=f9e3` —— 提取码参数叫 `password`
+            // 而不是 `pwd`。`115.com/s/…` 是同一家的老域名，一起认。
+            Rule(
+                PanType.CLOUD115,
+                Regex("""115(?:cdn)?\.com/s/([0-9A-Za-z_\-]+)""", RegexOption.IGNORE_CASE)
+            ),
             Rule(
                 PanType.MOBILE,
                 Regex(
@@ -130,7 +146,10 @@ data class PanLink(
             )
         )
 
-        private val PWD = Regex("""(?:pwd|passcode)=([0-9A-Za-z]{1,8})""", RegexOption.IGNORE_CASE)
+        /** 提取码参数名：百度/夸克是 `pwd`、夸克另接受 `passcode`、115 是 `password` */
+        private val PWD = Regex(
+            """(?:password|passcode|pwd)=([0-9A-Za-z]{1,8})""", RegexOption.IGNORE_CASE
+        )
 
         /** 分享 id 的合理长度区间：挡掉"正则吃到了半截 HTML"这类噪声 */
         private const val MIN_ID = 4

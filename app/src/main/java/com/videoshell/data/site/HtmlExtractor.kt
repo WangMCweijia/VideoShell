@@ -209,6 +209,20 @@ object HtmlExtractor {
         RegexOption.IGNORE_CASE
     )
 
+    /**
+     * 「整页链接当一条线路」这条兜底产出的线路名（见 [parseGroups] 第 4 步）。
+     *
+     * ⚠️ 它不只是个名字，它是一个**决策标记**：出现它就说明"这一页没被真正解析出来，
+     * 只是把页面上所有像播放地址的链接兜在一起"。调用方（见
+     * [com.videoshell.data.site.PanShareAdapter]）据此判断"原链路这次成功"
+     * **不构成"这一页不是网盘分享页"的证据** —— 木偶站就是靠这条兜底
+     * 给每个标题造了一条播不了的「默认线路」，把真正的网盘线路全挡在门外（E54）。
+     *
+     * 判据做成常量而不是各处重新拼字符串，是为了让它**可被断言**
+     * （`PanMediaCookieTest` 直接引用它，改字面量会立刻红）。
+     */
+    const val FALLBACK_LINE = "默认线路"
+
     fun parseGroups(doc: Document, base: String): List<PlayGroup> {
         // 1) tab 标题映射：href="#playlist2" -> "极速播放"（顺序也按 tab 来）
         val idNames = LinkedHashMap<String, String>()
@@ -312,7 +326,7 @@ object HtmlExtractor {
         //    先用严格判据，一个都没命中再放宽 —— 放宽只是为了别漏掉奇怪主题，不是在放宽噪声
         var all = scanWholePage(doc, base, strict = true)
         if (all.isEmpty()) all = scanWholePage(doc, base, strict = false)
-        return if (all.isEmpty()) emptyList() else listOf(PlayGroup("默认线路", all))
+        return if (all.isEmpty()) emptyList() else listOf(PlayGroup(FALLBACK_LINE, all))
     }
 
     /**

@@ -125,10 +125,12 @@ object PanResolver {
             // 顺着契约读 [PanProvider.lastError]：**"取不到"和"目录里真没有视频"要分得开**。
             // 两者都表现为"0 集"，但一个是我们的故障（可重试、要留痕），
             // 一个是分享本身的内容问题（换线路才是对的）—— 混成一句话用户无从下手。
-            lastNote = if (p.lastError != null) {
-                "${link.type.key} 展开失败（取不到目录）：${reason(p)}"
-            } else {
-                "${link.type.key} 展开为空：目录里没有视频文件（扫了 ${ex.dirsSeen} 个目录）"
+            lastNote = when (val e = p.lastError) {
+                null -> "${link.type.key} 展开为空：目录里没有视频文件（扫了 ${ex.dirsSeen} 个目录）"
+                // 「分享真没了」是**内容问题**，不是"取不到目录" —— 说成后者会把用户引向"重试"，
+                // 而正确的动作是**换线路**（v1.0.72 起 Dead 由服务端的原话判定，见 deadEnvelope）
+                is PanError.Dead -> "${link.type.key} 分享已失效：${e.message}"
+                else -> "${link.type.key} 展开失败（取不到目录）：${reason(p)}"
             }
             return PanEpisodes(
                 listOf(Episode("打开分享（未展开）", rawOf(link))), false, ex.dirsSeen,
@@ -159,7 +161,10 @@ object PanResolver {
         // 瞬时失败再给一次机会：`Http` 只重试 429/5xx，**404 是"一次就断"**（见 Http.worthRetry），
         // 而展开在详情页的必经路径上 —— 白丢一次请求换来的是整页降级（只剩一条「未展开」）。
         // 有界（只补一次、带固定间隔），不会把"真挂了"拖成转圈。
-        if (ex.failed) {
+        //
+        // ⚠️ 终态不补（判据与取流那条**同源**，见 [isTerminal]）：分享真没了 / 要登录，
+        //    补多少次结论都一样 —— 补它只是把失败路径拖长 0.4 秒，还多打一次请求。
+        if (ex.failed && !p.lastError.isTerminal()) {
             delay(EXPAND_RETRY_DELAY_MS)
             ex = walkOnce(p, link)
         }
@@ -251,6 +256,9 @@ object PanResolver {
                 PanType.QUARK -> "https://pan.quark.cn/s/${link.id}"
                 PanType.UC -> "https://drive.uc.cn/s/${link.id}"
                 PanType.BAIDU -> "https://pan.baidu.com/s/1${link.id}"
+                // ⚠️ 未支持的盘**也必须给出真实地址**：兜底集的名字是「XX（暂不支持）」，
+                //    但它照样会被点 —— 空 url 会让"点它"变成一次静默无反应（E54）
+                PanType.CLOUD115 -> "https://115cdn.com/s/${link.id}"
                 else -> ""
             }
         }

@@ -95,6 +95,9 @@ internal suspend fun HtmlAdapter.learnFromHome(): Boolean {
 }
 
 internal fun HtmlAdapter.buildDetail(id: String, doc: Document, groups: List<PlayGroup>): VideoDetail {
+    // 记下"这次分集是不是兜底产出的"（唯一的三个成功出口都经过这里：模板命中、播放页兜底、
+    // 网盘认领）。读它的只有 PanShareAdapter —— 见 lastDetailFlatFallback 的 KDoc。
+    lastDetailFlatFallback = groups.size == 1 && groups[0].name == HtmlExtractor.FALLBACK_LINE
     val title = HtmlExtractor.parseTitle(doc)
     return VideoDetail(
         id = id,

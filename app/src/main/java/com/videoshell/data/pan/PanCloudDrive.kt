@@ -157,36 +157,84 @@ class PanCloudDrive private constructor(
         }
 
         /**
-         * HTTP 状态码 → 失败归类（**纯函数**，可离线断言，`PanMediaCookieTest` 钉着它）。
+         * 服务端用来表达「**这条分享 / 这个文件已经没了**」的信封码（2026-09-24 逐条实测）。
          *
-         * ### 为什么要把这件事单独拎出来
+         * | 服务端 `message` | HTTP | `code` | 说明 |
+         * |---|---|---|---|
+         * | `ok` | 200 | 0 | 分享活着 |
+         * | **`分享地址已失效`** | **404** | **41011** | 分享被删/取消 |
+         * | **`文件不存在`** | **404** | **41004** | 分享在，但分享根指向的东西没了 |
+         * | `分享不存在` | 404 | 41006 | 分享 id 本身不存在（打错/伪造） |
+         * | `分享不存在`（**UC 侧**） | **403** | **41027** | UC 用 403 说这件事 |
          *
-         * 原先是 `classify()` 里的一串 `when`，其中 **`404 -> PanError.Dead("分享链接已失效")`**
-         * 是一条**被真机证伪的归因**（2026-09-24）：
+         * ⚠️ 这份表**推翻了两条曾经写进代码的"结论"**（这就是 `PanMediaCookieTest` E 组
+         * 曾经钉住的东西）：
+         *  - 「分享被删时回的是 HTTP 200 + `code:41006`」—— 只对"id 不存在"成立；
+         *    真正被删是 **404 + `41011`**，于是我们嘴里的"404 从来不是分享失效"变成了一次**漏报**：
+         *    用户看到「不是分享失效，可重试」而重试永远失败（蜡笔「天赐的声音第二季」，E54）。
+         *  - 「403 ⇒ 需要登录」—— UC 对**分享不存在**回的就是 403 ⇒ 用户被引导去白重登一次。
          *
-         * | 事实 | 来源 |
-         * |---|---|
-         * | 分享**真被删**时，夸克回的是 HTTP **200** + 信封 `code:41006` | P0 实测表（[PanCloudDrive] 类头） |
-         * | `file/v2/play` / `file/play` 这些**端点根本没消失** —— 匿名打它们是 401 `code:31001 require login` | 2026-09-24 免凭据探针 |
-         * | 可 App 里这些端点回的是 **HTTP 404**，而那条分享**完全活着**（匿名能展开全部集数） | 真机诊断面板 + PC 匿名 spike |
+         * 所以 Dead 的判据必须是**服务端自己说的那句**（[deadEnvelope]），既不是 HTTP 状态码，
+         * 也不是我们记住的某一个码。码会加，话不会乱说。
+         */
+        private val DEAD_CODES = setOf(41004, 41006, 41011, 41027)
+
+        /**
+         * 这个信封是不是在说「东西没了」（**纯函数**，可离线断言，`PanMediaCookieTest` J 组钉着）。
          *
-         * ⇒ HTTP 404 的含义是「**这次请求被拒了**（端点/风控/边缘节点），与分享是否存在无关」。
-         * 把它写成"分享已失效"，用户就会看到"所有夸克资源都说分享失效"这种
-         * 指向完全错误方向的结论 —— 而 Dead 是**终态**语义（提示换线路、不再重试），
-         * 判错就等于把可重试的问题钉死。所以 **Dead 只留给信封 `code:41006`**，
-         * HTTP 状态码一律不产生 Dead（守卫直接断言这一条）。
+         * 两层：**先认码**（实测表，最可靠），**再认话**（码变了时的安全网 ——
+         * "失效/不存在" + "分享/文件/地址" 同时出现才认，避免把一句普通报错判成终态）。
          *
-         * @param code HTTP 状态码（>0；== 0 是网络层失败，由调用方带异常细节处理）
+         * 为什么非要单独一个函数：Dead 是**终态语义**（提示换线路、不重试），判错方向比判不出更糟；
+         * 而"哪些码算 Dead"这件事必须只有一处定义 —— 它已经被改错过一次了。
          */
         @JvmStatic
-        fun errorForHttp(code: Int, type: PanType): PanError = when {
-            code == 401 || code == 403 -> PanError.NeedLogin(needLoginMsg(type), type)
-            code == 404 -> PanError.Broken(
-                "${type.label}接口回 HTTP 404（不是分享失效；接口/风控层拒绝了这次请求，可重试或稍后再试）"
-            )
-            code in 500..599 -> PanError.Broken("${type.label}服务端错误（HTTP $code）—— 稍后重试")
-            code > 0 -> PanError.Broken("${type.label}请求失败（HTTP $code）")
-            else -> PanError.Net("${type.label}网络请求失败")
+        fun deadEnvelope(code: Int, message: String): Boolean {
+            if (code in DEAD_CODES) return true
+            if (message.isBlank()) return false
+            val gone = message.contains("失效") || message.contains("不存在") ||
+                    message.contains("已删除") || message.contains("已被删")
+            val what = message.contains("分享") || message.contains("文件") || message.contains("地址")
+            return gone && what
+        }
+
+        /**
+         * HTTP 状态码 → 失败归类（**纯函数**，可离线断言，`PanMediaCookieTest` E 组钉着）。
+         *
+         * ⚠️ 它的定位是**兜底**：只有在服务端**一个字都没说**（没有可解析的信封）时才轮到它。
+         * 有信封时以 [com.videoshell.data.pan.PanCloudDrive.deadEnvelope] 与
+         * `isNeedLogin` 为准（见 `classify` 的"信封优先"）。
+         *
+         * 历史上这里写过 `404 -> PanError.Dead("分享链接已失效")` —— 被真机证伪过一次
+         * （活着的分享被判死），于是整条被反转成"404 永远不是分享失效"，**又被证伪了一次**
+         * （夸克对已删分享就是回 404，见 [DEAD_CODES]）。两次错误的共同点是**想用一个状态码
+         * 去回答一个状态码答不了的问题**。所以现在的 404 文案：
+         *  - **不断言任何一端**（既不说"失效"、也不说"不是失效"）；
+         *  - 给出**可执行动作**（先重试，仍失败就换线路），这才是没有归因时唯一诚实的话。
+         *
+         * @param step 失败发生在哪一步（`取分享令牌` / `列目录` / `取播放入口`…）。
+         *   没有它，用户手里就只剩「接口回 HTTP 404」—— 而我们连**哪个接口**都不知道
+         *   （v1.0.71 的真机诊断就是卡在这里，白追了一轮）。
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun errorForHttp(code: Int, type: PanType, step: String = ""): PanError {
+            val at = if (step.isBlank()) "" else "（${step}时）"
+            return when {
+                code == 401 -> PanError.NeedLogin(needLoginMsg(type), type)
+                // 403 保持"要登录"的兜底语义（无害且保住了真实的凭据过期路径）；
+                // 但**信封优先**会让 UC 的 403 + `41027 分享不存在` 走 Dead 而不是这里。
+                code == 403 -> PanError.NeedLogin(needLoginMsg(type), type)
+                code == 404 -> PanError.Broken(
+                    "${type.label}接口回 HTTP 404$at（服务端没说原因；可能是风控拒绝，" +
+                            "也可能这条分享/文件已经没了 —— 先重试一次，仍失败就换线路）"
+                )
+                code in 500..599 -> PanError.Broken(
+                    "${type.label}服务端错误（HTTP $code）$at —— 稍后重试"
+                )
+                code > 0 -> PanError.Broken("${type.label}请求失败（HTTP $code）$at")
+                else -> PanError.Net("${type.label}网络请求失败$at")
+            }
         }
 
         /**
@@ -223,17 +271,11 @@ class PanCloudDrive private constructor(
         /**
          * 取流失败值不值得补一次（**纯函数**，`PanMediaCookieTest` 钉着）。
          *
-         * 补一次 ≠ 无脑重试：[PanError.NeedLogin]（要用户去登录）与 [PanError.Dead]
-         * （分享真被删，终态）补多少次结论都一样 ⇒ 立刻收手，别把失败路径从 1 秒拖成 3 秒。
-         * 其余（4xx/5xx/网络）都含"这次不巧"的成分，而取流失败时用户已经在等，
-         * 多 0.9 秒换一次成功是划算的。
+         * 判据就是 [isTerminal] —— **与目录展开的补一次共用同一条规则**（原先这里和
+         * `PanResolver.expand` 各写一遍 `when`，正是"改一处漏一处"的形状）。
          */
         @JvmStatic
-        fun retryablePlay(e: PanError?): Boolean = when (e) {
-            null -> false
-            is PanError.NeedLogin, is PanError.Dead -> false
-            else -> true
-        }
+        fun retryablePlay(e: PanError?): Boolean = e != null && !e.isTerminal()
     }
 
     override val supported: Boolean get() = true
@@ -293,7 +335,7 @@ class PanCloudDrive private constructor(
             append("&force=0&_page=1&_size=200")
             append("&_sort=").append(u("file_type:asc,file_name:asc"))
         }
-        val body = getJson(url, null) ?: return emptyList()
+        val body = getJson(url, null, "列目录") ?: return emptyList()
         val o = json(body) ?: return emptyList()
         if (o.optInt("code", -1) != 0) {
             note(o)
@@ -391,7 +433,8 @@ class PanCloudDrive private constructor(
             if (System.currentTimeMillis() < exp) return v
         }
         val req = JSONObject().put("pwd_id", link.id).put("passcode", link.pwd).toString()
-        val resp = postJson("$apiBase/share/sharepage/token?${q()}", req, null) ?: return null
+        val resp = postJson("$apiBase/share/sharepage/token?${q()}", req, null, "取分享令牌")
+            ?: return null
         val o = json(resp) ?: return null
         if (o.optInt("code", -1) != 0) {
             note(o)
@@ -432,7 +475,8 @@ class PanCloudDrive private constructor(
             put("_fetch_total", 1)
             put("_sort", "file_type:asc,updated_at:desc")
         }.toString()
-        val resp = postJson("$apiBase/share/sharepage/save?${q()}", req, ck) ?: return null
+        val resp = postJson("$apiBase/share/sharepage/save?${q()}", req, ck, "转存到我的网盘")
+            ?: return null
         val o = json(resp) ?: return null
         if (o.optInt("code", -1) != 0) {
             note(o)
@@ -452,7 +496,8 @@ class PanCloudDrive private constructor(
     private suspend fun pollTask(taskId: String, ck: String): String? {
         for (i in 0 until TASK_TRIES) {
             delay(if (i == 0) 350L else TASK_INTERVAL_MS)
-            val body = getJson("$apiBase/task?${q()}&task_id=${u(taskId)}", ck) ?: continue
+            val body = getJson("$apiBase/task?${q()}&task_id=${u(taskId)}", ck, "等转存任务")
+                ?: continue
             val o = json(body) ?: continue
             if (o.optInt("code", -1) != 0) {
                 note(o)
@@ -519,7 +564,7 @@ class PanCloudDrive private constructor(
 
     /** 单次取流（不重试）。失败原因写进 [err]。 */
     private suspend fun playUrlOnce(fid: String, ck: String): String? {
-        val resp = postJson("$apiBase/file/v2/play?${q()}", playBody(fid), ck)
+        val resp = postJson("$apiBase/file/v2/play?${q()}", playBody(fid), ck, "取播放入口")
         val o = resp?.let { json(it) }
         if (o != null) {
             if (o.optInt("code", -1) == 0) {
@@ -530,8 +575,9 @@ class PanCloudDrive private constructor(
             }
         }
         for (res in arrayOf("raw", "low")) {
-            val body = getJson("$apiBase/file/play?${q()}&fid=${u(fid)}&resolution=$res", ck)
-                ?: continue
+            val body = getJson(
+                "$apiBase/file/play?${q()}&fid=${u(fid)}&resolution=$res", ck, "取播放入口·退路"
+            ) ?: continue
             val g = json(body) ?: continue
             if (g.optInt("code", -1) != 0) {
                 note(g)
@@ -697,22 +743,38 @@ class PanCloudDrive private constructor(
     private fun cookie(ck: String?) =
         if (ck.isNullOrBlank()) emptyMap() else mapOf("Cookie" to ck)
 
+    /**
+     * 当前这一步叫什么（`取分享令牌` / `列目录` / `取播放入口`…），只用于**失败文案归因**。
+     *
+     * 为什么值得单开一个字段：v1.0.71 的真机自检里只有一句「夸克网盘接口回 HTTP 404」，
+     * 而夸克链路上有 5 个端点都会回 404 —— 用户手里有了服务端的原话（`41004 文件不存在`），
+     * 我们却还是不知道**它出自哪一步**，只好又去扒一遍 bundle。加上这四个字，
+     * 下一次自检截图就能直接定位。
+     */
+    @Volatile
+    private var step: String = ""
+
+    private fun stepAt(): String = if (step.isBlank()) "" else "·$step"
+
     /** JSON 请求一律显式声明 Accept —— 云盘接口按它做内容协商，用 HTML 的 Accept 会被回 HTML */
     private val jsonAccept = mapOf("Accept" to "application/json, text/plain, */*")
 
-    private suspend fun getJson(url: String, ck: String?): String? = try {
+    private suspend fun getJson(url: String, ck: String?, what: String = ""): String? = try {
+        if (what.isNotBlank()) step = what
         Http.get(url, referer = webBase, ua = PAN_UA, headers = jsonAccept + cookie(ck))
     } catch (e: Exception) {
         err = classify(e)
         null
     }
 
-    private suspend fun postJson(url: String, body: String, ck: String?): String? = try {
-        Http.postJson(url, body, referer = webBase, ua = PAN_UA, headers = cookie(ck))
-    } catch (e: Exception) {
-        err = classify(e)
-        null
-    }
+    private suspend fun postJson(url: String, body: String, ck: String?, what: String = ""): String? =
+        try {
+            if (what.isNotBlank()) step = what
+            Http.postJson(url, body, referer = webBase, ua = PAN_UA, headers = cookie(ck))
+        } catch (e: Exception) {
+            err = classify(e)
+            null
+        }
 
     private fun json(s: String): JSONObject? {
         val o = runCatching { JSONObject(s) }.getOrNull()
@@ -720,7 +782,14 @@ class PanCloudDrive private constructor(
         return o
     }
 
-    /** 200 但 `code != 0` 的情况（云盘接口的常态错误，HTTP 状态是 200） */
+    /**
+     * 信封级的错误（HTTP 200，或非 2xx 但 body 是可解析的信封）—— **归因的主入口**。
+     *
+     * 顺序即优先级，三条都别调换：
+     *  ① 要登录（`31001` / `require login`）—— 语义最强，且要落"凭据过期"的痕迹；
+     *  ② 东西没了（[deadEnvelope]，`41004/41006/41011/41027`）—— 终态，提示换线路；
+     *  ③ 其余按"接口异常"处理，并把服务端的原话带出来。
+     */
     private fun note(o: JSONObject) {
         val code = o.optInt("code", -1)
         val msg = o.optString("message").take(60)
@@ -729,14 +798,14 @@ class PanCloudDrive private constructor(
                 DriveStore.markExpired(type)
                 PanError.NeedLogin(needLoginMsg(type), type)
             }
-            // ⚠️ **只有 `41006` 才算分享失效**（实测：分享被删时接口回 HTTP 200 + 这个码）。
-            //    原先这里还挂着 `|| status == 404` —— 那会把"信封自称 404"也判成分享失效，
-            //    而 404 在夸克链路上更多是**端点/风控**拒绝的形状（见 [errorForHttp] 的实测表）。
-            //    Dead 是终态语义（提示换线路、不再重试），判错方向比判不出更糟。
-            code == 41006 -> PanError.Dead("分享链接已失效（$msg）")
-            // 信封自称 404 但仍带别的 code：按"接口异常"处理并把原委写清楚，别冒充分享失效
+            // ⚠️ Dead 的判据在 [deadEnvelope]（**唯一出处**）。这里曾经只认 `41006`，
+            //    并且额外把"信封自称 404"也判成 Dead —— 那是两次方向相反的错：
+            //    前者**漏报**（`41011 分享地址已失效` 被我们说成"不是分享失效"），
+            //    后者**误报**（活着的分享被判死）。见 [DEAD_CODES] 与 docs/PITFALLS.md E54。
+            deadEnvelope(code, msg) -> PanError.Dead("分享已失效（$msg）")
+            // 信封自称 404 却没说是"没了"：按"接口异常"处理，**不断言原因**，只给动作
             o.optInt("status", 0) == 404 ->
-                PanError.Broken("${type.label}接口信封回 404 / code $code：$msg（不是分享失效，可重试）")
+                PanError.Broken("${type.label}接口信封回 404 / code $code：$msg（未识别的 404，可重试）")
             else -> PanError.Broken("${type.label}接口返回 $code：$msg")
         }
     }
@@ -748,9 +817,10 @@ class PanCloudDrive private constructor(
         Regex("HTTP (\\d{3})").find(e.message.orEmpty())?.groupValues?.get(1)?.toIntOrNull() ?: 0
 
     private fun classify(e: Exception): PanError {
-        // ① **信封优先**（v1.0.71）：能拿到响应体时，服务端自己说的那句话比 HTTP 状态码准得多。
-        //    典型：HTTP 404 的 body 里写的是 `code:31001 require login` —— 那其实是"要登录"，
-        //    不是"接口 404"。少了这一层，就只能按状态码猜方向（真机为此猜了一整轮）。
+        // ① **信封优先**（v1.0.71 引入，v1.0.72 起成为归因主入口）：能拿到响应体时，
+        //    服务端自己说的那句话比 HTTP 状态码准得多。`41004 文件不存在` /
+        //    `41011 分享地址已失效` / `41027 分享不存在`(UC 用 403) 全都只能从 body 读出来
+        //    —— 只按状态码猜，就是这两轮返工的成因。
         val he = e as? Http.HttpError
         val env = he?.body?.takeIf { it.startsWith("{") }
             ?.let { runCatching { JSONObject(it) }.getOrNull() }
@@ -759,15 +829,21 @@ class PanCloudDrive private constructor(
             err?.let { return it }
         }
         val code = he?.code ?: httpCode(e)
-        // 401/403 要先落"凭据过期"的痕迹（「网盘账号」页据此提示重登），再交给纯函数归类
-        if (code == 401 || code == 403) DriveStore.markExpired(type)
-        // 网络层失败（code == 0）没有状态码可归类，必须带上异常细节，否则诊断只剩一句空话
+        // 只有 401 直接落"凭据过期"的痕迹；**403 不落** —— UC 对「分享不存在」回的就是 403，
+        // 落下去会让用户的「网盘账号」页凭空变成"登录已过期"，白重登一次（E54）。
+        // 真正的"要登录"由信封判定（`31001` / `require login`），那条路在 [note] 里。
+        if (code == 401) DriveStore.markExpired(type)
+        // 网络层失败（code == 0）没有状态码可归类，必须带上**哪一步** + 异常细节，
+        // 否则诊断只剩一句空话（"网络请求失败"）而用户已经提供了完整自检
         if (code <= 0) {
-            return PanError.Net("网络请求失败：${e.javaClass.simpleName} ${e.message.orEmpty().take(60)}")
+            return PanError.Net(
+                "${type.label}${stepAt()}：网络请求失败（${e.javaClass.simpleName} " +
+                        "${e.message.orEmpty().take(60)}）"
+            )
         }
         // 状态码归类时把服务端的原话一并带上（只对 Broken 拼 —— NeedLogin 的语义不能被改掉，
         // 「网盘账号」页靠它提示重登）
-        val base = errorForHttp(code, type)
+        val base = errorForHttp(code, type, step)
         val said = env?.optString("message").orEmpty().take(60)
         return if (said.isBlank() || base !is PanError.Broken) base
         else PanError.Broken("${base.message}｜服务端：$said")
