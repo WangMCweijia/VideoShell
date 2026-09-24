@@ -199,6 +199,42 @@ class PanCloudDrive private constructor(
         }
 
         /**
+         * 从响应体里抠出信封的 `code` / `message` / `status`（**纯函数**，离线可断言）。
+         *
+         * ### 为什么不能用 `JSONObject`（v1.0.73 的真凶）
+         *
+         * 失败响应体经 [com.videoshell.data.net.Http.HttpError] 只保留**前 200 字符**
+         * （`snippetOf`：message 必须以 `HTTP <code> ` 开头、body 在 `" | "` 之后、≤200 字符）。
+         * 而夸克的错误信封**约 335 字节** —— 大头是尾部的 `metadata._g_group`：
+         *
+         * ```
+         * {"status":404,"code":41004,"message":"文件不存在","req_id":"…","timestamp":…,
+         *  "metadata":{"_t_group":"…","_g_group":"3:_s_vtp:1;7:_s_goback_app_pop:1;…"}}
+         * ```
+         *
+         * 截到 200 字符时 JSON 正好断在 `metadata` 里 ⇒ `JSONObject` **必定抛异常** ⇒
+         * 归因处拿到的信封恒为 null ⇒ 落到 [errorForHttp] 的 404 兜底（Broken，"先重试，
+         * 仍失败就换线路"）。于是 v1.0.72 精心写的 [deadEnvelope] **在真机上一次都没生效过**：
+         * 用户被引导去"重试"，而重试永远失败（蜡笔「天赐的声音第二季」= 404 + `41004`）。
+         *
+         * 好在**协议把 code/message 放在信封最前面**，正则从截断片段里照样抠得到。
+         * 所以这里不依赖 JSON 解析器，只按字段名取值 —— 顺带让这条判据**离线可断言**。
+         *
+         * @return 抠不出 `code` 时返回 null（不是信封 / HTML 错误页 / 空体）。
+         */
+        @JvmStatic
+        fun envelopeFields(body: String): PanEnvelope? {
+            if (body.isBlank()) return null
+            val code = Regex("\"code\"\\s*:\\s*(-?\\d+)").find(body)
+                ?.groupValues?.get(1)?.toIntOrNull() ?: return null
+            val msg = Regex("\"message\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").find(body)
+                ?.groupValues?.get(1).orEmpty()
+            val status = Regex("\"status\"\\s*:\\s*(\\d+)").find(body)
+                ?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            return PanEnvelope(code, msg, status)
+        }
+
+        /**
          * HTTP 状态码 → 失败归类（**纯函数**，可离线断言，`PanMediaCookieTest` E 组钉着）。
          *
          * ⚠️ 它的定位是**兜底**：只有在服务端**一个字都没说**（没有可解析的信封）时才轮到它。
@@ -782,17 +818,26 @@ class PanCloudDrive private constructor(
         return o
     }
 
+    /** HTTP 200 的信封（body 完整、可 JSON 解析）⇒ 取出三字段交给 [note]。 */
+    private fun note(o: JSONObject) =
+        note(o.optInt("code", -1), o.optString("message"), o.optInt("status", 0))
+
     /**
-     * 信封级的错误（HTTP 200，或非 2xx 但 body 是可解析的信封）—— **归因的主入口**。
+     * 信封级的错误（HTTP 200 的完整信封，或非 2xx 但 body 是**被截断**的信封）
+     * —— **归因的主入口**，判据**唯一出处**。
+     *
+     * 为什么要把参数从 [JSONObject] 剥成三个裸值（v1.0.73）：失败响应体在
+     * [com.videoshell.data.net.Http.HttpError] 里只剩前 200 字符（见 [envelopeFields]），
+     * JSON 解析必失败 —— 于是"HTTP 200 的完整信封"与"被截断的失败信封"必须能走
+     * **同一条**判据，否则 [deadEnvelope] 只在 200 那条路上有效。
      *
      * 顺序即优先级，三条都别调换：
      *  ① 要登录（`31001` / `require login`）—— 语义最强，且要落"凭据过期"的痕迹；
      *  ② 东西没了（[deadEnvelope]，`41004/41006/41011/41027`）—— 终态，提示换线路；
      *  ③ 其余按"接口异常"处理，并把服务端的原话带出来。
      */
-    private fun note(o: JSONObject) {
-        val code = o.optInt("code", -1)
-        val msg = o.optString("message").take(60)
+    private fun note(code: Int, rawMsg: String, status: Int) {
+        val msg = rawMsg.take(60)
         err = when {
             isNeedLogin(code, msg) -> {
                 DriveStore.markExpired(type)
@@ -804,7 +849,7 @@ class PanCloudDrive private constructor(
             //    后者**误报**（活着的分享被判死）。见 [DEAD_CODES] 与 docs/PITFALLS.md E54。
             deadEnvelope(code, msg) -> PanError.Dead("分享已失效（$msg）")
             // 信封自称 404 却没说是"没了"：按"接口异常"处理，**不断言原因**，只给动作
-            o.optInt("status", 0) == 404 ->
+            status == 404 ->
                 PanError.Broken("${type.label}接口信封回 404 / code $code：$msg（未识别的 404，可重试）")
             else -> PanError.Broken("${type.label}接口返回 $code：$msg")
         }
@@ -822,10 +867,14 @@ class PanCloudDrive private constructor(
         //    `41011 分享地址已失效` / `41027 分享不存在`(UC 用 403) 全都只能从 body 读出来
         //    —— 只按状态码猜，就是这两轮返工的成因。
         val he = e as? Http.HttpError
-        val env = he?.body?.takeIf { it.startsWith("{") }
-            ?.let { runCatching { JSONObject(it) }.getOrNull() }
-        if (env != null && env.optInt("code", -1) != 0) {
-            note(env)
+        // ⚠️ 这里**必须**用 [envelopeFields]（正则），不能用 `JSONObject`：
+        //    `he.body` 是 `snippetOf` 的产物，只有**前 200 字符**，而夸克错误信封约 335 字节
+        //    ⇒ JSON 截断、`JSONObject` 必抛 ⇒ `env` 恒为 null ⇒ [deadEnvelope] 永远走不到，
+        //    真失效被当成"可重试"（v1.0.72 的蜡笔「天赐的声音第二季」就是这样）。
+        val env = he?.body?.takeIf { it.trimStart().startsWith("{") }
+            ?.let { envelopeFields(it) }
+        if (env != null && env.code != 0) {
+            note(env.code, env.message, env.status)
             err?.let { return it }
         }
         val code = he?.code ?: httpCode(e)
@@ -844,8 +893,16 @@ class PanCloudDrive private constructor(
         // 状态码归类时把服务端的原话一并带上（只对 Broken 拼 —— NeedLogin 的语义不能被改掉，
         // 「网盘账号」页靠它提示重登）
         val base = errorForHttp(code, type, step)
-        val said = env?.optString("message").orEmpty().take(60)
+        val said = env?.message.orEmpty().take(60)
         return if (said.isBlank() || base !is PanError.Broken) base
         else PanError.Broken("${base.message}｜服务端：$said")
     }
 }
+
+/**
+ * [PanCloudDrive.envelopeFields] 抠出来的信封字段。
+ *
+ * 单独一个类型（而不是 `Triple`）是为了让**离线 harness 的断言可读** ——
+ * `PanMediaCookieTest` L 组钉的就是"被截断的 404 信封仍要抠得出 `41004`"。
+ */
+data class PanEnvelope(val code: Int, val message: String, val status: Int)

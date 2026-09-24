@@ -1,6 +1,7 @@
 package tools.verify;
 
 import com.videoshell.data.pan.PanCloudDrive;
+import com.videoshell.data.pan.PanEnvelope;
 import com.videoshell.data.pan.PanError;
 import com.videoshell.data.pan.PanResolver;
 import com.videoshell.data.pan.PanType;
@@ -342,6 +343,46 @@ public class PanMediaCookieTest {
         ok("K5 115 已进 PanLink 的识别表（否则整站会被判成「不是网盘分享站族」）",
                 code(readSrc("app/src/main/java/com/videoshell/data/pan/PanLink.kt"))
                         .contains("PanType.CLOUD115"), "");
+
+        // ---------------------------------------------------------------- L
+        // v1.0.73 / E56「蜡笔仍然有剧集获取不到列表」：
+        //   v1.0.72 写了 deadEnvelope，但**真机上一次都没生效** —— 失败响应体经 HttpError
+        //   只留前 200 字符（snippetOf），而夸克错误信封约 335 字节 ⇒ JSON 截断、JSONObject 必抛。
+        //   于是"服务端说了什么"永远读不到，真失效被当成"可重试"。
+        //   下面三条 body 是**逐字**取自真接口的 200 字符片段（尾部被 snippetOf 切断）。
+        System.out.println("-- L. 被截断的失败信封仍要能判 Dead（v1.0.73 的真凶） --");
+        String t41004 = "{\"status\":404,\"code\":41004,\"message\":\"文件不存在\",\"req_id\":\"9aa1-2b19240a3a5cf2\",\"timestamp\":1790252372,\"metadata\":{\"_t_group\":\"0:_s_vp:1\",\"_g_group\":\"3:_s_vtp:1;7:_s_goback_app_pop:1;8:_s_goback_auto_sa";
+        String t41011 = "{\"status\":404,\"code\":41011,\"message\":\"分享地址已失效\",\"req_id\":\"9aa2-2b19240a3a5cf2\",\"timestamp\":1790252372,\"metadata\":{\"_t_group\":\"0:_s_vp:1\",\"_g_group\":\"3:_s_vtp:1;7:_s_goback_app_pop:1;8:_s_goback_auto_sa";
+        String t41027 = "{\"status\":403,\"code\":41027,\"message\":\"分享不存在\",\"req_id\":\"9aa3-2b19240a3a5cf2\",\"timestamp\":1790252372,\"metadata\":{\"_t_group\":\"0:_s_vp:1\",\"_g_group\":\"3:_s_vtp:1;7:_s_goback_app_pop:1;8:_s_goback_auto_sa";
+        ok("L0 前提：这三条片段确实是**被截断**的（不以 } 结尾 ⇒ JSONObject 必抛）",
+                !t41004.endsWith("}") && !t41011.endsWith("}") && !t41027.endsWith("}"), "");
+        PanEnvelope e4 = PanCloudDrive.envelopeFields(t41004);
+        ok("L1 ★ 截断的 404 信封仍抠得出 code=41004（原先这里恒为 null）",
+                e4 != null && e4.getCode() == 41004, String.valueOf(e4));
+        ok("L2 同时抠出 message（Dead 文案要用它）",
+                e4 != null && "文件不存在".equals(e4.getMessage()),
+                e4 == null ? "null" : e4.getMessage());
+        ok("L3 抠出的 code 交给 deadEnvelope ⇒ Dead（这正是原先走不到的一步）",
+                e4 != null && PanCloudDrive.deadEnvelope(e4.getCode(), e4.getMessage()), "");
+        PanEnvelope e11 = PanCloudDrive.envelopeFields(t41011);
+        ok("L4 41011「分享地址已失效」同样抠得出 ⇒ Dead",
+                e11 != null && e11.getCode() == 41011
+                        && PanCloudDrive.deadEnvelope(e11.getCode(), e11.getMessage()), "");
+        PanEnvelope e27 = PanCloudDrive.envelopeFields(t41027);
+        ok("L5 UC 的 403 + 41027 也抠得出（403 不能默认当「要登录」）",
+                e27 != null && e27.getCode() == 41027 && e27.getStatus() == 403
+                        && PanCloudDrive.deadEnvelope(e27.getCode(), e27.getMessage()), "");
+        ok("L6 status 也抠出来（「未识别 404」那条分支要用）",
+                e4 != null && e4.getStatus() == 404, "");
+        // 对照组：不是信封的东西不许被硬当成信封
+        ok("L7 非 JSON（HTML 错误页）不产生信封",
+                PanCloudDrive.envelopeFields("<html><body>404 Not Found</body></html>") == null, "");
+        ok("L8 空体不产生信封", PanCloudDrive.envelopeFields("") == null, "");
+        ok("L9 有 message 没有 code 不算信封（code 是主判据）",
+                PanCloudDrive.envelopeFields("{\"message\":\"文件不存在\"}") == null, "");
+        // 源码级：归因处**必须**用 envelopeFields 读失败体 —— 不许再回去用 JSONObject（它必抛）
+        ok("L10 ★ 源码级：classify 用 envelopeFields 读失败体（不许再用 JSONObject 解它）",
+                pcd != null && pcd.contains("?.let { envelopeFields(it) }"), "");
 
         System.out.println();
         System.out.println("PASS=" + pass + "  FAIL=" + fail);
