@@ -33,6 +33,11 @@ _samples/
 # 本地导出的 APK 目录（约 18 MB，不是源码；CI 出的包在 Actions artifact / Releases 里）
 videoshell-apk/
 
+# 分享用 HTML 打包目录：里面是**已入库 .html 的 .zip 副本**，纯工具产物。
+# 它曾把 116 个 zip（约 20 MB）混进 v1.0.73 的发版提交 —— 而 `.gitignore` 里的
+# `_*.html` 只挡得住 .html 本身，挡不住 `.html.zip`。绝不入库。
+.trae-html-share-packages/
+
 # 签名密钥：**绝不入库**（仓库是 public）。
 # 本地一份在仓库外（keystore.properties 指向 ../releases/.keys/videoshell.jks），
 # CI 一份从 GitHub Secrets 解到 $RUNNER_TEMP/sign/（见 .github/workflows/android.yml）。
