@@ -29,7 +29,9 @@ import okhttp3.Response;
  *   C  免校准分类（合成一个"新站"页面，端到端跑 categoriesFrom，证明不用校准也能出分类）；
  *   D  ImageCipher 的未收录站探针（源码守卫 + 语义守卫）；
  *   E  自检报告新增的 [2b] 与改写后的 [3a]（printedLine 守卫，不把注释算成回归）；
- *   F  实时端到端 —— **真正的对照组**：首页副本要认出来，真分类页 / JS 空壳不能被误杀。
+ *   F  实时端到端 —— **真正的对照组**：首页副本要认出来，真分类页 / JS 空壳不能被误杀；
+ *      F5 的 oracle 按 `SoftMiss` 的**两档**判据独立重算（不调 `isCopyOf`，避免循环论证），
+ *      另配 F5b 负控防止 oracle 恒真（见 §4.72）。
  *
  * 入参：a[0] = 夹具目录   a[1] = 工程根（D/E 段读源码）
  */
@@ -127,6 +129,26 @@ public class Universal {
         ok("A10 空壳页的唯一链接数远小于首页（结构确实不同，不是巧合）",
                 sStub.getLinks() * 4 < sHome.getLinks(),
                 sStub.getLinks() + " / " + sHome.getLinks());
+
+        // A11~A14：F5 的**独立 oracle**（`expectHomeCopy`）必须在**离线**就可断言 ——
+        // 否则它只在真网络下被验，凡连不上该站的路径都会整段 SKIP（本机实测就是 SKIP）。
+        // 夹具用 v1.0.72 那次真机 CI 的实测形状：首页 229556 B / 软404候选 229555 B（**差 1 字节**）
+        // / 链接集哈希一致 ⇒ 掉进 tier ②。老 F5 就是在这条形状上假红（E35 / §4.72）。
+        SoftMiss.Sig liveHomeShape = new SoftMiss.Sig(229556, "野果短剧", 199, "ef59b85b68b23177");
+        SoftMiss.Sig liveSoftShape = new SoftMiss.Sig(229555, "野果短剧", 199, "ef59b85b68b23177");
+        note("live 形状夹具：首页 " + liveHomeShape.getLen() + " B / 候选 "
+                + liveSoftShape.getLen() + " B / 链接集 " + liveSoftShape.getLinkHash());
+        ok("A11 oracle 两档：差 1 字节 + 标题/链接数/链接集一致 ⇒ 判副本（tier ②）",
+                expectHomeCopy(liveHomeShape, liveSoftShape), "false");
+        ok("A12 oracle 两档：完全相同的页 ⇒ 判副本（tier ①）",
+                expectHomeCopy(liveHomeShape, liveHomeShape), "false");
+        ok("A13 oracle **不恒真**：链接集合变了（多一条）⇒ 判「不是副本」",
+                !expectHomeCopy(liveHomeShape,
+                        new SoftMiss.Sig(229600, "野果短剧", 200, "ffffffffffffffff")),
+                "恒真了 ⇒ F5 退化成空断言");
+        ok("A14 oracle 与守卫在**离线夹具**上同结论（1 字节漂移这条真实形状）",
+                expectHomeCopy(sHome, SoftMiss.INSTANCE.sigOf(home + "x"))
+                        == SoftMiss.INSTANCE.isCopyOf(home, home + "x"), "不一致");
 
         // ---------------------------------------------------------------- B 形状普查
         banner("B. 形状普查 —— 用真实首页验证「数量分得开」这条判据");
@@ -295,18 +317,55 @@ public class Universal {
                             .equals(ls.getLinkHash())
                             || SoftMiss.INSTANCE.sigOf(liveStub).getLen() != ls.getLen(),
                     "两份响应一模一样");
-            boolean byteIdentical = lh.getLen() == ls.getLen()
-                    && lh.getLinkHash().equals(ls.getLinkHash());
-            note("对照组实测：`/?s=<不可能的词>` 与首页逐字节相同? " + byteIdentical);
-            ok("F5 守卫与实测一致（软 404 仍在 ⇒ 必须判为副本；站点已修 ⇒ 必须放行）",
-                    SoftMiss.INSTANCE.isCopyOf(liveHome, liveSoft) == byteIdentical,
-                    "守卫=" + SoftMiss.INSTANCE.isCopyOf(liveHome, liveSoft)
-                            + " 实测逐字节相同=" + byteIdentical);
+            // F5 的 oracle 必须与 `whyCopyOf` 的**文档定义**同档位。
+            //
+            // ⚠️ 老版本的 F5 拿「只有 tier ①」的 `byteIdentical` 当 oracle，而守卫刻意有**两档**
+            //    （②「标题相同 + 唯一链接数相同 + 长度差 <1%」专门兜随机广告位/时间戳）。
+            //    站点后来在 `/?s=` 上差 1 个字节（广告位/时间戳），落进 tier ② ⇒ 守卫判"是副本"
+            //    **完全正确**，老 oracle 却按 tier ① 判"不是" ⇒ 假红（E35 / §4.72）。
+            //    所以这里**独立重算两档** —— 故意**不**调 `isCopyOf`，否则就是循环论证（拿实现验实现，
+            //    实现一旦错就一起错，断言恒真）。
+            SoftMiss.Sig lsStub = SoftMiss.INSTANCE.sigOf(liveStub);
+            boolean guardVerdict = SoftMiss.INSTANCE.isCopyOf(liveHome, liveSoft);
+            boolean expectCopy = expectHomeCopy(lh, ls);
+            note("对照组实测：`/?s=<不可能的词>` 与首页逐字节相同? "
+                    + (lh.getLen() == ls.getLen() && lh.getLinkHash().equals(ls.getLinkHash()))
+                    + " / 守卫结论: " + SoftMiss.INSTANCE.whyCopyOf(liveHome, liveSoft));
+            ok("F5 守卫与文档判据一致（两档独立重算，不调 isCopyOf）",
+                    guardVerdict == expectCopy,
+                    "守卫=" + guardVerdict + " 独立重算=" + expectCopy);
+            // 负控：这份独立 oracle 不能恒真 —— 一份明显不同的页（JS 空壳）必须被判「不是副本」。
+            // 没有它，"guardVerdict == expectCopy" 有可能是两边同时恒 true 的空断言。
+            ok("F5b 负控：独立 oracle 对明显不同的页判「不是副本」（防恒真）",
+                    !expectHomeCopy(lh, lsStub),
+                    "对 JS 空壳页也判成了副本 ⇒ oracle 恒真，F5 失去意义");
         }
 
         System.out.println("\n================ Universal: " + pass + " PASS / " + fail + " FAIL"
                 + (skip > 0 ? " / " + skip + " SKIP" : "") + " ================");
         if (fail > 0) System.exit(1);
+    }
+
+    /**
+     * F5 的**独立 oracle**：按 [SoftMiss] KDoc 里写死的**两档判据**重算一遍
+     * 「给定首页身份，这份页算不算它的副本」。
+     *
+     * 刻意**不复用** `SoftMiss.whyCopyOf` —— 那是拿实现验实现，断言会退化成恒真；
+     * 这里的价值正是「文档说的两档」与「代码实现的两档」是否一致（E35 / §4.72）。
+     */
+    static boolean expectHomeCopy(SoftMiss.Sig home, SoftMiss.Sig now) {
+        // ① 字节级等同：长度一致 + 链接集合哈希一致
+        if (!home.getLinkHash().isEmpty() && home.getLen() == now.getLen()
+                && home.getLinkHash().equals(now.getLinkHash())) {
+            return true;
+        }
+        // ② 近乎等同：标题一致 + 唯一链接数一致 + 长度差 <1%（下限 64）
+        if (!home.getTitle().isEmpty() && home.getTitle().equals(now.getTitle())
+                && home.getLinks() == now.getLinks()
+                && Math.abs(home.getLen() - now.getLen()) <= Math.max(home.getLen() / 100, 64)) {
+            return true;
+        }
+        return false;
     }
 
     static boolean isSortedByNames(List<HtmlTemplates.ShapeHit> hits) {

@@ -99,7 +99,7 @@
 | E32 | 「有复制按钮的普通站」被拖进网盘链路 | TVBox 原正则的分享 id 字符类没排 `.`，`pan.baidu.com/s/1.html` 被解析成 `baidu:1.html`（长度过闸） | 自门控入口（`SiteAdapter.resolve` 第 0 步）的判据字符类要**按实际 id 形态收紧**：九个盘 id 只用字母数字（百度/迅雷另带 `_` `-`）。负例清单必须含 `s/1.html` 这类"路径噪声"。见 §4.58（v1.0.65） |
 | E33 | 新增两个文件，编译报几十个无关 unresolved | Kotlin 硬语法两条：① 同名 `data class` 与 `object` 不能共存（`PanLink.parse` 全 unresolved）；② 一个类只能有一个 `companion object`（`Only one companion object is allowed`） | 错误数突然到几十而改动只有一两处新文件 ⇒ 先找"唯一那句描述真问题的错"，别按错误数估工作量。见 §4.58（v1.0.65） |
 | E34 | 离线 harness 里 Java 断言编译不过 / Python 替换脚本 `count==0` | 三个小坑：① `Result<Long?>.getOrDefault(0L)` 推断成 `Long?`；② Kotlin `is` 前缀属性的 Java getter 是 `isVideo()` 不是 `getIsVideo()`；③ 本机 Git Bash heredoc 会**吞掉** Python 字面量里的反斜杠 | ①用 `getOrNull() ?: 0L`；②按 Kotlin 属性名规则推 getter；③改用**不含反斜杠的锚点**做替换并打印计数复核。见 §4.58（v1.0.65） |
-| E35 | `rununiversal` 长期 `BAD PASS=40 FAIL=1`（唯一失败 F5） | F5 的 oracle 只实现了 tier ①（len+linkHash 一致），而 `SoftMiss.whyCopyOf` **刻意有两档**，②专门兜"随机广告位/时间戳"。该站软404落在 tier ② ⇒ 守卫判"是副本"（对），F5 按 tier ① 判"不是"（错） | **探针太严 ≠ 站点漂移**。改 oracle 时禁止直接调被测函数（循环论证）。本条**未修**，见 §4.58（v1.0.65）；对照 `_runall.log`/`_runall2.log` 确认为存量红 |
+| E35 | `rununiversal` 长期 `BAD PASS=40 FAIL=1`（唯一失败 F5） | F5 的 oracle 只实现了 tier ①（len+linkHash 一致），而 `SoftMiss.whyCopyOf` **刻意有两档**，②专门兜"随机广告位/时间戳"。该站软404落在 tier ②（差 1 字节）⇒ 守卫判"是副本"（对），F5 按 tier ① 判"不是"（错） | **探针太严 ≠ 站点漂移**。改 oracle 时禁止直接调被测函数（循环论证）。**v1.0.72 发版轮已修**：oracle 升级成**独立重算两档**（`expectHomeCopy`，不调 `isCopyOf`）+ F5b 负控防恒真 + A11~A14 **离线**夹具（用那次 CI 的真实数字 229556/229555）把这条真网络判据搬进离线。见 §4.58 / §4.72（v1.0.72） |
 | E36 | 云盘 spike 首轮：三条分享里 `dbc851025443` 稳定报 `400 code:14001 Bad Parameter: [非法token]`，另两条全绿 ⇒ 差点写成"该分享已失效 / 玩偶站线路坏一半" | stoken 是 base64 变体、**可能以 `+` 开头**（这条正是 `+JPpdVNi4j…`）。手拼 URL 漏编码 ⇒ `+` 被服务端当**空格**。对照实验证明 14001 ≠ 失效：**不存在的**分享在 token 阶段就报 `404 code:41006 分享不存在` | **同一接口"一部分成功、一部分报同一个错"时先怀疑 URL 编码，别归因站点**；凡把服务端给的 token 塞进 query 都要编码（App 的 `u()` 不能删）。"部分失败"必须做**对照实验**才能下结论。见 §4.59（v1.0.65） |
 | E37 | 拿到一份 1971 字符、24 个键的夸克 Cookie，打 `save` 仍 `401 code:31001 require login [guest]` ⇒ 看着像"接口要额外 header" | **"Cookie 很长、还带 `ctoken`/`__pugs`" ≠ "具备登录态"**。判据只能靠**差分**：带它 vs **不带它**打 `/member`，结果**完全相同**（都 401 31001）⇒ 登录增益为零。旁证：PC 登录态核心字段 `__pus`/`__puus`/`__uid` **全部未出现**；`pan.quark.cn/list` **302 回 `/`**（未登录被踢回首页） | 判"凭据生效没有"看**对照实验**、不看凭据的长相；换 UA（PC/移动）、换 `drive-m`/`drive-h` 域全无差别 ⇒ 与 UA、域都无关。`panquark_spike.py` 已内置 **④.5 登录态体检**（键名 + 差分），无效就直接打印获取指引。见 §4.59（v1.0.65） |
 | E38 | 带**真实**登录凭据打 `POST /file/download`（原 P0 的取流设计），对分享里的文件**一律** `400 code:23018 download file size limit[<fid>]`，连 615MB 的"最小文件"也照拒 | 不是体积问题，是**这条接口对普通账号已经不给了**（六种组合全一样：换 host / 换 UA / 换 Referer / 加 `pf=1&support_https=1` / 加 `group_id`）。真正的入口是 `POST /file/v2/play` ⇒ 返回**转码后的 HLS**（`video_list[].video_info.url` = `media.m3u8`），文件多大都不影响 | 报错文案**逐字读**：`size limit` 名字像"文件太大"，但对照组（更小的文件）同样被拒 ⇒ 文案会骗人。取流入口必须靠**端点矩阵实测**确定，不能靠"这个名字看起来该是取直链的"。见 §4.60（v1.0.65） |
@@ -120,6 +120,7 @@
 | E52 | 网盘**全部无法播放**：`file/v2/play` 回 HTTP 404，而分享完全活着（save/task 都 200、匿名能列出全部集数）；自检里三个带 fid 的端点（`file/v2/play`、`file/play`、`file/delete`）**全 404/400** —— 看着像"fid 无效/会话失效" | **取流请求体是过时的形状**：旧代码发 `{"fid":…,"resolution":"normal"}`（**单数键** + 值 `normal`），而当前网页端（`cloud-drive-web/4.6.7` 的 `share.js`）发的是 `{"fid":…,"resolutions":"low","supports":"fmp4,m3u8"}` ⇒ 服务端按 `resolutions` 找码流、一个都没声明 ⇒ **404**（不是 400 —— "参数错"的形状被误读成"资源不存在"） | ①`playBody()` 按当前网页端形状发（`resolutions` 复数逗号列表 + `supports`）；②取流失败补一次（`retryablePlay` 纯函数：`NeedLogin`/`Dead` 不补）；③**HTTP 层非 2xx 必须带着响应体抛**（`Http.HttpError`）—— 否则只能靠猜方向。见 §4.69（v1.0.71） |
 | E53 | **同一个 commit 的两条 CI 通道结论相反**：tag 通道 `runepname OK PASS=41 FAIL=0`，main 通道 `runepname BAD PASS=0 FAIL=0 rc=1` ⇒ main 门禁红 | 离线套件 `runepname` 的 **F 段是真网络段**；而"站点够不着"有两种形状，`catch (Throwable)` 只兜得住**抛异常的**那一种。**丢包黑洞**不抛异常，每次调用安静地等到 OkHttp `callTimeout(22s)`；F 段最多 ≈20 次调用 ⇒ 最坏 ≈440s ⇒ 撞穿 `runepname.py` 的 **300s 硬超时** ⇒ 整个门禁红，日志只留 `PASS=0 FAIL=0 rc=1`（零归因线索）—— **站点抖动被记成我方回归** | F 段自带**墙钟预算**：主体提成 `runF(budgetMs)`，**返回值即结论**（`F_DONE`/`F_UNREACHABLE`/`F_OVER_BUDGET`），超预算直接 `return` ⇒ F2~F7 一条不记。预算检查排在**任何网络调用之前** ⇒ 配自测 **F0**（`runF(-1L) == F_OVER_BUDGET`，**不依赖网络**）+ 对照组（期望改成 `F_DONE` 必须变红）。见 §4.70（v1.0.71 发版轮） |
 | E54 | ①**木偶站"全部无法播放"**（自检：首页/分类/列表/封面全 200，详情却只有「1 条线路 · 默认线路 · 1 集」，[5] 网页嗅探无结果，[2a] 写着「已判定**不是**网盘分享站族」）；②**蜡笔个别剧集**报「夸克网盘分享里没有找到可播放的视频（夸克网盘接口回 HTTP 404（不是分享失效…）」 | **三个缺陷，全都在"判据"这一层**：①**「原链路成功」被当成「这一页不是网盘分享页」的证据** —— 而原链路可以靠**兜底**产出一条「默认线路」（木偶详情页有个「立刻播放」锚点，`HtmlExtractor` 的"整页链接当一条线路"兜底就把它当成一集）⇒ 一条**播不了的假线路**顶掉了真实的网盘线路，页面上的夸克/UC 链接一次都没被看过；②**Dead 的判据只认 `41006`** —— 实测表是 `41011 分享地址已失效`(404)、`41004 文件不存在`(404)、`41006 分享不存在`(404)、UC `41027 分享不存在`(**403**)。于是"分享真没了"被说成「不是分享失效，可重试」（重试永远失败），而 UC 的 403 又被当成"要登录"⇒ 用户白重登；③**115 网盘不在 `PanLink` 的识别表里** ⇒ 木偶「115臻享」那一页 D2 不成立 ⇒ 判定按 host 落盘、**一票否决** ⇒ **整站**被判「不是网盘分享站族」，连累它自己贴夸克/UC 的标题（抽样 18 个标题里 15 个有夸克/UC） | ① 否定判据换成**决策标记** `HtmlAdapter.lastDetailFlatFallback`（在唯一的成功出口 `buildDetail` 里设置）＋ 页面确实带 D1+D2 ⇒ 认领网盘路径、**不落否定**；真解析出分集才 `markAbsent`；② Dead 提成纯函数 `PanCloudDrive.deadEnvelope(code, message)`（码表 `{41004,41006,41011,41027}` + 「失效/不存在」×「分享/文件/地址」安全网），403 不再无条件 `markExpired`；③ `PanType.CLOUD115` + `115(?:cdn)?\.com/s/…` 进识别表，提取码参数补 `password`，未支持的盘照常出线路（名字「（暂不支持）」，不再叠「（未展开）」误导）；④ **每个请求带上"哪一步"**（取分享令牌/列目录/取播放入口…）—— 真凶之一其实是我们连"哪个接口返的 404"都说不出来。守卫 `runpanmediacookie` **80 条**（新增 J 组 deadEnvelope 正/负例、K 组源码级纪律）、`runpanlink` **131 条**（新增 P 组：115-only 页面必须自证 + 兜底假线路的**对照组**）。见 §4.71（v1.0.72） |
+| E55 | v1.0.72 发版轮：**tag 通道 CI 红、Release 没生成**（main 通道同一 commit 却绿）；失败步 `Offline regression`，明细 `rununiversal BAD PASS=40 FAIL=1`（唯一失败仍是 F5，`守卫=true 实测逐字节相同=false`）。⚠️ **还叠加了一次自己的误读**：`gh run watch <id> \| tail` 让 `$?` 变成 `tail` 的退出码 ⇒ **把 tag 通道 failure 读成了 success**，直到发现 Releases 页**根本没有 v1.0.72** 才暴露 | 就是 E35 那条**存量红**，但发版轮把它从"看着不舒服"升级成**硬门禁拦路**：tag 通道要 `Offline regression` 绿才会 `Publish Release` ⇒ **CI 结论读错 = 白等一个永远不来的 Release**。F5 的 oracle 与实现**两档定义不一致**（详见 E35/§4.72）：站点这次差 **1 字节**（`229556 vs 229555`，linkHash 相同）落进 tier ② ⇒ 守卫判"是副本"（**正确**），老 oracle 按 tier ① 判"不是" ⇒ 假红。同一 commit 的 main 绿是因为 F 段真网络那次抓取 `SKIP`（**站点抖动被记成绿**，另一种不可靠） | ①F5 的 oracle 升级成**独立重算两档**（`Universal.expectHomeCopy`：tier ① len+linkHash / tier ② title+links+长度差<1%）——**刻意不调 `isCopyOf`**，否则是"拿实现验实现"的循环论证（E35 早已写明这条禁令）；②补 **F5b 负控**（独立 oracle 对 JS 空壳页必须判"不是副本"）防它恒真；③把这条**真网络判据搬到离线**：A11~A14 用那次 CI 的**真实数字**（`229556`/`229555`/`ef59b85b68b23177`）造夹具，本机无网也能红绿；④**核 CI 结论只看 `gh run list` / `gh run view`，不许 `\| tail` 取退出码**。见 §4.72（v1.0.72） |
 
 ---
 
@@ -1949,7 +1950,7 @@ sha256、`parse()` 判据**全都是对的** —— 读代码读不出任何问�
    凡是要匹配含反斜杠的源码，改用**不含反斜杠的锚点**做替换（例：把 `]+)"""` 换成 `.]+)"""`），
    并在替换后**打印计数复核**（见 `win-gitbash-build-env-pitfalls`）。
 
-### E35 ⚠️ 未修：`rununiversal` 的 F5 是**探针太严**，不是站点漂移（存量红）
+### E35 ✅ 已修（v1.0.72）：`rununiversal` 的 F5 是**探针太严**，不是站点漂移（曾为存量红）
 
 - **现象**：`rununiversal` 持续 `BAD PASS=40 FAIL=1`，唯一失败是
   `F5 守卫与实测一致 … 守卫=true 实测逐字节相同=false`。
@@ -1959,9 +1960,15 @@ sha256、`parse()` 判据**全都是对的** —— 读代码读不出任何问�
   而 `SoftMiss.whyCopyOf` **刻意有两档**：②「标题相同 + 唯一链接数相同 + 长度差 <1%」
   专门兜"随机广告位 / 时间戳"。该站现在的软 404 落在 tier ② ⇒ 守卫判"是副本"（正确），
   F5 却按 tier ① 判"不是"⇒ 断言红。**是 oracle 与实现的两档定义不一致，不是守卫错**。
-- **处置**：未动。要么把 F5 的 oracle 升级成两档（**注意别直接调 `isCopyOf`，那会变成循环论证**），
-  要么把 F5 降级成 `note`。它属于 `runall.py` 文件头讲的"活体断言分类"问题，
-  改动会动到 SoftMiss 的语义，留待确认。
+- **为何一直"未动"**：它属于 `runall.py` 文件头讲的"活体断言分类"问题；改 oracle 有个陷阱 ——
+  **不能直接调 `isCopyOf`**（拿实现验实现 = 循环论证，断言恒真）。
+- **v1.0.72 处置（已修）**：它从"看着不舒服"变成**发布硬门禁**（tag 通道要 `Offline regression`
+  绿才 `Publish Release`，见 E55/§4.72），于是：
+  ① `Universal.expectHomeCopy(home, now)` —— 按 KDoc 的**两档**独立重算，**不调** `isCopyOf`；
+  ② **F5b 负控**（独立 oracle 对 JS 空壳页必须判"不是副本"）证明 oracle **不恒真**；
+  ③ **A11~A14 离线夹具**：用那次 CI 的真实数字（首页 `229556 B` / 候选 `229555 B` / 链接集
+     `ef59b85b68b23177`，**差 1 字节** = tier ②）把这条真网络判据搬进**离线**（本机无网也跑）；
+  ④ F 段仍保留 live 抓取 —— 现在它只负责"站点是什么样"，**一致性的担保交给纯函数 oracle**。
 
 ---
 
@@ -3092,4 +3099,72 @@ play/id/8623    `var player_aaaa={…,"url":"","from":"","server":""}`          
   省掉一整轮扒 bundle。
 - **对照组的位置**：`P5` 是本次新增的关键对照 —— 把夹具里那个「立刻播放」锚点**只删这一处**，
   `parseGroups` 就不该再产出线路。有它，"P3/P4 观测到的是兜底造成的"才算被证明了。
+
+---
+
+## §4.72 F5 从"存量红"变成"发布拦路虎"：发版轮才逼出来的三个教训（v1.0.72，E55）
+
+v1.0.72 是「木偶/蜡笔播不了」的修复版（§4.71）。代码、守卫、全量回归、REST 推送全绿之后，
+**发版卡住了**：tag 通道 CI 红 ⇒ `Publish Release` 没跑 ⇒ Releases 页上**根本没有 v1.0.72**。
+这条红不是新引入的，而是 §4.58 就记下的 **E35 存量红**（`rununiversal` 的 F5）——
+它一直在，只是从"看着不舒服"升级成了"发不出去"。三个教训都值得单独记。
+
+### 一、"存量红"是会复利的 —— 它迟早从噪音变成门禁
+
+E35 当时判"未动"是对的（它确实不影响功能），但它**没有被隔离**：它就在那条**硬门禁**里
+（`Offline regression` 是发版的必经步骤）。于是同一件事在一次发版里同时具备两种身份 ——
+"已知噪音"和"阻断发布"。教训：**存量红要么修掉、要么从门禁里显式摘出去并留下"为何安全"的判据**，
+不能只是"我们知道它红"。悬着不动的红，代价会在最不该付的时候结账。
+
+### 二、oracle 与实现"同源不同档"＝ 必然假红（E35 的技术内核）
+
+`SoftMiss.whyCopyOf` 刻意有**两档**：① `len` 一致 + `linkHash` 一致；② 标题一致 + 唯一链接数一致
++ **长度差 <1%**（专门兜随机广告位/时间戳）。而 F5 的 oracle 只写了**第①档**。
+站点这次对 `/?s=<不可能的词>` 吐回的页与首页**差 1 个字节**（`229556 vs 229555`，链接集完全相同）
+⇒ 落进第②档 ⇒ 守卫判"是副本"（**完全正确**），老 oracle 按第①档判"不是" ⇒ 假红。
+
+**判据**：当一个断言要"独立重算一份期望"，它必须与**被测函数的文档定义同档位**。
+只覆盖实现的一部分分支的 oracle，不是"更严格的守卫"，是**会随机喊狼来了的守卫** ——
+而喊过几次假狼之后，真的红也没人看了。
+
+### 三、修它有个必须先拆掉的陷阱：别拿实现验实现
+
+E35 原文已经写明禁令：**"改 oracle 时禁止直接调被测函数（那会变成循环论证）"**。
+如果 F5 写成 `isCopyOf(...) == isCopyOf(...)`，它**永远绿**，且看不出任何问题 ——
+这正是本项目最忌讳的 **vacuous 断言**。所以修法是**独立重写两档**：
+
+```java
+static boolean expectHomeCopy(SoftMiss.Sig home, SoftMiss.Sig now) {
+    if (!home.getLinkHash().isEmpty() && home.getLen() == now.getLen()
+            && home.getLinkHash().equals(now.getLinkHash())) return true;      // tier ①
+    if (!home.getTitle().isEmpty() && home.getTitle().equals(now.getTitle())
+            && home.getLinks() == now.getLinks()
+            && Math.abs(home.getLen() - now.getLen()) <= Math.max(home.getLen() / 100, 64))
+        return true;                                                          // tier ②
+    return false;
+}
+```
+
+三条配套（缺一条就会退化成另一种假绿）：
+
+1. **F5b 负控**：独立 oracle 对一份明显不同的页（JS 空壳）**必须**判"不是副本"。
+   少了它，`guardVerdict == expectCopy` 有可能是**两边同时恒 true** 的空断言。
+2. **A11~A14 离线夹具**：把那次 CI 的**真实数字**（`229556`/`229555`/`ef59b85b68b23177`）
+   造成 `SoftMiss.Sig` 直接喂给 oracle。这条判据本来是**真网络**的（本机实测整段 `SKIP`），
+   搬进离线后**无网也能红绿** —— 否则它在开发机上永远验不到。
+3. **F 段保留 live 抓取，但职责变了**：它只负责回答"站点今天长什么样"，
+   **一致性的担保交给纯函数 oracle**。真网络数据只做输入，不做结论。
+
+### 四、顺带：`gh run watch | tail` 会把退出码吃掉
+
+本轮还踩了一个自己的坑：`gh run watch <id> | tail` 之后 `$?` 是 **`tail` 的**退出码（0），
+于是 **tag 通道的 failure 被读成了 success**，差点据此认为"发版成功、只等 CDN"。
+真相是靠核对 Releases 页（**没有 v1.0.72**）才浮出来的。
+**核 CI 结论只看 `gh run list` / `gh run view`**，不要在管道尾部读退出码。
+
+- **守卫**：`rununiversal` F5 重写 + F5b + A11~A14（本机无网实测 `40 PASS / 0 FAIL / 1 SKIP`，
+  F 段 `SKIP` 是预期）。E35 从"未修"改为"已修"。
+- **教训一句话**：**"我们知道的存量红"不是免责声明，是一张迟早要还的账单；
+  而修它时最先要防的，是修出一个永远绿的断言。**
+
 
