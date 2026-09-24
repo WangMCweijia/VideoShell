@@ -117,6 +117,7 @@
 | E49 | 站点列表里显示「再见，我们跑路了」「求大佬们别爬了」「网站关闭」当站名，用户以为站全死了 | 站长把反爬牢骚写进 `<title>`，而 `titleOf` 裸取 `<title>.take(30)` 当站名。牢骚是**页面文本**，不是关站告示 —— 站活着（首页 2000+ 卡片） | 站名净化 `SiteDetector.cleanSiteName`：按标点/空白**切子句**、含牢骚词的子句整段剔除、剔完为空回落 host；词表刻意窄（误伤必须为零，正常站名逐字节保留——有守卫钉住）。**存量自愈**：落盘的旧名字不会自己变 ⇒ `MainActivity.refresh` 顺手净化回写。⚠️ 给 Java harness 用的函数必须 public + `@JvmOverloads`（`internal` 有名字修饰、默认参数对 Java 不可见）。见 §4.66（v1.0.68） |
 | E50 | v1.0.68 真机报障：网盘**取流全程成功**（token→save→v2/play 拿到直链），分片直链却**全 403**（每片 60~114ms 就被拒）；重解析换直链也 403。诊断面板看着自相矛盾——"凭据没问题（能取流）却每片被拒" | **`__puus` 是滚动凭据**：每次 API 响应都会 `Set-Cookie` 下发新值（这条事实 E45 的注释里自己写过），落盘快照**只新鲜一阵**。媒体域（`video-play-*.drive.quark.cn`）校验的就是它 ⇒ 快照旧了 ⇒ 全分片 403。而 API 域对旧值宽容 ⇒ 取流照常成功 —— **"取流成功"不是"凭据没问题"的证据**，两个域的宽严不同。E37 当年实测 200 用的是登录**当天**的新鲜值，结论"只认 Cookie"没错，但"快照永远有效"没验证过。⚠️ 403（带了过期凭据）与 412（完全没带凭据，E37）是两种形状，别混着归因 | 媒体头合成：**快照打底 + jar 最新值覆盖**（`PanCloudDrive.mediaCookie` 纯函数；jar 因为 `Domain=.quark.cn` 宽域 + CookieJar 不分桶，恰好一直与服务端同步）。再配**一次**自动重解析自愈（403 时重走 save→play，服务端随响应下发新凭据；`PanResolver.isPanMediaUrl` 把闸——普通站点流的 403 是防盗链/下架，重解析救不了也不该拉长转圈）。守卫 `runpanmediacookie`（21 条：合成方向/白名单/退路/判域）。见 §4.67（v1.0.69） |
 | E51 | 夸克线路**选集一条都不显示**，详情页只剩一条「打开分享（未展开）」，而那条分享**完全活着**（PC 匿名能把 11 集全列出来）；同一批资源还伴生「所有夸克资源都提示分享已失效」 | 两个缺陷叠加，**一个让失败变永久、一个让方向被报错**：① `PanResolver.expand` 把"取不到"当成"目录空"（契约 `PanProvider.lastError` 明写着失败也返回空表，调用方却没读），**并且把这份空树写进 10 分钟缓存** ⇒ 用户点「打开分享（未展开）」重试时命中的还是同一份空结果，*重试这个自救入口形同不存在*；② `classify()` 里 **`404 -> PanError.Dead("分享链接已失效")`** 是**被证伪的归因**——分享真被删时夸克回的是 HTTP 200 + 信封 `code:41006`（P0 实测表），而 `file/v2/play` 匿名打是 **401 require login**（免凭据探针），端点压根没消失。404 的真实含义是"这次请求被端点/风控层拒了"。`Dead` 是**终态**语义（提示换线路、不再重试），判错方向比判不出更糟 | `expand` 失败不入缓存 + **有界补一次**重试（`Http.worthRetry` 只重试 429/5xx，404 一次就断）；`episodes()` 顺着契约读 `lastError`，把"取不到"与"真没视频"分开报；HTTP 状态码归类提成纯函数 `PanCloudDrive.errorForHttp`，**任何状态码都不产生 Dead**（Dead 只留给 `41006`）；兜底集在界面上写「（未展开）」而不是「（1 集）」，自检里报 ⚠️ 而不是 ✓（失败不许被伪装成成功）。守卫 `runpanmediacookie` 扩到 35 条（含**全量扫描 100..599 无 Dead** 与源码级"旧归因不许回来"）。见 §4.68（v1.0.70） |
+| E52 | 网盘**全部无法播放**：`file/v2/play` 回 HTTP 404，而分享完全活着（save/task 都 200、匿名能列出全部集数）；自检里三个带 fid 的端点（`file/v2/play`、`file/play`、`file/delete`）**全 404/400** —— 看着像"fid 无效/会话失效" | **取流请求体是过时的形状**：旧代码发 `{"fid":…,"resolution":"normal"}`（**单数键** + 值 `normal`），而当前网页端（`cloud-drive-web/4.6.7` 的 `share.js`）发的是 `{"fid":…,"resolutions":"low","supports":"fmp4,m3u8"}` ⇒ 服务端按 `resolutions` 找码流、一个都没声明 ⇒ **404**（不是 400 —— "参数错"的形状被误读成"资源不存在"） | ①`playBody()` 按当前网页端形状发（`resolutions` 复数逗号列表 + `supports`）；②取流失败补一次（`retryablePlay` 纯函数：`NeedLogin`/`Dead` 不补）；③**HTTP 层非 2xx 必须带着响应体抛**（`Http.HttpError`）—— 否则只能靠猜方向。见 §4.69（v1.0.71） |
 
 ---
 
@@ -2881,3 +2882,67 @@ v1.0.68 发版当天真机报障：夸克分享能展开、能转存、`file/v2/
   （信封 `41006`），不能是"HTTP 状态码看起来像"。
 - **兜底展示不许冒充成功**：兜底集叫「未展开」而不是「1 集」；自检报 ⚠️ 而不是 ✓。
   否则失败在界面上与自检里**同时隐身**，用户只能报"不显示"，我们只能靠猜。
+
+---
+
+## §4.69 「网盘全部无法播放」：请求体形状过时，而我们丢掉了服务端说的话（v1.0.71，E52）
+
+2026-09-24 真机：**蜡笔、木偶所有网盘线路都无法播放**（蜡笔详情页自检 [5] 明确写
+「夸克网盘接口回 HTTP 404」）。
+
+### 一、证据链（每一环都可复核）
+
+| 观察 | 事实 |
+|---|---|
+| 站点 | 木偶首页 490KB、658 个详情链接、线路 BD/KK/UC、剪贴板链齐全 ⇒ **站活着**（title 的「再见，我们跑路了」是 E49 那类反爬牢骚） |
+| 分享 | 匿名 spike：`sharepage/token` + `detail` 全通；`天赐的声音S2` 11 个文件、Interstellar 4K 都在 ⇒ **分享活着** |
+| 转存 | 真机日志 `share/sharepage/save` 200 → `task` 200（一个 poll 就 status=2）⇒ **会话可用**（写自己网盘必须有登录态） |
+| 取流 | `file/v2/play` **404**、`file/play` raw/low **404**、`file/delete` **400** ⇒ 三个带 fid 的端点全灭 |
+| 路由在吗 | 匿名打 `file/v2/play` → **401 `code:31001 require login`**；不存在的路由匿名也是 404 ⇒ **路由没改**，排除"接口下架" |
+| 参数对吗 | `share.js` 里 `E.SYNC=1 / E.ASYNC=2` ⇒ `file/delete` 的 `action_type:2` **是对的** ⇒ 排除"删除参数写错" |
+
+### 二、定性：扒当前网页端 bundle（不登录也能拿到"正确形状"）
+
+`pan.quark.cn/s/<id>` 加载 `g.alicdn.com/uc-cloud-drive-web-system/cloud-drive-web/4.6.7/share.js`
+（2026-09-24 下载 1.1MB 直接读）。里面的取流调用是：
+
+```js
+POST <cloudDriveHost>/1/clouddrive/file/v2/play
+data: Object.assign({ fid, resolutions: (res||["low"]).join(","), supports: "fmp4,m3u8" }, rest)
+```
+
+⇒ **`resolutions`（复数、逗号分隔）+ `supports`**；我们发的是 `resolution`（单数）/ 值 `normal`。
+服务端照 `resolutions` 找码流，一个都没声明 ⇒ 找不到 ⇒ **404**。
+（`normal` 也不在词汇表里，当前是 `low/high/super`。）
+
+同一份 bundle 还否掉了两条旧结论：
+
+- `GET /file/play` 在网页端**已 0 引用** ⇒ 那条退路已下架（真机 404 与它吻合）；
+- 分享页播放走 `GET /share/sharepage/video_preview`（只要 `pwd_id/stoken/fid/fid_token`，
+  **匿名可用**）—— 但它给的是**游客试看**：`play_info.duration=120`，而 `preview_url` 实测
+  回来是 `image/webp`、14KB 的**预览图** ⇒ **不能拿它当全片播放**（谁把它当视频流，谁黑屏）。
+
+### 三、修法
+
+1. `PanCloudDrive.playBody()` 按当前网页端形状发请求体（`resolutions` + `supports`）。
+   守卫 H 组钉三件事：复数键在、`supports` 在、**单数键 `put("resolution"` 必须不在**。
+2. `playUrl` 拆成「重试壳 + 单次」：失败补**一次**（0.9s），判据是纯函数 `retryablePlay`
+   （`NeedLogin`/`Dead` 不补 —— 补了结论一样，只会把失败路径从 1 秒拖成 3 秒）。
+3. **`Http.HttpError`：非 2xx 带着响应体抛**（`"HTTP <code> @ <url> | <前 200 字>"`，NetLog
+   同时记一条带 body 片段的记录）；`postJsonOnceRaw` 相应把 body 交出来；`classify` 改为
+   **信封优先**（body 里写 `code:31001 require login` 时，哪怕 HTTP 是 404 也按"要登录"归类）。
+4. 响应解析提成 `urlOf()`（`video_list[].video_info.url` → `video_list[].url` → `data.url`），
+   并**明确禁止**退到 `preview_url`（那是预览图）。
+
+### 四、方法论
+
+- **"取流全链路失败"先分清三件事：路由在不在 / 参数对不对 / 凭据有没有。** 每件都有便宜判据：
+  匿名打一下（401 = 路由在、404 = 路由不在）、读网页端 bundle（**当前**权威形状）、
+  看"哪些端点活哪些死"（活的全是不带 fid 的 ⇒ 断点就在 fid 那一段）。
+- **私有接口的权威形状就写在客户端 JS 里。** 不用登录、不用抓包：页面引用的那个 `share.js`
+  就是它对服务端的全部要求（路径、方法、字段、枚举值），而且是**当天**的真相 ——
+  比翻第三方 SDK、比猜参数都强。
+- **丢掉响应体 = 丢掉归因能力。** 这次绕了一大圈（扒 bundle）才拿到答案，而答案本来就在
+  404 的 body 里。凡"非 2xx 直接抛状态码"的封装，都在给自己挖这个坑。
+- **404 不等于"资源不存在"**：参数没声明、码流匹配不到，服务端也可能回 404 ——
+  于是"参数错"被读成"东西没了"，方向一下就偏了。

@@ -172,6 +172,43 @@ object Http {
     }
 
     /**
+     * 带**响应体**的 HTTP 错误（v1.0.71）。
+     *
+     * ### 为什么必须带着 body 抛
+     *
+     * 原先非 2xx 一律抛 `IOException("HTTP 404 @ url")` —— **服务端说的那句话被丢掉了**。
+     * 对云盘接口这是致命的：夸克/UC 的失败原因全在信封里
+     * （`{"status":404,"code":41006,"message":"…"}`、`code:14001 Bad Parameter: [xxx]`），
+     * 而 HTTP 状态码只是个粗壳。
+     *
+     * 真机踩到的形状（2026-09-24，`file/v2/play` 回 HTTP 404 但分享完全活着）：
+     * 手上只有"404"这一个事实，于是"是 fid 不对 / 是会话不对 / 是参数不对"三种归因
+     * **全都只能猜**，靠翻网页端 bundle 才把答案找出来。如果当时 body 在手上，
+     * 一行 message 就够了 —— 所以这条不是"顺手加个日志"，是**诊断能力的地基**。
+     *
+     * ### 兼容性约束（改 message 前先读这段）
+     *
+     * `message` **必须以 `"HTTP <code> "` 开头**：`worthRetry` / `postJsonOnceRaw` 等
+     * 都靠这个前缀解析状态码，`PanCloudDrive.httpCode` 也用正则从里面抠。body 追加在
+     * 末尾（`" | "` 之后），200 字符以内、空白压平。
+     */
+    class HttpError(val code: Int, val url: String, val body: String) : IOException(
+        "HTTP $code @ $url" + if (body.isBlank()) "" else " | $body"
+    )
+
+    /**
+     * 非 2xx 响应体的片段（诊断用）：解出文本、压平空白、截 200 字符。
+     * 解不出来（二进制/怪编码）就返回空串 —— 诊断信息可以少，但不能因此把请求搞崩。
+     */
+    private fun snippetOf(bytes: ByteArray, resp: okhttp3.Response): String {
+        if (bytes.isEmpty()) return ""
+        val declared = resp.body?.contentType()?.charset()?.name()
+        val txt = runCatching { decodeBody(bytes, declared) }
+            .getOrElse { runCatching { String(bytes, Charsets.UTF_8) }.getOrDefault("") }
+        return txt.replace(Regex("\\s+"), " ").trim().take(200)
+    }
+
+    /**
      * 优先返回 IPv4 地址。
      *
      * 有些网络里 IPv6 地址**能解析但连不通**（黑洞）。OkHttp 默认按系统给的顺序试，
@@ -505,8 +542,14 @@ object Http {
         try {
             c.newCall(b.build()).execute().use { resp ->
                 val bytes = resp.body?.bytes() ?: ByteArray(0)
+                if (!resp.isSuccessful) {
+                    // 服务端说的那句话必须带出去（见 [HttpError]）。
+                    // 只对失败解 body —— 成功路径不付这个解码成本。
+                    val snip = snippetOf(bytes, resp)
+                    NetLog.record(url, resp.code, System.currentTimeMillis() - t0, snip.take(120))
+                    throw HttpError(resp.code, url, snip)
+                }
                 NetLog.record(url, resp.code, System.currentTimeMillis() - t0)
-                if (!resp.isSuccessful) throw IOException("HTTP ${resp.code} @ $url")
                 return decodeBody(bytes, resp.body?.contentType()?.charset()?.name())
             }
         } catch (e: Exception) {
@@ -653,9 +696,9 @@ object Http {
      *    让它白自旋 2.4 秒去撞一个**必定失败**的请求，纯粹是拖慢播放启动。
      *  - **把状态码交出来**：调用方要能区分"成了 / 4xx 别再试 / 5xx 稍后再试"这三种结局。
      *
-     * ⚠️ 非 2xx 时 `oncePostJson` 抛的是 `IOException("HTTP <code> @ <url>")`，**正文拿不到**
-     * ⇒ 第二个返回值是 `""`。所以这个 API 只适合"按状态码分派"的调用；要读 4xx 的正文
-     * （比如 `code:23004` 那种），得走别的路子。清理逻辑不需要它 —— 4xx 一律"别再试"。
+     * ⚠️ 非 2xx 时 `oncePostJson` 抛的是 [HttpError]，v1.0.71 起**第二个返回值是响应体片段**
+     * （原先是 `""`）—— 于是 `code:23004 文件已经删除` / `code:14001 参数错` 这类
+     * "4xx 但原因不同"的形状终于能分开。不关心正文的调用方直接忽略第二个值即可。
      *
      * 仍然记 `NetLog`（复用 [oncePostJson]），诊断信息不丢。
      */
@@ -668,14 +711,10 @@ object Http {
     ): Pair<Int, String> = withContext(Dispatchers.IO) {
         try {
             200 to oncePostJson(url, json, referer, ua, headers)
+        } catch (e: HttpError) {
+            e.code to e.body
         } catch (e: Exception) {
-            val m = e.message.orEmpty()
-            val code = if (m.startsWith("HTTP ")) {
-                m.removePrefix("HTTP ").takeWhile { it.isDigit() }.toIntOrNull() ?: -1
-            } else {
-                -1
-            }
-            code to ""
+            -1 to ""
         }
     }
 
@@ -703,8 +742,14 @@ object Http {
         try {
             client.newCall(b.build()).execute().use { resp ->
                 val bytes = resp.body?.bytes() ?: ByteArray(0)
+                if (!resp.isSuccessful) {
+                    // 服务端说的那句话必须带出去（见 [HttpError]）。
+                    // 只对失败解 body —— 成功路径不付这个解码成本。
+                    val snip = snippetOf(bytes, resp)
+                    NetLog.record(url, resp.code, System.currentTimeMillis() - t0, snip.take(120))
+                    throw HttpError(resp.code, url, snip)
+                }
                 NetLog.record(url, resp.code, System.currentTimeMillis() - t0)
-                if (!resp.isSuccessful) throw IOException("HTTP ${resp.code} @ $url")
                 return decodeBody(bytes, resp.body?.contentType()?.charset()?.name())
             }
         } catch (e: Exception) {
@@ -741,8 +786,14 @@ object Http {
         try {
             c.newCall(b.build()).execute().use { resp ->
                 val bytes = resp.body?.bytes() ?: ByteArray(0)
+                if (!resp.isSuccessful) {
+                    // 服务端说的那句话必须带出去（见 [HttpError]）。
+                    // 只对失败解 body —— 成功路径不付这个解码成本。
+                    val snip = snippetOf(bytes, resp)
+                    NetLog.record(url, resp.code, System.currentTimeMillis() - t0, snip.take(120))
+                    throw HttpError(resp.code, url, snip)
+                }
                 NetLog.record(url, resp.code, System.currentTimeMillis() - t0)
-                if (!resp.isSuccessful) throw IOException("HTTP ${resp.code} @ $url")
                 return decodeBody(bytes, resp.body?.contentType()?.charset()?.name())
             }
         } catch (e: Exception) {

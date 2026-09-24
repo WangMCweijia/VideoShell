@@ -120,6 +120,19 @@ class PanCloudDrive private constructor(
         private const val MIME_HLS = "application/x-mpegURL"
 
         /**
+         * 取流请求体里点名的分辨率（**复数、逗号分隔** —— v1.0.71 纠正的形状）。
+         *
+         * `low/high/super` 是当前网页端的词汇表；`normal` 不是（旧代码发的是
+         * `resolution:"normal"`，服务端匹配不到码流 ⇒ 404）。三档都点名，图的是
+         * "哪档能出就给哪档"，最终取哪档由响应里的 `default_resolution` 决定。
+         */
+        const val DEFAULT_RESOLUTIONS = "low,high,super"
+
+        /** 取流尝试次数与补一次的间隔（刚转存完的文件偶尔"还没就绪"） */
+        private const val PLAY_TRIES = 2
+        private val PLAY_RETRY_DELAY_MS = longArrayOf(900L)
+
+        /**
          * 媒体 Cookie 合成（**纯函数**，离线 harness 断言的就是它 —— `PanMediaCookieTest`）。
          *
          * 落盘快照打底（白名单键），[fresh]（jar 最新值，见 [Http.cookieValuesFor]）
@@ -174,6 +187,52 @@ class PanCloudDrive private constructor(
             code in 500..599 -> PanError.Broken("${type.label}服务端错误（HTTP $code）—— 稍后重试")
             code > 0 -> PanError.Broken("${type.label}请求失败（HTTP $code）")
             else -> PanError.Net("${type.label}网络请求失败")
+        }
+
+        /**
+         * 取流请求体（v1.0.71）。
+         *
+         * 判据来自**当前网页端的实现本身** —— 2026-09-24 直接下载并读了
+         * `cloud-drive-web/4.6.7/share.js`（`pan.quark.cn/s/<id>` 真正加载的那份）：
+         *
+         * ```js
+         * POST <host>/1/clouddrive/file/v2/play
+         * data: Object.assign({ fid, resolutions: (res||["low"]).join(","),
+         *                       supports: "fmp4,m3u8" }, rest)
+         * ```
+         *
+         * ⇒ 是 `resolutions`（**复数、逗号分隔**）+ `supports`；我们原先发的
+         * `resolution`（单数）/ 值 `normal` 是过时形状，服务端匹配不到码流 ⇒ **HTTP 404**。
+         *
+         * ⚠️ 同一次下载还确认了另外两件事，别再回头试：
+         *  - `file/delete` 的 `action_type:2`（= `E.ASYNC`）**是对的**（bundle 里 `SYNC=1/ASYNC=2`）；
+         *  - 网页端**没有** `GET /file/play` 这条退路（bundle 里 0 次）⇒ 它已下架。
+         *
+         * 只声明 `m3u8`（HLS 清单，ExoPlayer 直接吃）与 `fmp4`；不声明 `preview_url`
+         * 那条游客试看通道（它给的是预览图，见 [urlOf]）。
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun playBody(fid: String, resolutions: String = DEFAULT_RESOLUTIONS): String =
+            JSONObject()
+                .put("fid", fid)
+                .put("resolutions", resolutions)
+                .put("supports", "m3u8,fmp4")
+                .toString()
+
+        /**
+         * 取流失败值不值得补一次（**纯函数**，`PanMediaCookieTest` 钉着）。
+         *
+         * 补一次 ≠ 无脑重试：[PanError.NeedLogin]（要用户去登录）与 [PanError.Dead]
+         * （分享真被删，终态）补多少次结论都一样 ⇒ 立刻收手，别把失败路径从 1 秒拖成 3 秒。
+         * 其余（4xx/5xx/网络）都含"这次不巧"的成分，而取流失败时用户已经在等，
+         * 多 0.9 秒换一次成功是划算的。
+         */
+        @JvmStatic
+        fun retryablePlay(e: PanError?): Boolean = when (e) {
+            null -> false
+            is PanError.NeedLogin, is PanError.Dead -> false
+            else -> true
         }
     }
 
@@ -430,34 +489,41 @@ class PanCloudDrive private constructor(
     /**
      * 取**播放入口**（转码后的 m3u8）。
      *
-     * 首选 `POST /file/v2/play`：它除了给 URL，还自报 `default_resolution`
-     * （实测 `"super"`）以及每档的 `right`/`member_right`/`trans_status`/`accessable`/
-     * `width`/`bitrate`/`size`。**按服务器自报的默认档取**，比我们猜"哪档能用"可靠得多；
-     * 将来若要做"会员过期就降档"，判据也就在这几个字段里。
+     * 首选 `POST /file/v2/play` —— ⚠️ **请求体形状在 v1.0.71 纠正过，改之前先读 [playBody]**：
+     * 旧代码发的是 `{"fid":…,"resolution":"normal"}`（**单数** + 值 `normal`），而当前网页端
+     * （cloud-drive-web 4.6.7 的 `share.js`，2026-09-24 直接扒 bundle 得到的）发的是
+     * `{"fid":…,"resolutions":"low","supports":"fmp4,m3u8"}` ⇒ 服务端找不到匹配的码流，
+     * **回 HTTP 404**。真机症状：save/task 全 200，三个带 fid 的端点（v2/play、file/play、
+     * file/delete）全 404/400 —— 看着像"fid 无效"，其实是请求体过时。
      *
-     * 退路 `GET /file/play?resolution=raw|low`：实测两档都能出 URL（`raw` 是原画那份，
-     * 与 v2 里的 `super` 指向同一个 m3u8 路径）。**只在前者拿不到 URL 时走**。
+     * 它还自报 `default_resolution` 与每档的 `right`/`member_right`/`trans_status`/
+     * `accessable`/`width`/`bitrate`/`size` —— **按服务器自报的默认档取**，比我们猜可靠。
+     *
+     * 退路 `GET /file/play?resolution=raw|low`：当前网页端已不再调用它（bundle 里 0 次），
+     * 实测也已 404 —— 只作为历史版本兜底留着，别指望它。
      */
     private suspend fun playUrl(fid: String, ck: String): String? {
-        val req = JSONObject().put("fid", fid).put("resolution", "normal").toString()
-        val resp = postJson("$apiBase/file/v2/play?${q()}", req, ck)
+        var last: PanError? = null
+        for (attempt in 0 until PLAY_TRIES) {
+            if (attempt > 0) delay(PLAY_RETRY_DELAY_MS[attempt - 1])
+            err = null
+            playUrlOnce(fid, ck)?.let { return it }
+            last = err ?: PanError.Broken("${type.label}没有返回播放入口（接口可能变了）")
+            // 刚转存完就取流，服务端偶尔还没就绪 ⇒ 补一次是划算的；
+            // 但要登录 / 分享真失效补多少次都一样 ⇒ 立刻收手（见 [retryablePlay]）
+            if (!retryablePlay(last)) break
+        }
+        err = last
+        return null
+    }
+
+    /** 单次取流（不重试）。失败原因写进 [err]。 */
+    private suspend fun playUrlOnce(fid: String, ck: String): String? {
+        val resp = postJson("$apiBase/file/v2/play?${q()}", playBody(fid), ck)
         val o = resp?.let { json(it) }
         if (o != null) {
             if (o.optInt("code", -1) == 0) {
-                val d = o.optJSONObject("data")
-                val want = d?.optString("default_resolution").orEmpty()
-                val list = d?.optJSONArray("video_list")
-                var first: String? = null
-                if (list != null) {
-                    for (i in 0 until list.length()) {
-                        val e = list.optJSONObject(i) ?: continue
-                        val url = e.optJSONObject("video_info")?.optString("url").orEmpty()
-                        if (url.isBlank()) continue
-                        if (first == null) first = url
-                        if (want.isNotBlank() && e.optString("resolution") == want) return url
-                    }
-                }
-                first?.let { return it }
+                urlOf(o)?.let { return it }
             } else {
                 // 留痕但不提前返回 —— 下面还有退路（note 会把"需登录/分享失效"分类好）
                 note(o)
@@ -471,13 +537,41 @@ class PanCloudDrive private constructor(
                 note(g)
                 continue
             }
-            val vl = g.optJSONObject("data")?.optJSONArray("video_list") ?: continue
-            for (i in 0 until vl.length()) {
-                val url = vl.optJSONObject(i)?.optString("url").orEmpty()
-                if (url.isNotBlank()) return url
-            }
+            urlOf(g)?.let { return it }
         }
         if (err == null) err = PanError.Broken("${type.label}没有返回播放入口（接口可能变了）")
+        return null
+    }
+
+    /**
+     * 从取流响应里挑出播放入口。认两种形状（同一个信封）：
+     *  ① `data.video_list[]` —— 每档一条，地址在 `video_info.url`（也见过平铺的 `url`）；
+     *     有 `default_resolution` 就优先那一档，否则取第一条非空的；
+     *  ② `data.url` / `data.play_url` —— 信封直接给地址的简化形状。
+     *
+     * ⚠️ **绝不要退到 `data.preview_url`**：那是"游客试看"通道给的**预览图**
+     * （实测 HEAD 回来 `Content-Type: image/webp`、14KB），拿它当视频流只会黑屏。
+     */
+    private fun urlOf(o: JSONObject): String? {
+        val d = o.optJSONObject("data") ?: return null
+        val want = d.optString("default_resolution")
+        val list = d.optJSONArray("video_list")
+        var first: String? = null
+        if (list != null) {
+            for (i in 0 until list.length()) {
+                val e = list.optJSONObject(i) ?: continue
+                val url = e.optJSONObject("video_info")?.optString("url").orEmpty()
+                    .ifBlank { e.optString("url") }
+                if (url.isBlank()) continue
+                if (first == null) first = url
+                if (want.isNotBlank() && e.optString("resolution") == want) return url
+            }
+        }
+        first?.let { return it }
+        for (k in arrayOf("url", "play_url")) {
+            val v = d.optString(k)
+            if (v.startsWith("http")) return v
+        }
         return null
     }
 
@@ -654,13 +748,28 @@ class PanCloudDrive private constructor(
         Regex("HTTP (\\d{3})").find(e.message.orEmpty())?.groupValues?.get(1)?.toIntOrNull() ?: 0
 
     private fun classify(e: Exception): PanError {
-        val code = httpCode(e)
+        // ① **信封优先**（v1.0.71）：能拿到响应体时，服务端自己说的那句话比 HTTP 状态码准得多。
+        //    典型：HTTP 404 的 body 里写的是 `code:31001 require login` —— 那其实是"要登录"，
+        //    不是"接口 404"。少了这一层，就只能按状态码猜方向（真机为此猜了一整轮）。
+        val he = e as? Http.HttpError
+        val env = he?.body?.takeIf { it.startsWith("{") }
+            ?.let { runCatching { JSONObject(it) }.getOrNull() }
+        if (env != null && env.optInt("code", -1) != 0) {
+            note(env)
+            err?.let { return it }
+        }
+        val code = he?.code ?: httpCode(e)
         // 401/403 要先落"凭据过期"的痕迹（「网盘账号」页据此提示重登），再交给纯函数归类
         if (code == 401 || code == 403) DriveStore.markExpired(type)
         // 网络层失败（code == 0）没有状态码可归类，必须带上异常细节，否则诊断只剩一句空话
         if (code <= 0) {
             return PanError.Net("网络请求失败：${e.javaClass.simpleName} ${e.message.orEmpty().take(60)}")
         }
-        return errorForHttp(code, type)
+        // 状态码归类时把服务端的原话一并带上（只对 Broken 拼 —— NeedLogin 的语义不能被改掉，
+        // 「网盘账号」页靠它提示重登）
+        val base = errorForHttp(code, type)
+        val said = env?.optString("message").orEmpty().take(60)
+        return if (said.isBlank() || base !is PanError.Broken) base
+        else PanError.Broken("${base.message}｜服务端：$said")
     }
 }

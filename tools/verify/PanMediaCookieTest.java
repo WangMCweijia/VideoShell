@@ -222,6 +222,46 @@ public class PanMediaCookieTest {
                 g3.contains("B") && !g3.contains("注释"), g3);
         ok("G0d 未闭合的块注释不会抛异常（读到文件尾）", code("A /* 没闭合") != null, "");
 
+        System.out.println("-- H. 取流请求体：形状过时 ⇒ HTTP 404（v1.0.71 的真凶） --");
+        // 真机证据（2026-09-24 蜡笔/木偶）：save/task 全 200，而 file/v2/play、file/play、
+        // file/delete 三个带 fid 的端点全 404/400 —— 看着像"fid 无效"。
+        // 真正的判据来自**当前网页端自己的实现**（cloud-drive-web/4.6.7 的 share.js）：
+        //   { fid, resolutions: (res||["low"]).join(","), supports: "fmp4,m3u8" }
+        // 而旧代码发的是 { fid, resolution:"normal" }（单数键 + 过时值）。
+        ok("H1 DEFAULT_RESOLUTIONS 是复数逗号列表、且不含过时的 normal",
+                PanCloudDrive.DEFAULT_RESOLUTIONS.contains("low")
+                        && PanCloudDrive.DEFAULT_RESOLUTIONS.contains("super")
+                        && PanCloudDrive.DEFAULT_RESOLUTIONS.contains(",")
+                        && !PanCloudDrive.DEFAULT_RESOLUTIONS.contains("normal"),
+                PanCloudDrive.DEFAULT_RESOLUTIONS);
+        ok("H2 取流体用 `resolutions`（复数键）",
+                pcd != null && pcd.contains("put(\"resolutions\""), "");
+        ok("H3 取流体带 `supports`（当前网页端必带）",
+                pcd != null && pcd.contains("put(\"supports\""), "");
+        // ★ 否定断言：过时的单数键必须真的不在 —— 它有 0.9 秒就退回老形状的诱惑
+        ok("H4 ★ 已无单数键 `put(\"resolution\"`（它会让服务端匹配不到码流 ⇒ 404）",
+                pcd != null && !pcd.contains("put(\"resolution\""), "");
+        ok("H5 已无过时分辨率值 `normal`",
+                pcd != null && !pcd.contains("resolution\", \"normal\""), "");
+        ok("H6 退路 file/play 仍在（历史版本兜底；但网页端已 0 引用 ⇒ 别指望它）",
+                pcd != null && pcd.contains("/file/play?"), "");
+
+        System.out.println("-- I. 取流要不要补一次（retryablePlay） --");
+        ok("I1 404 ⇒ 补（可能刚转存完还没就绪）",
+                PanCloudDrive.retryablePlay(PanCloudDrive.errorForHttp(404, PanType.QUARK)), "");
+        ok("I2 5xx / 429 ⇒ 补",
+                PanCloudDrive.retryablePlay(PanCloudDrive.errorForHttp(503, PanType.QUARK))
+                        && PanCloudDrive.retryablePlay(PanCloudDrive.errorForHttp(429, PanType.QUARK)), "");
+        ok("I3 401/403 ⇒ 不补（要用户去登录，补多少次结论一样）",
+                !PanCloudDrive.retryablePlay(PanCloudDrive.errorForHttp(401, PanType.QUARK))
+                        && !PanCloudDrive.retryablePlay(PanCloudDrive.errorForHttp(403, PanType.QUARK)), "");
+        ok("I4 Dead（分享真失效）⇒ 不补（终态语义）",
+                !PanCloudDrive.retryablePlay(new PanError.Dead("分享链接已失效")), "");
+        ok("I5 null ⇒ 不补（没有失败原因就别瞎试）",
+                !PanCloudDrive.retryablePlay(null), "");
+        ok("I6 Net（抖动）⇒ 补",
+                PanCloudDrive.retryablePlay(new PanError.Net("网络请求失败")), "");
+
         System.out.println();
         System.out.println("PASS=" + pass + "  FAIL=" + fail);
         if (fail > 0) {
