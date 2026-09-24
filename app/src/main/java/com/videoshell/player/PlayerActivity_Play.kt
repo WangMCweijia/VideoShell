@@ -473,7 +473,13 @@ internal fun PlayerActivity.playEpisode(index: Int, autoHeal: Boolean = false) {
             // v1.0.65：网盘未登录。给一个**能直接走的下一步**（跳账号页），
             // 而不是只弹一句 toast —— 用户知道"要登录"却不知道去哪儿登，等于没说。
             is MediaSource.NeedLogin -> askDriveLogin(r)
-            is MediaSource.Error -> toast(r.message)
+            // 解析失败也要落一份播放记录：站点自检**只能跑站点、不能指定某一部**，
+            // 而报告尾部会带上 PlayLog —— 这条就是"把某一部的失败原因带回来"的唯一出口。
+            // 这里原先只弹 toast（不进 PlayLog），于是恰恰是**解析失败**没有出口。
+            is MediaSource.Error -> {
+                toast(r.message)
+                PlayLog.record("✗ 解析失败：${r.message}")
+            }
             null -> toast("解析播放地址失败")
         }
     }

@@ -612,6 +612,28 @@ public class PanLinkTest {
         ok("E18e mediaClient 由 client 派生（写死成独立 Builder 会漏掉播放侧）",
                 netCode != null && netCode.contains("client.newBuilder()"), "");
 
+        // ------------------------------------------------- 失败文案的可定位性（v1.0.74）
+        // 用户手上只有两个出口：**截图**，或**站点自检的报告尾部**。而自检**只能跑站点、
+        // 不能指定某一部** ⇒ 失败文案本身必须自证「哪一步 + 信封 code」；解析失败也必须
+        // 落进 PlayLog，否则"某一部"的失败原因**没有任何出口**（2026-09-24 真机症状：
+        // 一句「分享已失效(file not found…)」，链路上 5 个端点都会报，无从定位）。
+        // ⚠️ 必须去注释：本轮新加的注释里就写着「解析失败 / PlayLog」这些字，按裸文本判
+        // 会让守卫自己红 —— 与 E13/E4/E5 同一个坑。
+        String plCode = pl == null ? null : stripComments(pl);
+        ok("E19a 守卫自测：Dead 分支与 PlayLog 记录点都还在（否则 E19/E19b 是恒真断言）",
+                pcdCode != null && pcdCode.contains("PanError.Dead(")
+                        && plCode != null && plCode.contains("PlayLog.record("),
+                "两个记录点有一个没了 ⇒ 复查 E19/E19b 还有没有意义");
+        int deadAt = pcdCode == null ? -1 : pcdCode.indexOf("PanError.Dead(");
+        String deadTail = deadAt < 0 ? ""
+                : pcdCode.substring(deadAt, Math.min(pcdCode.length(), deadAt + 120));
+        ok("E19 Dead 文案必须带「哪一步」+ 信封 code（终态不重试 ⇒ 文案是唯一的定位线索）",
+                deadTail.contains("stepAt()") && deadTail.contains("code $code"),
+                "Dead 文案退回成只说「分享已失效」⇒ 5 个端点都会报它，用户截回来也定位不了");
+        ok("E19b 解析失败要落 PlayLog（站点自检的报告尾部会带上它 —— 「某一部」唯一的出口）",
+                plCode != null && plCode.contains("PlayLog.record(\"✗ 解析失败：${r.message}\")"),
+                "解析失败只弹 toast ⇒ 用户没有任何办法把「某一部」的失败原因带回来");
+
         System.out.println();
         System.out.println("==== pass=" + pass + " fail=" + fail + " ====");
         if (fail > 0) {

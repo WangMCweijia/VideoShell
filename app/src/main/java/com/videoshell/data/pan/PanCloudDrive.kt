@@ -847,7 +847,12 @@ class PanCloudDrive private constructor(
             //    并且额外把"信封自称 404"也判成 Dead —— 那是两次方向相反的错：
             //    前者**漏报**（`41011 分享地址已失效` 被我们说成"不是分享失效"），
             //    后者**误报**（活着的分享被判死）。见 [DEAD_CODES] 与 docs/PITFALLS.md E54。
-            deadEnvelope(code, msg) -> PanError.Dead("分享已失效（$msg）")
+            // Dead 是**终态**（不重试、直接劝换线路），文案里必须能看出「哪一步 + 信封 code」。
+            // §4.71 ④ 的教训只补到了 Broken / Net 两条路，这条漏了 —— 于是用户截回来
+            // 只剩一句"分享已失效"，而链路上 5 个端点（取分享令牌/列目录/转存/等任务/取播放入口）
+            // 都可能报它，等于又回到"只好再扒一遍 bundle"。
+            deadEnvelope(code, msg) ->
+                PanError.Dead("分享已失效$stepAt()（code $code：$msg）")
             // 信封自称 404 却没说是"没了"：按"接口异常"处理，**不断言原因**，只给动作
             status == 404 ->
                 PanError.Broken("${type.label}接口信封回 404 / code $code：$msg（未识别的 404，可重试）")
