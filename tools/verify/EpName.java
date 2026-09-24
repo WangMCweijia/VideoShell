@@ -340,83 +340,122 @@ public class EpName {
 
         // ---------------------------------------------------------------- F
         banner("F. 端到端（真网络）：真取一部剧，产出名必须干净、递增、互不相同");
+        // ⚠️ **真网络段必须自带墙钟预算**（v1.0.71 main 轮实测教训，2026-09-24）：
+        //   "站点够不着"有两种坏结局，而只有一种会被下面那个 catch 兜住 ——
+        //     ① 立刻失败 / 抛异常 → catch(Throwable) → SKIP ✓
+        //     ② **丢包黑洞**：不抛异常，每次调用都安静地等到 client 的 callTimeout(22s) 才放弃。
+        //        本段最多 1(resolve 含挖掘)+1(list)+8×(detail+play) ≈ 20 次调用 ⇒ 最坏 ≈440s，
+        //        直接撞穿 runepname.py 的 **300s 硬超时** ⇒ 整个**离线门禁变红**，
+        //        而日志只留一行 `runepname BAD PASS=0 FAIL=0 rc=1`（完全看不出是站点连不上）。
+        //   把"站点可达性抖动"记成"我方回归"，是这类门禁最贵的错误 ⇒ 超预算一律降级成 SKIP。
+        //   单次调用本身有界（CryptApi 走 Http.client，callTimeout=22s）⇒ 两次调用之间的检查一定被走到。
+        final long F_BUDGET_MS = 120_000L;
+        // 对照组自测：同一段代码用 **-1ms** 预算跑一遍 ⇒ 必须在**任何网络调用之前**就返回「超预算」。
+        // 有它，"超预算"分支才是永远可验证的；否则它只是一段永远跑不到、也没人知道对不对的死代码。
+        ok("F0 预算 -1ms ⇒ runF 在做任何网络调用之前就判超预算",
+                runF(-1L) == F_OVER_BUDGET, "预算分支没生效（超预算会被当成验完）");
+        int fStatus = F_UNREACHABLE;
         try {
-            final CryptRecipe rec = block((s, c) -> CryptFamily.INSTANCE.resolve(
-                    YG, YG, (Continuation<? super CryptRecipe>) c));
-            if (rec == null) {
-                System.out.println("  [SKIP] F 段（自证没命中，需要能访问 " + YG + "）");
-            } else {
-                Map<String, String> p = new HashMap<>();
-                p.put("page", "1");
-                p.put("limit", "20");
-                JsonObject lst = block((s, c) -> CryptApi.INSTANCE.call(rec, "/api/theater/exploreList",
-                        p, YG, (Continuation<? super JsonObject>) c));
-                List<VideoItem> items = YeguoMap.INSTANCE.itemsFromResp(lst);
-                ok("F1 拿到列表", !items.isEmpty(), "条数=" + items.size());
-                // 列表第一条常常是单集短剧 —— 单集验不出「递增 / 互不相同」，往后找一部多集的。
-                List<Episode> out = null;
-                String title = "";
-                String picked = "";
-                for (int k = 0; k < Math.min(8, items.size()); k++) {
-                    String vid = items.get(k).getId();
-                    Map<String, String> dq = new HashMap<>();
-                    dq.put("id", vid);
-                    JsonObject det = block((s, c) -> CryptApi.INSTANCE.call(rec, "/api/playlet/detail",
-                            dq, YG, (Continuation<? super JsonObject>) c));
-                    JsonObject d = det == null ? null : det.getAsJsonObject("data");
-                    if (d == null) continue;
-                    JsonArray deps = d.getAsJsonArray("episodes");
-                    List<JsonElement> dlist = new ArrayList<>();
-                    if (deps != null) for (JsonElement e : deps) dlist.add(e);
-                    if (dlist.isEmpty()) continue;
-                    String videoId = d.has("video_id") ? d.get("video_id").getAsString() : vid;
-                    String first = dlist.get(0).getAsJsonObject().get("id").getAsString();
-                    Map<String, String> pq = new HashMap<>();
-                    pq.put("video_id", videoId);
-                    pq.put("episode_id", first);
-                    JsonObject pl = block((s, c) -> CryptApi.INSTANCE.call(rec, "/api/playlet/play",
-                            pq, YG, (Continuation<? super JsonObject>) c));
-                    JsonObject pd = pl == null ? null : pl.getAsJsonObject("data");
-                    List<Episode> cand = YeguoMap.INSTANCE.episodesFrom(
-                            videoId, pd, dlist, YeguoMap.INSTANCE.titleMapFrom(dlist));
-                    picked = d.get("title").getAsString();
-                    if (cand.size() > 1) { out = cand; title = picked; break; }
-                    if (out == null) { out = cand; title = picked; }
-                }
-                ok("F2 拿到详情与分集", out != null && !out.isEmpty(), "详情/分集为空");
-                if (out != null && !out.isEmpty()) {
-                    System.out.println("       剧名 = " + title + "　分集 = " + out.size() + " 集");
-                    System.out.println("       前 3 格 = "
-                            + names(out.subList(0, Math.min(3, out.size()))));
-
-                    boolean shapeOk = true, ascOk = true;
-                    Set<String> uniq = new HashSet<>();
-                    int prev = -1;
-                    for (int i = 0; i < out.size(); i++) {
-                        String n = out.get(i).getName();
-                        if (!n.matches("第\\d+集")) shapeOk = false;
-                        Integer no = EpisodeOrder.INSTANCE.noOf(out.get(i));
-                        if (no == null) { ascOk = false; continue; }
-                        if (i > 0 && no <= prev) ascOk = false;
-                        prev = no;
-                        uniq.add(n);
-                    }
-                    ok("F3 每一格都是「第N集」形状（没有剧名混进来）", shapeOk, names(out));
-                    ok("F4 集号严格递增", ascOk, names(out));
-                    ok("F5 集号互不相同（不会出现两个「第1集」）", uniq.size() == out.size(), names(out));
-                    ok("F6 显示名里没有剧名", !names(out).contains(title), names(out));
-                    // 多集的那一部必须真的被验到，否则 F4/F5 是空转
-                    ok("F7 验到的是多集剧（单集验不出递增与互不相同）",
-                            out.size() > 1 || items.size() < 8, "只验到 " + out.size() + " 集");
-                }
-            }
+            fStatus = runF(F_BUDGET_MS);
         } catch (Throwable t) {
             System.out.println("  [SKIP] F 段（真网络不可用：" + t + "）");
+        }
+        if (fStatus == F_OVER_BUDGET) {
+            System.out.println("  [SKIP] F 段（真网络超预算：" + (F_BUDGET_MS / 1000)
+                    + "s 内没取完，已放弃 —— 站点可达性抖动，不是回归）");
         }
 
         System.out.println();
         System.out.println("==== EpName  " + pass + " PASS / " + fail + " FAIL ====");
         if (!fails.isEmpty()) System.out.println("失败项：" + fails);
         if (fail > 0) System.exit(1);
+    }
+
+    // ================================================================== F 段主体
+
+    static final int F_DONE = 0, F_UNREACHABLE = 1, F_OVER_BUDGET = 2;
+
+    /** F 段主体（真网络）。**返回值就是结论**，断言只在这里记：
+     *  [F_DONE] 验完 · [F_UNREACHABLE] 够不着 · [F_OVER_BUDGET] 超预算。
+     *  超预算从任何检查点直接 return ⇒ F2~F7 一条都不会被记（"没取完"不许写成 PASS / FAIL）。 */
+    static int runF(long budgetMs) throws Exception {
+        final long fT0 = System.currentTimeMillis();
+        // 这个检查排在**任何网络调用之前**：这样 budgetMs<0 时它必然命中，
+        // 上面那条 F0 自测才能不依赖网络地证明「超预算」这条路径真的走得通。
+        if (System.currentTimeMillis() - fT0 > budgetMs) return F_OVER_BUDGET;
+
+        final CryptRecipe rec = block((s, c) -> CryptFamily.INSTANCE.resolve(
+                YG, YG, (Continuation<? super CryptRecipe>) c));
+        if (rec == null) {
+            System.out.println("  [SKIP] F 段（自证没命中，需要能访问 " + YG + "）");
+            return F_UNREACHABLE;
+        }
+        if (System.currentTimeMillis() - fT0 > budgetMs) return F_OVER_BUDGET;
+
+        Map<String, String> p = new HashMap<>();
+        p.put("page", "1");
+        p.put("limit", "20");
+        JsonObject lst = block((s, c) -> CryptApi.INSTANCE.call(rec, "/api/theater/exploreList",
+                p, YG, (Continuation<? super JsonObject>) c));
+        List<VideoItem> items = YeguoMap.INSTANCE.itemsFromResp(lst);
+        ok("F1 拿到列表", !items.isEmpty(), "条数=" + items.size());
+        // 列表第一条常常是单集短剧 —— 单集验不出「递增 / 互不相同」，往后找一部多集的。
+        List<Episode> out = null;
+        String title = "";
+        String picked = "";
+        for (int k = 0; k < Math.min(8, items.size()); k++) {
+            if (System.currentTimeMillis() - fT0 > budgetMs) return F_OVER_BUDGET;
+            String vid = items.get(k).getId();
+            Map<String, String> dq = new HashMap<>();
+            dq.put("id", vid);
+            JsonObject det = block((s, c) -> CryptApi.INSTANCE.call(rec, "/api/playlet/detail",
+                    dq, YG, (Continuation<? super JsonObject>) c));
+            JsonObject d = det == null ? null : det.getAsJsonObject("data");
+            if (d == null) continue;
+            JsonArray deps = d.getAsJsonArray("episodes");
+            List<JsonElement> dlist = new ArrayList<>();
+            if (deps != null) for (JsonElement e : deps) dlist.add(e);
+            if (dlist.isEmpty()) continue;
+            String videoId = d.has("video_id") ? d.get("video_id").getAsString() : vid;
+            String first = dlist.get(0).getAsJsonObject().get("id").getAsString();
+            Map<String, String> pq = new HashMap<>();
+            pq.put("video_id", videoId);
+            pq.put("episode_id", first);
+            JsonObject pl = block((s, c) -> CryptApi.INSTANCE.call(rec, "/api/playlet/play",
+                    pq, YG, (Continuation<? super JsonObject>) c));
+            JsonObject pd = pl == null ? null : pl.getAsJsonObject("data");
+            List<Episode> cand = YeguoMap.INSTANCE.episodesFrom(
+                    videoId, pd, dlist, YeguoMap.INSTANCE.titleMapFrom(dlist));
+            picked = d.get("title").getAsString();
+            if (cand.size() > 1) { out = cand; title = picked; break; }
+            if (out == null) { out = cand; title = picked; }
+        }
+        ok("F2 拿到详情与分集", out != null && !out.isEmpty(), "详情/分集为空");
+        if (out != null && !out.isEmpty()) {
+            System.out.println("       剧名 = " + title + "　分集 = " + out.size() + " 集");
+            System.out.println("       前 3 格 = "
+                    + names(out.subList(0, Math.min(3, out.size()))));
+
+            boolean shapeOk = true, ascOk = true;
+            Set<String> uniq = new HashSet<>();
+            int prev = -1;
+            for (int i = 0; i < out.size(); i++) {
+                String n = out.get(i).getName();
+                if (!n.matches("第\\d+集")) shapeOk = false;
+                Integer no = EpisodeOrder.INSTANCE.noOf(out.get(i));
+                if (no == null) { ascOk = false; continue; }
+                if (i > 0 && no <= prev) ascOk = false;
+                prev = no;
+                uniq.add(n);
+            }
+            ok("F3 每一格都是「第N集」形状（没有剧名混进来）", shapeOk, names(out));
+            ok("F4 集号严格递增", ascOk, names(out));
+            ok("F5 集号互不相同（不会出现两个「第1集」）", uniq.size() == out.size(), names(out));
+            ok("F6 显示名里没有剧名", !names(out).contains(title), names(out));
+            // 多集的那一部必须真的被验到，否则 F4/F5 是空转
+            ok("F7 验到的是多集剧（单集验不出递增与互不相同）",
+                    out.size() > 1 || items.size() < 8, "只验到 " + out.size() + " 集");
+        }
+        return F_DONE;
     }
 }
