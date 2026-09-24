@@ -3,6 +3,7 @@ package com.videoshell.data.pan
 import com.videoshell.data.model.Episode
 import com.videoshell.data.model.MediaSource
 import com.videoshell.data.site.Media
+import kotlinx.coroutines.delay
 
 /**
  * ## 网盘解析层：分享链接 / 站内引用 → 可播地址
@@ -38,6 +39,9 @@ object PanResolver {
 
     /** 目录树缓存时长 */
     private const val TREE_TTL_MS = 10 * 60_000L
+
+    /** 展开失败后补一次前的间隔（有界：只补一次，见 [expand]） */
+    private const val EXPAND_RETRY_DELAY_MS = 400L
 
     private class Tree(val files: List<PanFile>, val dirs: Int, val truncated: Boolean, val at: Long)
 
@@ -112,19 +116,31 @@ object PanResolver {
         val p = PanProviders.of(link.type)
         if (!p.supported) {
             return PanEpisodes(
-                listOf(Episode("${link.type.label}（暂不支持）", rawOf(link))), false, 0
+                listOf(Episode("${link.type.label}（暂不支持）", rawOf(link))), false, 0,
+                expanded = false
             )
         }
         val ex = expand(link)
         if (ex.files.isEmpty()) {
-            lastNote = "${link.type.key} 展开为空：${reason(p)}"
-            return PanEpisodes(listOf(Episode("打开分享（未展开）", rawOf(link))), false, ex.dirsSeen)
+            // 顺着契约读 [PanProvider.lastError]：**"取不到"和"目录里真没有视频"要分得开**。
+            // 两者都表现为"0 集"，但一个是我们的故障（可重试、要留痕），
+            // 一个是分享本身的内容问题（换线路才是对的）—— 混成一句话用户无从下手。
+            lastNote = if (p.lastError != null) {
+                "${link.type.key} 展开失败（取不到目录）：${reason(p)}"
+            } else {
+                "${link.type.key} 展开为空：目录里没有视频文件（扫了 ${ex.dirsSeen} 个目录）"
+            }
+            return PanEpisodes(
+                listOf(Episode("打开分享（未展开）", rawOf(link))), false, ex.dirsSeen,
+                expanded = false
+            )
         }
         lastNote = "${link.type.key} 展开到 ${ex.files.size} 个文件 / ${ex.dirsSeen} 个目录"
         return PanEpisodes(
             ex.files.map { Episode(it.name, PanLink.refOf(link, it.fid, it.token)) },
             ex.truncated,
-            ex.dirsSeen
+            ex.dirsSeen,
+            expanded = true
         )
     }
 
@@ -139,12 +155,39 @@ object PanResolver {
         val p = PanProviders.of(link.type)
         if (!p.supported) return PanExpanded(emptyList(), 0, false)
 
+        var ex = walkOnce(p, link)
+        // 瞬时失败再给一次机会：`Http` 只重试 429/5xx，**404 是"一次就断"**（见 Http.worthRetry），
+        // 而展开在详情页的必经路径上 —— 白丢一次请求换来的是整页降级（只剩一条「未展开」）。
+        // 有界（只补一次、带固定间隔），不会把"真挂了"拖成转圈。
+        if (ex.failed) {
+            delay(EXPAND_RETRY_DELAY_MS)
+            ex = walkOnce(p, link)
+        }
+        // ⚠️ **失败的展开绝不入缓存**。缓存的时效是 [TREE_TTL_MS]（10 分钟），而失败往往只
+        //    持续几秒 —— 一旦把失败也缓存起来，用户在详情页点那条「打开分享（未展开）」
+        //    重试时命中的还是同一份空结果，**"重试"这个最后的自救入口就形同不存在**
+        //    （2026-09-24 真机症状：那一条点下去也永远不恢复，而分享在 PC 上匿名可完整展开）。
+        if (!ex.failed) {
+            treeCache[key] = Tree(ex.files, ex.dirsSeen, ex.truncated, System.currentTimeMillis())
+        }
+        return ex
+    }
+
+    /**
+     * 一次展开（不含缓存、不含重试）：BFS 走到含文件的层级，收集可播视频。
+     *
+     * 失败判据是 [PanProvider.lastError]，**不是**"返回了空表" —— 契约（[PanProvider] 第 32 行）
+     * 说得很清楚：取不到也返回空表，原因写在 `lastError` 里。这里混同一次，
+     * 用户就会看到"0 集"却没有任何原因，而且那份空树还会进缓存（见 [expand]）。
+     */
+    private suspend fun walkOnce(p: PanProvider, link: PanLink): PanExpanded {
         val files = ArrayList<PanFile>()
         val seenDir = HashSet<String>()
         val queue = ArrayDeque<String?>()
         queue.add(null)                        // null = 分享根
         var dirs = 0
         var truncated = false
+        var failed = false
         var guard = 0
 
         while (queue.isNotEmpty()) {
@@ -154,6 +197,10 @@ object PanResolver {
             }
             val fid = queue.removeFirst()
             val items = p.list(link, fid)
+            if (items.isEmpty() && p.lastError != null) {
+                failed = true
+                break
+            }
             for (it in items) {
                 if (it.dir) {
                     if (dirs >= MAX_DIRS) {
@@ -173,9 +220,7 @@ object PanResolver {
                 }
             }
         }
-        val out = naturalSort(files)
-        treeCache[key] = Tree(out, dirs, truncated, System.currentTimeMillis())
-        return PanExpanded(out, dirs, truncated)
+        return PanExpanded(naturalSort(files), dirs, truncated, failed)
     }
 
     // ------------------------------------------------------------------ 内部
@@ -250,9 +295,20 @@ object PanResolver {
     }
 }
 
-/** [PanResolver.episodes] 的结果：集数 + 是否被截断（截断要能在界面上说出来） */
+/**
+ * [PanResolver.episodes] 的结果：集数 + 是否被截断（截断要能在界面上说出来）。
+ *
+ * [expanded] 是**这次到底有没有真的展开出来**：false 表示返回的那条「打开分享（未展开）」
+ * 只是兜底（详见 [PanResolver.episodes]）—— 上层（[com.videoshell.data.site.PanShareAdapter]）
+ * 据此把"线路数"报成告警而不是成功。没有它，界面上会显示"✓ 1 条线路（1 集）"，
+ * 把一次失败伪装成一次成功（2026-09-24 修）。
+ *
+ * 默认值给 `true` 是为了兼容 Kotlin 侧的既有构造点；Java harness 若要位置构造请用
+ * 四参构造（本项目已踩过"Kotlin 默认参数对 Java 不可见"的坑，见 PITFALLS E-alias）。
+ */
 data class PanEpisodes(
     val episodes: List<Episode>,
     val truncated: Boolean,
-    val dirs: Int
+    val dirs: Int,
+    val expanded: Boolean = true
 )

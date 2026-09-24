@@ -69,6 +69,13 @@ import java.io.IOException
  *
  * 展开失败也**不会让整页变空**：[PanResolver.episodes] 在展开为空时会留一条
  * 「打开分享（未展开）」，点它时会在播放链路里再试一次并给出具体原因。
+ *
+ * ⚠️ 那条兜底集**必须说成"未展开"而不是"1 集"**（v1.0.70 修）：线路名写作
+ * `夸克（1 集）` 会把一次失败伪装成一次成功，用户点进去才发现不对；
+ * 而 `夸克（未展开）` 至少传达了"点它是重试"。自检报告同理 —— 全是兜底时
+ * 那条结论是 **⚠️** 而不是 ✓（否则失败在诊断里完全看不见）。
+ * 配套：`PanResolver.expand` **失败的结果不进缓存**，所以"重试"是真能生效的
+ * （原先失败的空树被缓存 10 分钟 ⇒ 点它命中的还是同一份空结果，自救入口形同不存在）。
  */
 class PanShareAdapter(
     site: SiteConfig,
@@ -171,8 +178,8 @@ class PanShareAdapter(
     private suspend fun claim(id: String, doc: Document, page: String, where: String): VideoDetail? {
         if (!PanShareExtract.isPanSharePage(doc)) return null
 
-        val groups = buildPanGroups(doc)
-        if (groups.isEmpty()) {
+        val built = buildPanGroups(doc)
+        if (built.groups.isEmpty()) {
             panDiag = "⚠️ $where 是网盘分享页，但一条线路都没展开出来" +
                     "（${PanResolver.lastNote.takeIf { it.isNotBlank() } ?: "展开无结果"}）"
             return null
@@ -181,11 +188,18 @@ class PanShareAdapter(
         runCatching { resolveUrl(site.baseUrl, HtmlExtractor.parsePic(doc)) }
             .getOrNull()?.takeIf { it.isNotBlank() }?.let { html.detailPicHint = it }
 
-        panDiag = "✓ 网盘分享页 $where → ${groups.size} 条线路 " +
-                "（${groups.sumOf { it.episodes.size }} 集）｜判据：" +
-                PanShareExtract.evidence(doc, page)
+        // ⚠️ "线路数"要按**真展开出来的**算：全是兜底时写 "✓ 1 条线路（1 集）"，
+        //    等于把一次失败伪装成成功 —— 自检里就再也看不出问题（2026-09-24 修）。
+        panDiag = if (built.expanded == 0) {
+            "⚠️ 网盘分享页 $where：一条线路都没展开出来（只有兜底集，点它会重试）｜" +
+                    PanResolver.lastNote + "｜判据：" + PanShareExtract.evidence(doc, page)
+        } else {
+            "✓ 网盘分享页 $where → ${built.groups.size} 条线路 " +
+                    "（${built.groups.sumOf { it.episodes.size }} 集）｜判据：" +
+                    PanShareExtract.evidence(doc, page)
+        }
         PanShareFamily.markHit(site.baseUrl)
-        return html.buildDetail(id, doc, groups)
+        return html.buildDetail(id, doc, built.groups)
     }
 
     /** 详情页候选：**配方/学到的模板优先**，再是通用形状兜底（与 [HtmlAdapter.detail] 同序） */
@@ -205,12 +219,13 @@ class PanShareAdapter(
      * `.module-row-one` 顺序一致）。顺序对不上时才退回按网盘类型命名 —— 宁可名字朴素，
      * 也不要出现"线路名张冠李戴"（那会把用户引到一个完全不相干的分享里）。
      */
-    private suspend fun buildPanGroups(doc: Document): List<PlayGroup> {
+    private suspend fun buildPanGroups(doc: Document): PanGroups {
         val links = PanShareExtract.shareLinks(doc)
-        if (links.isEmpty()) return emptyList()
+        if (links.isEmpty()) return PanGroups(emptyList(), 0)
         val names = PanShareExtract.lineNames(doc)
         val used = HashMap<String, Int>()
         val out = ArrayList<PlayGroup>()
+        var expanded = 0
 
         for ((i, u) in links.withIndex()) {
             val link = PanLink.parse(u) ?: continue
@@ -222,11 +237,22 @@ class PanShareAdapter(
 
             val ex = PanResolver.episodes(link)
             if (ex.episodes.isEmpty()) continue
-            val suffix = if (ex.truncated) "（已截断）" else "（${ex.episodes.size} 集）"
+            if (ex.expanded) expanded++
+            // ⚠️ 兜底那一集**不是**"1 集"：它是「打开分享（未展开）」，写成"（1 集）"
+            //    会把一次失败伪装成一次成功 —— 用户看到"夸克（1 集）"点进去才发现不对劲。
+            //    说成"（未展开）"，用户至少知道点它是"重试"（2026-09-24 修）。
+            val suffix = when {
+                !ex.expanded -> "（未展开）"
+                ex.truncated -> "（已截断）"
+                else -> "（${ex.episodes.size} 集）"
+            }
             out.add(PlayGroup(name + suffix, ex.episodes))
         }
-        return out
+        return PanGroups(out, expanded)
     }
+
+    /** [buildPanGroups] 的汇总：[groups] 交给 UI，[expanded] = 真展开出来的线路条数（0 ⇒ 全是兜底） */
+    private class PanGroups(val groups: List<PlayGroup>, val expanded: Int)
 
     // ------------------------------------------------------------------ 契约（其余全部委托）
 

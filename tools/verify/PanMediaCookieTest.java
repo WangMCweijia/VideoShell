@@ -1,25 +1,34 @@
 package tools.verify;
 
 import com.videoshell.data.pan.PanCloudDrive;
+import com.videoshell.data.pan.PanError;
 import com.videoshell.data.pan.PanResolver;
+import com.videoshell.data.pan.PanType;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * 网盘媒体凭据合成（v1.0.69，E50「直链 403」）的纯函数守卫 —— 无网络。
+ * 网盘层纯函数守卫（无网络）：
  *
- * 背景：夸克 `__puus` 是**滚动凭据**（每次 API 响应 Set-Cookie 下发新值），
- * 落盘快照必然越来越旧；媒体域校验它 ⇒ 过期后全分片 403。
- * 修复 = 媒体头用「快照打底 + jar 最新值覆盖」（{@link PanCloudDrive#mediaCookie}），
- * 外加「网盘直链 403 ⇒ 自动重新解析一次」自愈（判据 {@link PanResolver#isPanMediaUrl}）。
+ *  - v1.0.69 / E50「直链 403」：媒体凭据合成（{@link PanCloudDrive#mediaCookie}）
+ *    + 403 自愈判域（{@link PanResolver#isPanMediaUrl}）；
+ *  - v1.0.70 / E51「选集不显示 / 分享已失效」：HTTP 状态码归类（{@link PanCloudDrive#errorForHttp}）。
  *
- * 判据三条腿：
- *   A) 合成方向：jar 新值**覆盖**快照同名键（方向错了就等于没修）；
- *   B) 白名单：只有 __pus/__puus/__uid 三键能出现 —— 不把整份账号凭据平铺到 1000+ 分片上；
- *   C) 退路：快照白名单全空 ⇒ 退回**整份**快照（宁可多带也不能播不了）；isPanMediaUrl 判域。
+ * ## E 组为什么是这一版最值钱的断言
+ *
+ * 真机把一条**活着的**分享报成"分享链接已失效"，靠的就是 `404 -> PanError.Dead` 这条归因。
+ * 它错在两层：
+ *  ① 事实层：分享被删时夸克回的是 HTTP **200 + 信封 code:41006**（P0 实测表），而
+ *     `file/v2/play` 这些端点匿名打是 **401**（2026-09-24 免凭据探针）—— 端点压根没消失；
+ *  ② 语义层：**Dead 是终态**（提示换线路、不再重试）。把可重试的"这次请求被拒"判成终态，
+ *     用户唯一能得到的结论就是一个**错误的方向**。
+ * ⇒ 所以这里钉一条**全量**断言：任何 HTTP 状态码都不产生 Dead。
  */
 public class PanMediaCookieTest {
 
@@ -38,6 +47,66 @@ public class PanMediaCookieTest {
         Map<String, String> out = new LinkedHashMap<>();
         for (int i = 0; i + 1 < kv.length; i += 2) out.put(kv[i], kv[i + 1]);
         return out;
+    }
+
+    // ------------------------------------------------------------------ 源码级守卫用的工具
+
+    static String ROOT = System.getProperty("vs.root", "");
+
+    static String readSrc(String rel) {
+        try {
+            return new String(Files.readAllBytes(Paths.get(ROOT, rel.split("/"))),
+                    StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * 剥注释（**必须认字符串字面量** —— E47 的教训：源码里一个
+     * `"…,image/webp,*` + `/` + `*;q=0.8"` 就能让"块注释正则"把几百字符真代码吃掉，
+     * 否定断言随即**恒真**）。G 组对剥注释助手本身有自测。
+     */
+    static String code(String s) {
+        if (s == null) return null;
+        StringBuilder b = new StringBuilder(s.length());
+        int i = 0, n = s.length();
+        boolean inStr = false, inChr = false;
+        while (i < n) {
+            char ch = s.charAt(i);
+            if (!inStr && !inChr && ch == '"' && i + 2 < n
+                    && s.charAt(i + 1) == '"' && s.charAt(i + 2) == '"') {
+                int j = s.indexOf("\"\"\"", i + 3);
+                if (j < 0) { b.append(s, i, n); break; }
+                b.append(s, i, j + 3);
+                i = j + 3;
+                continue;
+            }
+            if (inStr || inChr) {
+                b.append(ch);
+                if (ch == '\\' && i + 1 < n) { b.append(s.charAt(i + 1)); i += 2; continue; }
+                if (inStr && ch == '"') inStr = false;
+                if (inChr && ch == '\'') inChr = false;
+                i++;
+                continue;
+            }
+            if (ch == '"') { inStr = true; b.append(ch); i++; continue; }
+            if (ch == '\'') { inChr = true; b.append(ch); i++; continue; }
+            if (ch == '/' && i + 1 < n && s.charAt(i + 1) == '/') {
+                while (i < n && s.charAt(i) != '\n') i++;
+                continue;
+            }
+            if (ch == '/' && i + 1 < n && s.charAt(i + 1) == '*') {
+                i += 2;
+                while (i + 1 < n && !(s.charAt(i) == '*' && s.charAt(i + 1) == '/')) i++;
+                i = Math.min(n, i + 2);
+                b.append(' ');
+                continue;
+            }
+            b.append(ch);
+            i++;
+        }
+        return b.toString();
     }
 
     public static void main(String[] args) {
@@ -96,6 +165,62 @@ public class PanMediaCookieTest {
         ok("D7 假前缀域不算：evildrive.quark.cn.example.com 拒绝",
                 !PanResolver.isPanMediaUrl("https://evildrive.quark.cn.example.com/a.m3u8"), "");
         ok("D8 空串/null 拒绝", !PanResolver.isPanMediaUrl("") && !PanResolver.isPanMediaUrl(null), "");
+
+        System.out.println("-- E. HTTP 状态码归类：Dead 只留给信封 41006 --");
+        ok("E1 404 ⇒ 归到 Broken（真凶：原归因把可重试的问题判成终态）",
+                PanCloudDrive.errorForHttp(404, PanType.QUARK) instanceof PanError.Broken,
+                PanCloudDrive.errorForHttp(404, PanType.QUARK).getMessage());
+        ok("E2 404 文案必须自己说清「不是分享失效」",
+                PanCloudDrive.errorForHttp(404, PanType.QUARK).getMessage().contains("不是分享失效"),
+                PanCloudDrive.errorForHttp(404, PanType.QUARK).getMessage());
+        ok("E3 401 ⇒ NeedLogin（要能引导去「网盘账号」重登）",
+                PanCloudDrive.errorForHttp(401, PanType.QUARK) instanceof PanError.NeedLogin, "");
+        ok("E4 403 ⇒ NeedLogin（与 E50 的媒体域 403 区分：那是分片，这是接口）",
+                PanCloudDrive.errorForHttp(403, PanType.QUARK) instanceof PanError.NeedLogin, "");
+        ok("E5 500/503 ⇒ Broken（服务端错误，可稍后重试）",
+                PanCloudDrive.errorForHttp(500, PanType.QUARK) instanceof PanError.Broken
+                        && PanCloudDrive.errorForHttp(503, PanType.QUARK) instanceof PanError.Broken, "");
+        ok("E6 429 ⇒ Broken（限流不是分享问题）",
+                PanCloudDrive.errorForHttp(429, PanType.QUARK) instanceof PanError.Broken, "");
+        ok("E7 UC 走同一套（同后端）且文案带品牌",
+                PanCloudDrive.errorForHttp(404, PanType.UC).getMessage().contains("UC"), "");
+        // ★ 全量：100..599 里**没有任何**状态码会产生 Dead。
+        //   这是「Dead 是终态、不能由 HTTP 状态码冒充」这条纪律的机器化表达：
+        //   以后谁再写 `某状态码 -> PanError.Dead(...)`，这条立刻红。
+        List<Integer> deadFromHttp = new ArrayList<>();
+        for (int c = 100; c <= 599; c++) {
+            if (PanCloudDrive.errorForHttp(c, PanType.QUARK) instanceof PanError.Dead) {
+                deadFromHttp.add(c);
+            }
+        }
+        ok("E8 ★ 全量扫描 100..599：没有任何 HTTP 状态码产生 Dead", deadFromHttp.isEmpty(),
+                "Dead 来自：" + deadFromHttp);
+        ok("E9 每个状态码都给出非空原因（不许静默）",
+                PanCloudDrive.errorForHttp(418, PanType.QUARK).getMessage().contains("418"), "");
+
+        System.out.println("-- F. 源码级：那条错误归因不许回来 --");
+        String pcd = code(readSrc(
+                "app/src/main/java/com/videoshell/data/pan/PanCloudDrive.kt"));
+        ok("F0 源码读得到（路径/编码没变）", pcd != null && pcd.length() > 1000,
+                pcd == null ? "读不到" : (pcd.length() + " 字符"));
+        // 否定断言必须能证明"被否定的东西确实不在"，且正例仍在（否则可能是文件读错/被剥空）
+        ok("F1 剥注释后仍含正例 `code == 41006`（说明剥注释没把真代码吃掉）",
+                pcd != null && pcd.contains("code == 41006"), "");
+        ok("F2 已无 `HTTP 404 ⇒ Dead` 那条归因（剥注释后）",
+                pcd != null && !pcd.contains("PanError.Dead(\"分享链接已失效（HTTP 404）\")"), "");
+        ok("F3 已无「信封 status 404 即 Dead」的归因（剥注释后）",
+                pcd != null && !pcd.contains("code == 41006 || o.optInt(\"status\", 0) == 404"), "");
+
+        System.out.println("-- G. 剥注释助手自测（防 vacuous） --");
+        String g1 = code("A // 注释\nB");
+        ok("G0a 行注释被剥、真代码留下",
+                !g1.contains("注释") && g1.contains("A") && g1.contains("B"), g1.replace("\n", "\\n"));
+        ok("G0b 字符串字面量里的 /* 不许当块注释起点（E47 踩过：吞掉 600+ 字符真代码）",
+                code("val a = \"x/*y\"; val b = 1").contains("val b = 1"), "");
+        String g3 = code("A /* 注释 */ B");
+        ok("G0c 块注释被剥、后面的真代码留下",
+                g3.contains("B") && !g3.contains("注释"), g3);
+        ok("G0d 未闭合的块注释不会抛异常（读到文件尾）", code("A /* 没闭合") != null, "");
 
         System.out.println();
         System.out.println("PASS=" + pass + "  FAIL=" + fail);

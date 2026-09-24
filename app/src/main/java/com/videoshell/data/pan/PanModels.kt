@@ -82,9 +82,15 @@ internal fun needLoginMsg(t: PanType) = "未登录${t.label}（登录后可播�
  *
  * 为什么要单独一个类型带上 [files] 与 [dirs] 计数：用户看到的可能是"0 集"，
  * 而原因有两种完全不同 —— 目录是空的 vs 递归深度被截断了。报告里要分得开。
+ *
+ * [failed] 是第三种、也必须分得开的原因（2026-09-24 修）：**这次请求根本没成功**。
+ * 它不是"目录空"，而是"取不到"—— 判据来自 [PanProvider.lastError]，而不是"返回了空表"。
+ * 这个标记的唯一消费者是 [PanResolver.expand] 的缓存决策：**失败的结果绝不进缓存**，
+ * 否则用户重试时命中的还是同一份空结果，"重试"这个自救入口就形同不存在。
  */
 data class PanExpanded(
     val files: List<PanFile>,
     val dirsSeen: Int,
-    val truncated: Boolean
+    val truncated: Boolean,
+    val failed: Boolean = false
 )

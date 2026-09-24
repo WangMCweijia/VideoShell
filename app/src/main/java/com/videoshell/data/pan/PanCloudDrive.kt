@@ -142,6 +142,39 @@ class PanCloudDrive private constructor(
             if (jar.isEmpty()) return snapshot
             return jar.entries.joinToString("; ") { "${it.key}=${it.value}" }
         }
+
+        /**
+         * HTTP 状态码 → 失败归类（**纯函数**，可离线断言，`PanMediaCookieTest` 钉着它）。
+         *
+         * ### 为什么要把这件事单独拎出来
+         *
+         * 原先是 `classify()` 里的一串 `when`，其中 **`404 -> PanError.Dead("分享链接已失效")`**
+         * 是一条**被真机证伪的归因**（2026-09-24）：
+         *
+         * | 事实 | 来源 |
+         * |---|---|
+         * | 分享**真被删**时，夸克回的是 HTTP **200** + 信封 `code:41006` | P0 实测表（[PanCloudDrive] 类头） |
+         * | `file/v2/play` / `file/play` 这些**端点根本没消失** —— 匿名打它们是 401 `code:31001 require login` | 2026-09-24 免凭据探针 |
+         * | 可 App 里这些端点回的是 **HTTP 404**，而那条分享**完全活着**（匿名能展开全部集数） | 真机诊断面板 + PC 匿名 spike |
+         *
+         * ⇒ HTTP 404 的含义是「**这次请求被拒了**（端点/风控/边缘节点），与分享是否存在无关」。
+         * 把它写成"分享已失效"，用户就会看到"所有夸克资源都说分享失效"这种
+         * 指向完全错误方向的结论 —— 而 Dead 是**终态**语义（提示换线路、不再重试），
+         * 判错就等于把可重试的问题钉死。所以 **Dead 只留给信封 `code:41006`**，
+         * HTTP 状态码一律不产生 Dead（守卫直接断言这一条）。
+         *
+         * @param code HTTP 状态码（>0；== 0 是网络层失败，由调用方带异常细节处理）
+         */
+        @JvmStatic
+        fun errorForHttp(code: Int, type: PanType): PanError = when {
+            code == 401 || code == 403 -> PanError.NeedLogin(needLoginMsg(type), type)
+            code == 404 -> PanError.Broken(
+                "${type.label}接口回 HTTP 404（不是分享失效；接口/风控层拒绝了这次请求，可重试或稍后再试）"
+            )
+            code in 500..599 -> PanError.Broken("${type.label}服务端错误（HTTP $code）—— 稍后重试")
+            code > 0 -> PanError.Broken("${type.label}请求失败（HTTP $code）")
+            else -> PanError.Net("${type.label}网络请求失败")
+        }
     }
 
     override val supported: Boolean get() = true
@@ -602,9 +635,14 @@ class PanCloudDrive private constructor(
                 DriveStore.markExpired(type)
                 PanError.NeedLogin(needLoginMsg(type), type)
             }
-            // 41006 = 分享不存在；404 也可能是"分享被删/过期"
-            code == 41006 || o.optInt("status", 0) == 404 ->
-                PanError.Dead("分享链接已失效（$msg）")
+            // ⚠️ **只有 `41006` 才算分享失效**（实测：分享被删时接口回 HTTP 200 + 这个码）。
+            //    原先这里还挂着 `|| status == 404` —— 那会把"信封自称 404"也判成分享失效，
+            //    而 404 在夸克链路上更多是**端点/风控**拒绝的形状（见 [errorForHttp] 的实测表）。
+            //    Dead 是终态语义（提示换线路、不再重试），判错方向比判不出更糟。
+            code == 41006 -> PanError.Dead("分享链接已失效（$msg）")
+            // 信封自称 404 但仍带别的 code：按"接口异常"处理并把原委写清楚，别冒充分享失效
+            o.optInt("status", 0) == 404 ->
+                PanError.Broken("${type.label}接口信封回 404 / code $code：$msg（不是分享失效，可重试）")
             else -> PanError.Broken("${type.label}接口返回 $code：$msg")
         }
     }
@@ -617,15 +655,12 @@ class PanCloudDrive private constructor(
 
     private fun classify(e: Exception): PanError {
         val code = httpCode(e)
-        return when {
-            code == 401 || code == 403 -> {
-                DriveStore.markExpired(type)
-                PanError.NeedLogin(needLoginMsg(type), type)
-            }
-            code == 404 -> PanError.Dead("分享链接已失效（HTTP 404）")
-            code in 500..599 -> PanError.Broken("${type.label}服务端错误（HTTP $code）—— 稍后重试")
-            code > 0 -> PanError.Broken("${type.label}请求失败（HTTP $code）")
-            else -> PanError.Net("网络请求失败：${e.javaClass.simpleName} ${e.message.orEmpty().take(60)}")
+        // 401/403 要先落"凭据过期"的痕迹（「网盘账号」页据此提示重登），再交给纯函数归类
+        if (code == 401 || code == 403) DriveStore.markExpired(type)
+        // 网络层失败（code == 0）没有状态码可归类，必须带上异常细节，否则诊断只剩一句空话
+        if (code <= 0) {
+            return PanError.Net("网络请求失败：${e.javaClass.simpleName} ${e.message.orEmpty().take(60)}")
         }
+        return errorForHttp(code, type)
     }
 }
