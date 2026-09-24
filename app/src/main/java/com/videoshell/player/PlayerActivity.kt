@@ -168,6 +168,14 @@ class PlayerActivity : AppCompatActivity() {
     internal var retried = false
 
     /**
+     * 「网盘直链 403 ⇒ 自动重新解析」是否已用过（v1.0.69）。
+     *
+     * 只在**成功起播**时重置 —— 一次 403 自愈不成，说明凭据真的没了（或别的校验挂了），
+     * 再循环重解析只会让用户看着无限转圈；把剩下的信息留给错误面板。
+     */
+    internal var panReResolveTried = false
+
+    /**
      * 本次播放地址的内容类型（v1.0.65）。
      *
      * 只在解析方**明确知道**时才有值（目前是网盘层：直链常不带扩展名，

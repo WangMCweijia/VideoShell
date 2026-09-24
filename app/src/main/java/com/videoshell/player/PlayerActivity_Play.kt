@@ -97,6 +97,7 @@ internal fun PlayerActivity.setupPlayer() {
                 if (playbackState == Player.STATE_BUFFERING) View.VISIBLE else View.GONE
             if (playbackState == Player.STATE_READY) {
                 resetErrorState()
+                panReResolveTried = false
                 if (!readyLogged) {
                     readyLogged = true
                     PlayLog.record("✓ 播放就绪 ${shorten(currentUrl)}")
@@ -146,6 +147,22 @@ internal fun PlayerActivity.setupPlayer() {
 
         override fun onPlayerError(error: PlaybackException) {
             binding.pbBuffering.visibility = View.GONE
+            // 网盘媒体直链 403（v1.0.69）：`__puus` 是滚动凭据，落盘快照旧了就是全分片 403。
+            // 重新解析一次 = 重走 save→play，服务端会随响应下发新凭据、媒体头随之更新。
+            // 只自动做一次（[panReResolveTried] 在 READY 才复位）——再做还是 403 就交给面板，
+            // 无限自愈只会把"真的没凭据"演成无限转圈。普通站点流的 403 不走这里：
+            // 那是防盗链/内容下架，重解析救不了，也不该把转圈拉长。
+            if (error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS &&
+                !panReResolveTried && PanResolver.isPanMediaUrl(currentUrl)
+            ) {
+                panReResolveTried = true
+                PlayLog.record("⚠ 网盘直链 403 ⇒ 自动重新解析一次（凭据已滚动，重换取新凭据）")
+                handler.postDelayed(
+                    { if (!isFinishing) playEpisode(PlayQueue.episodeIndex, autoHeal = true) },
+                    300
+                )
+                return
+            }
             showDiag(error)
         }
     })

@@ -118,6 +118,30 @@ class PanCloudDrive private constructor(
 
         /** HLS 的 MIME（= `MimeTypes.APPLICATION_M3U8`）。取流方自己报，别让 media3 猜后缀。 */
         private const val MIME_HLS = "application/x-mpegURL"
+
+        /**
+         * 媒体 Cookie 合成（**纯函数**，离线 harness 断言的就是它 —— `PanMediaCookieTest`）。
+         *
+         * 落盘快照打底（白名单键），[fresh]（jar 最新值，见 [Http.cookieValuesFor]）
+         * **覆盖**同名键 —— `__puus` 是滚动凭据，快照必然越来越旧（v1.0.69 修 403）。
+         * 合成后为空时退回整份快照：宁可多带，也不能因为键名没见过就播不了。
+         */
+        @JvmStatic
+        fun mediaCookie(snapshot: String, fresh: Map<String, String>): String {
+            val jar = LinkedHashMap<String, String>()
+            for (part in snapshot.split(';')) {
+                val i = part.indexOf('=')
+                if (i <= 0) continue
+                val k = part.substring(0, i).trim()
+                if (k in MEDIA_COOKIE_KEYS) jar[k] = part.substring(i + 1).trim()
+            }
+            for (k in MEDIA_COOKIE_KEYS) {
+                val v = fresh[k]
+                if (!v.isNullOrBlank()) jar[k] = v
+            }
+            if (jar.isEmpty()) return snapshot
+            return jar.entries.joinToString("; ") { "${it.key}=${it.value}" }
+        }
     }
 
     override val supported: Boolean get() = true
@@ -505,25 +529,21 @@ class PanCloudDrive private constructor(
      *  - 带 Cookie → **200**；ts 带 `Range: bytes=0-1023` → **206**（所以拖进度条没问题）
      *  ⇒ 校验**只认 Cookie**，UA 与 Referer 与成败无关。
      *
-     * 键也不必全给（见 [MEDIA_COOKIE_KEYS]）：`__puus` 单键就够。
-     * 只发必需键有两个好处 —— 不依赖用户 Cookie 里其它键是否出现，
-     * 也不把一份完整账号凭据平铺到 1000+ 个分片请求上。
+     * ⚠️ 但上面"只认 Cookie"的实测用的是**登录当天的新鲜 cookie**。`__puus` 会滚动
+     * （每次 API 响应 `Set-Cookie` 下发新值），旧值在媒体域会失效 ⇒ **403**（不是 412！
+     * E37 的 412 是"完全没带凭据"的形状，403 是"带了过期凭据"的形状 —— 两个码别混着归因）。
+     * 所以这里的值**不直接用落盘快照**：jar 里有最新下发的键值
+     * （`Domain=.quark.cn` 宽域 + [cookieJar] 不分桶 ⇒ jar 与服务端同步），用 [mediaCookie]
+     * 把它盖到快照上。只查 [apiBase]：滚动 `Set-Cookie` 全部来自网盘 API 域的响应。
      *
-     * 白名单一个都没命中时**退回整份 Cookie**：宁可多带，也不能因为键名没见过就播不了。
+     * 白名单合成后一个键都没有时退回整份 Cookie：宁可多带，也不能因为键名没见过就播不了。
      *
      * 顺带记一笔：这个头是**播放器**在发，`Http.mediaClient` 是另一个 OkHttp 实例，
      * 不会自动带 App 里存的凭据 —— 少了它，症状是"解析成功、一播就黑屏"。
      */
     private fun mediaHeaders(ck: String): Map<String, String> {
-        val jar = LinkedHashMap<String, String>()
-        for (part in ck.split(';')) {
-            val i = part.indexOf('=')
-            if (i <= 0) continue
-            val k = part.substring(0, i).trim()
-            if (k in MEDIA_COOKIE_KEYS) jar[k] = part.substring(i + 1).trim()
-        }
-        if (jar.isEmpty()) return mapOf("Cookie" to ck)
-        return mapOf("Cookie" to jar.entries.joinToString("; ") { "${it.key}=${it.value}" })
+        val merged = mediaCookie(ck, Http.cookieValuesFor("$apiBase/member"))
+        return mapOf("Cookie" to merged)
     }
 
     // ------------------------------------------------------------------ 内部

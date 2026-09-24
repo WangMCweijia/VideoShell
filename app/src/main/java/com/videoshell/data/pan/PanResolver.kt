@@ -60,6 +60,21 @@ object PanResolver {
     fun handles(url: String?): Boolean = PanLink.isRef(url) || PanLink.isPan(url)
 
     /**
+     * 这是不是网盘**媒体直链**（清单/分片 URL，不是分享页、不是站内引用）。
+     *
+     * 给播放器的 403 自愈做判据（v1.0.69）：只有这类 URL 的 403 才值得
+     * "重新解析换凭据" —— 分享页 404/403 是分享没了，语义完全不同。
+     * 域名按后缀宽判、**不写死主机名**：`video-play-h-zb` 这类 CDN 前缀会变。
+     * 纯函数、无 IO，`PanMediaCookieTest` 有逐条断言。
+     */
+    @JvmStatic
+    fun isPanMediaUrl(url: String?): Boolean {
+        if (url.isNullOrBlank()) return false
+        val host = runCatching { java.net.URI(url).host }.getOrNull() ?: return false
+        return host.endsWith("drive.quark.cn") || host.endsWith("drive.uc.cn")
+    }
+
+    /**
      * 分享链接 / 站内引用 → 可播地址。
      *
      * 站内引用走「按 fid 取流」；原始分享链接走「先展开、播第一个文件」。

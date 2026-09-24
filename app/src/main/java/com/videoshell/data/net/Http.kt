@@ -9,10 +9,10 @@ import okhttp3.CookieJar
 import okhttp3.Dns
 import okhttp3.HttpUrl
 import okhttp3.Interceptor
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.net.Inet4Address
@@ -146,6 +146,29 @@ object Http {
         val mine = req.tag(ExplicitCookie::class.java)
         if (mine == null) chain.proceed(req)
         else chain.proceed(req.newBuilder().header("Cookie", mine.value).build())
+    }
+
+    /**
+     * jar 里当前该 URL 应带的全部 cookie（name → value；同名取 `expiresAt` 最晚的）。
+     *
+     * 为什么必须有它（v1.0.69，修「网盘取流成功、分片直链 403」）：
+     * 夸克的 `__puus` 是**滚动凭据** —— 每次 API 响应都会 `Set-Cookie` 下发新值
+     * （[ExplicitCookie] 的注释里记着这个事实）。于是落盘快照里的 `__puus` 在登录后
+     * **只新鲜一阵**；而网盘媒体域（`video-play-*.drive.quark.cn`）校验的就是它 ——
+     * 快照旧了 ⇒ 每个分片 403。取流（token/save/v2/play）用的是同一份快照却仍成功，
+     * 是 API 域对旧值宽容 —— **别把这个差异当成"凭据没问题"的证据**（E50）。
+     *
+     * jar 恰好握着最新值：这些 `Set-Cookie` 的 `Domain=.quark.cn`（宽域），
+     * [cookieJar] 不分桶、按 [Cookie.matches] 派发 ⇒ jar 一直跟服务端同步。
+     * 同名多版本时取 `expiresAt` 最晚的：滚动刷新会不断把过期时间往后推，
+     * 最晚的那个就是最新下发的。
+     */
+    fun cookieValuesFor(url: String): Map<String, String> {
+        val u = runCatching { url.toHttpUrl() }.getOrNull() ?: return emptyMap()
+        val list = cookieJar.loadForRequest(u)
+        val out = LinkedHashMap<String, String>()
+        for (c in list.sortedBy { it.expiresAt }) out[c.name] = c.value
+        return out
     }
 
     /**
