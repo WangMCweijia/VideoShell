@@ -580,8 +580,10 @@ class PanCloudDrive private constructor(
      * 它还自报 `default_resolution` 与每档的 `right`/`member_right`/`trans_status`/
      * `accessable`/`width`/`bitrate`/`size` —— **按服务器自报的默认档取**，比我们猜可靠。
      *
-     * 退路 `GET /file/play?resolution=raw|low`：当前网页端已不再调用它（bundle 里 0 次），
-     * 实测也已 404 —— 只作为历史版本兜底留着，别指望它。
+     * 退路 `GET /file/play?resolution=raw|low`：v1.0.65 记的是「网页端已 0 引用、实测 404」，
+     * 但 **v1.0.75 真机实测它活着**（回 HTTP 200 + 完整信封 `code 21001 file not found`）——
+     * 旧结论对这个账号已不成立，别再当"死接口"看。它仍只是**兜底**：它的结论不许顶掉主端点
+     * （见 [playUrlOnce] 的快照/还原，§4.75）。
      */
     private suspend fun playUrl(fid: String, ck: String): String? {
         var last: PanError? = null
@@ -610,17 +612,24 @@ class PanCloudDrive private constructor(
                 note(o)
             }
         }
+        // ⚠️ 主端点已经说出的结论必须**留住**。退路是历史接口（见 [playUrl] 头注），它的失败
+        //    只会把更有信息量的那句盖掉 —— v1.0.74 真机的 toast 只剩「·退路（code 21001…）」，
+        //    而 `v2/play` 到底回了什么**一点都没留下**（和 §4.74 同一种病，换了个洞）。
+        //    所以退路只在主端点**没给出结论**（err == null）时才补位；拿到 URL 仍照常返回。
+        val primary = err
         for (res in arrayOf("raw", "low")) {
             val body = getJson(
                 "$apiBase/file/play?${q()}&fid=${u(fid)}&resolution=$res", ck, "取播放入口·退路"
             ) ?: continue
             val g = json(body) ?: continue
             if (g.optInt("code", -1) != 0) {
-                note(g)
+                if (primary == null) note(g)
                 continue
             }
             urlOf(g)?.let { return it }
         }
+        // 退路的失败（无论来自 [note] 还是 [classify] 的异常）都不许顶掉主端点那句
+        if (primary != null) err = primary
         if (err == null) err = PanError.Broken("${type.label}没有返回播放入口（接口可能变了）")
         return null
     }

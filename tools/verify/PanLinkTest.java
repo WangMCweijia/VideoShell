@@ -639,6 +639,28 @@ public class PanLinkTest {
                 plCode != null && plCode.contains("PlayLog.record(\"✗ 解析失败：${r.message}\")"),
                 "解析失败只弹 toast ⇒ 用户没有任何办法把「某一部」的失败原因带回来");
 
+        // ------------------------------------------------- 退路不许覆盖主端点的原因（v1.0.75）
+        // v1.0.74 真机截图：toast 是「分享已失效·取播放入口·退路（code 21001…）」—— 「·退路」
+        // 三个字说明这句话出自**历史接口**（`GET /file/play`，头注写着网页端 0 引用、别指望它），
+        // 而真正该被看见的主端点 `POST /file/v2/play` 回了什么，**一个字都没留下**。
+        // 机理：`note()` 是无条件赋值，退路跑在主端点之后 ⇒ 把 `err` 盖掉了。
+        // 修法 = 「快照主端点的 err + 跑退路 + 还原」。⚠️ 这里只能做**源码守卫**
+        //（PanCloudDrive 用 org.json，离线 harness 挂的是 android.jar 桩 ⇒ 行为断言跑不了），
+        // 所以钉的是**结构**（快照/还原两段），不是某句文案 —— 文案会改，结构不会。
+        int onceAt = pcdCode == null ? -1 : pcdCode.indexOf("private suspend fun playUrlOnce(");
+        int onceEnd = onceAt < 0 ? -1 : pcdCode.indexOf("private fun urlOf(", onceAt);
+        String onceBody = (onceAt < 0 || onceEnd <= onceAt) ? ""
+                : pcdCode.substring(onceAt, onceEnd);
+        // 自测：先证窗口**真的截到了**那个函数（两端点都在），否则 E20 会因为空串而恒真
+        ok("E20a 守卫自测：窗口确实截到了 playUrlOnce 的函数体",
+                onceBody.contains("file/v2/play") && onceBody.contains("file/play"),
+                "截到 " + onceBody.length() + " 字符（窗口错位 ⇒ E20 是恒真断言）");
+        ok("E20 主端点的结论要**快照 + 还原**，退路不得顶掉它（否则真原因又没有出口）",
+                onceBody.contains("val primary = err")
+                        && onceBody.contains("if (primary == null) note(g)")
+                        && onceBody.contains("if (primary != null) err = primary"),
+                "退路的 note/classify 跑在主端点之后且无条件赋值 ⇒ 用户只看到「·退路」，主端点那句丢了");
+
         System.out.println();
         System.out.println("==== pass=" + pass + " fail=" + fail + " ====");
         if (fail > 0) {
