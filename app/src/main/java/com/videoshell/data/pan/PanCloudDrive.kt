@@ -199,6 +199,26 @@ class PanCloudDrive private constructor(
         }
 
         /**
+         * 这一步的「东西没了」该不该判成**终态** [PanError.Dead]（**纯函数**，`PanMediaCookieTest` J2 组钉着）。
+         *
+         * 它把两个**权威性不同**的来源分开（v1.0.76，§4.76）：
+         *  - [DEAD_CODES]：逐条打真接口得到的表 ⇒ **任何时候都认**，不看上下文；
+         *  - [deadEnvelope] 的**模糊文案网**（"已删除/失效" × "分享/文件"）：只在
+         *    **这一步问的是分享里的东西**时才认。
+         *
+         * 为什么必须分上下文：取播放入口那一步问的 fid 是**我们自己的转存产物**
+         * （`save` 刚返回的），信封那句 `file not found [文件已删除: <fid>]` 说的是**它** ——
+         * 而分享明明活着（转存都成了）。拿这句去判"分享已失效"就是**误报**：
+         * Dead 是终态，会劝用户去换线路，而这里换多少条线路都没用。
+         *
+         * @param askingAboutShare `true` = 问的是分享里的东西（取令牌 / 列目录 / 转存）；
+         *                         `false` = 问的是我们自己的转存产物（取播放入口）
+         */
+        @JvmStatic
+        fun deadVerdict(code: Int, message: String, askingAboutShare: Boolean): Boolean =
+            code in DEAD_CODES || (askingAboutShare && deadEnvelope(code, message))
+
+        /**
          * 从响应体里抠出信封的 `code` / `message` / `status`（**纯函数**，离线可断言）。
          *
          * ### 为什么不能用 `JSONObject`（v1.0.73 的真凶）
@@ -413,7 +433,16 @@ class PanCloudDrive private constructor(
         // ⚠️ 但**不能立刻删** —— 见 [pendingDelete] 的实测表：`v2/play` 打开播放会话后，
         // 该文件在几十秒内删不掉（`500 code:15000`，连试 4 次全败）。
         // 所以这里只"记账"，等下次取流时再清。
-        val url = playUrl(saved, ck)
+        // 取流这一段要把这对 fid 立起来（[deadVerdict] 的判据与失败文案的出口都要它），
+        // 无论成败都清掉 —— 出了这一步，"文件已删除"就又是关于分享的话了。
+        playShareFid = ref.fid
+        playSavedFid = saved
+        val url = try {
+            playUrl(saved, ck)
+        } finally {
+            playShareFid = null
+            playSavedFid = null
+        }
         if (url == null) {
             // 没播成 ⇒ 没有播放会话锁着它 ⇒ 立刻删是可以成的（同 [pendingDelete] 分支 A）
             // 只有 5xx/网络才记账（4xx = 别再试，盘里要么干净要么参数错）
@@ -801,6 +830,23 @@ class PanCloudDrive private constructor(
 
     private fun stepAt(): String = if (step.isBlank()) "" else "·$step"
 
+    /**
+     * 取流阶段的**那对 fid**：分享里的 fid（`ref.fid`）与转存产物在用户网盘里的 fid
+     * （`save` 返回的那个）。只在 [stream] 的取流那一段非空，出了那一段立刻清掉。
+     *
+     * 为什么要单开这一段上下文（v1.0.76，§4.76）：取播放入口时我们问的 fid 是**我们自己的
+     * 转存产物**，不是分享里的文件 ⇒ 此时信封说的"文件已删除"指的是**它**（[deadVerdict]
+     * 靠这个区分来避免误判 Dead）。而这两个值一起进文案，下一份自检报告就能把两种可能分开：
+     *  - `转存 fid != 分享 fid`（正常形状）⇒ 拿到的是一个"已删除"的**幽灵 fid**；
+     *  - `转存 fid == 分享 fid` ⇒ `save` 根本没转存成功，我们喂给取流的是**分享 fid**
+     *    （而头注写着"分享 fid 不能直接喂给取流端点"）。
+     */
+    @Volatile
+    private var playShareFid: String? = null
+
+    @Volatile
+    private var playSavedFid: String? = null
+
     /** JSON 请求一律显式声明 Accept —— 云盘接口按它做内容协商，用 HTML 的 Accept 会被回 HTML */
     private val jsonAccept = mapOf("Accept" to "application/json, text/plain, */*")
 
@@ -852,7 +898,7 @@ class PanCloudDrive private constructor(
                 DriveStore.markExpired(type)
                 PanError.NeedLogin(needLoginMsg(type), type)
             }
-            // ⚠️ Dead 的判据在 [deadEnvelope]（**唯一出处**）。这里曾经只认 `41006`，
+            // ⚠️ Dead 的判据在 [deadVerdict]（**唯一出处**）。这里曾经只认 `41006`，
             //    并且额外把"信封自称 404"也判成 Dead —— 那是两次方向相反的错：
             //    前者**漏报**（`41011 分享地址已失效` 被我们说成"不是分享失效"），
             //    后者**误报**（活着的分享被判死）。见 [DEAD_CODES] 与 docs/PITFALLS.md E54。
@@ -860,8 +906,19 @@ class PanCloudDrive private constructor(
             // §4.71 ④ 的教训只补到了 Broken / Net 两条路，这条漏了 —— 于是用户截回来
             // 只剩一句"分享已失效"，而链路上 5 个端点（取分享令牌/列目录/转存/等任务/取播放入口）
             // 都可能报它，等于又回到"只好再扒一遍 bundle"。
-            deadEnvelope(code, msg) ->
+            // 判据在 [deadVerdict]（**纯函数**，J2 组钉着）：码表任何时候都认；模糊文案网
+            // 只在"这一步问的是**分享里的**东西"时才认 —— 取播放入口问的是我们自己的转存
+            // 产物，那里的"文件已删除"说的是它（v1.0.76 真机，§4.76）。
+            deadVerdict(code, msg, playSavedFid == null) ->
                 PanError.Dead("分享已失效${stepAt()}（code $code：$msg）")
+            // 取流这一步的"文件没了"：说的是**我们自己刚转存出来的那个文件**。这里既不判死、
+            // 也不断言原因，只把**两个 fid 一起交出去** —— 它们是"幽灵 fid"与"分享 fid"
+            // 的唯一判据，也是下一份报告能定性的全部依据。
+            playSavedFid != null ->
+                PanError.Broken(
+                    "${type.label}转存后的文件取不到播放入口（code $code：$msg）" +
+                            "｜分享fid=${playShareFid.orEmpty()} 转存fid=$playSavedFid"
+                )
             // 信封自称 404 却没说是"没了"：按"接口异常"处理，**不断言原因**，只给动作
             status == 404 ->
                 PanError.Broken("${type.label}接口信封回 404 / code $code：$msg（未识别的 404，可重试）")

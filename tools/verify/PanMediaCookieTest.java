@@ -23,6 +23,9 @@ import java.util.Map;
  *  - v1.0.71 / E52「取流 404」：取流请求体形状（`resolutions` 复数 + `supports`）；
  *  - **v1.0.72 / E54「个别剧集播不了 + 整站播不了」**：Dead 的判据改成
  *    {@link PanCloudDrive#deadEnvelope}（**按服务端信封说的那句**）。
+ *  - **v1.0.76 / §4.76「退路修好了，可它报的仍不是真凶」**：判据升级成
+ *    {@link PanCloudDrive#deadVerdict}（**加一层上下文**）—— 取播放入口那一步问的 fid 是
+ *    **我们自己的转存产物**，那里的"文件已删除"说的是它，不能拿来判"分享已失效"（J2 组）。
  *
  * ## E 组为什么是这两版最值钱的断言
  *
@@ -225,8 +228,10 @@ public class PanMediaCookieTest {
         ok("F0 源码读得到（路径/编码没变）", pcd != null && pcd.length() > 1000,
                 pcd == null ? "读不到" : (pcd.length() + " 字符"));
         // 正例锚点：**剥注释后**必须还能看到真实判定代码（否则下面的否定断言可能只是"文件被剥空了"）
-        ok("F1 剥注释后仍含正例 `deadEnvelope(code, msg)`（说明剥注释没把真代码吃掉）",
-                pcd != null && pcd.contains("deadEnvelope(code, msg) ->"), "");
+        // ⚠️ v1.0.76 起锚点从 `deadEnvelope(code, msg)` 换成 `deadVerdict(...)` ——
+        //    `note()` 里的判据改了名字，锚点必须跟着走，否则 F1 会假红。
+        ok("F1 剥注释后仍含正例 `deadVerdict(code, msg, …)`（说明剥注释没把真代码吃掉）",
+                pcd != null && pcd.contains("deadVerdict(code, msg, playSavedFid == null) ->"), "");
         ok("F2 已无 `HTTP 404 ⇒ Dead` 那条归因（剥注释后）",
                 pcd != null && !pcd.contains("PanError.Dead(\"分享链接已失效（HTTP 404）\")"), "");
         ok("F3 已无「信封 status 404 即 Dead」的归因（剥注释后）",
@@ -312,6 +317,20 @@ public class PanMediaCookieTest {
         ok("J-msg-neg 只说「失效」不说是什么 ⇒ 不判 Dead（半句话不算）",
                 !PanCloudDrive.deadEnvelope(49999, "签名已失效"), "签名已失效");
         ok("J-msg-neg 空 message 不 ⇒ Dead", !PanCloudDrive.deadEnvelope(49999, ""), "");
+
+        // ---------------------------------------------------------------- J2
+        // ★ v1.0.76（§4.76）：同样是"东西没了"，**问的是谁的东西**决定它能不能判终态。
+        // 真机原文：取播放入口回 `21001 file not found [文件已删除: 0467dd5c0a4f…]` ——
+        // 而那一步问的 fid 是**我们自己刚转存出来的产物**，分享明明活着（转存都成了）。
+        System.out.println("-- J2. deadVerdict：取流那一步问的是我们自己的转存产物 --");
+        String onceOnly = "file not found [文件已删除: 0467dd5c0a4f]";
+        ok("J2 ★ 真机原文（21001 + 文件已删除）在**取流**那一步不判终态",
+                !PanCloudDrive.deadVerdict(21001, onceOnly, false), onceOnly);
+        ok("J2b 同一句话在**分享**那一步照旧判终态（不许把 E54 的漏报放回来）",
+                PanCloudDrive.deadVerdict(21001, onceOnly, true), "");
+        ok("J2c 码表任何时候都认 —— 即使问的是我们自己的产物（DRY：少报状态比误报更糟）",
+                PanCloudDrive.deadVerdict(41011, "", false)
+                        && PanCloudDrive.deadVerdict(41004, "", false), "");
 
         // ---------------------------------------------------------------- K
         System.out.println("-- K. 源码级：v1.0.72 的四条新纪律 --");
