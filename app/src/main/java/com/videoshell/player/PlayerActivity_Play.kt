@@ -226,23 +226,38 @@ internal fun PlayerActivity.playUrl(rawUrl: String, fromRetry: Boolean = false) 
  * 而部分 CDN / WAF 拿它做防盗链校验 —— 只带 Referer、不带 Origin 的请求会被挂住，
  * 表现就是"网页端同一个链接能播，App 里一直转圈"。
  *
+ * ⚠️ **只有 http(s) 的播放页才配当 Origin / Referer 的来源**（v1.0.78，§4.78）。
+ * 网盘直连的"播放页"是 `panref://quark/{share}/{fid}/{token}` —— 它压根不是网页，
+ * 拿它去算会发出 `Origin: panref://quark`（scheme 都不是 http 的**非法 Origin**），
+ * CDN/WAF 直接 403。自检 [9] 用同一套 DataSource、**只发 Cookie** 实测 200 ⇒
+ * 网盘这条链路就按"只发 Cookie"走，与已被证明能播的那套头逐字一致。
+ *
  * 只补**缺失**的，绝不覆盖调用方已经设好的值（那些值是按站点试出来的）。
  */
 internal fun PlayerActivity.browserHeaders(): Map<String, String> {
     val h = HashMap(headers)
+    val page = fallbackPage.takeIf { it.startsWith("http://") || it.startsWith("https://") }
     if (h.keys.none { it.equals("Origin", true) }) {
-        originOf(fallbackPage)?.let { h["Origin"] = it }
+        page?.let { originOf(it) }?.let { h["Origin"] = it }
     }
-    if (h.keys.none { it.equals("Referer", true) } && fallbackPage.isNotBlank()) {
-        h["Referer"] = fallbackPage
+    if (h.keys.none { it.equals("Referer", true) } && page != null) {
+        h["Referer"] = page
     }
     return h
 }
 
-/** `https://a.b/c?d` → `https://a.b`。拿不到就返回 null —— 宁可少发一个头，也不发假值 */
+/**
+ * `https://a.b/c?d` → `https://a.b`。拿不到就返回 null —— 宁可少发一个头，也不发假值。
+ *
+ * ⚠️ **非 http(s) 一律 null**（v1.0.78，§4.78）：`panref://quark/…` 曾被算成
+ * `panref://quark` 当 Origin 发出去（真机：网盘直连播放全 403，见 §4.78）。
+ * 判据与 [com.videoshell.data.site.WebSiteKit.originOf] 保持同一条。
+ */
 internal fun PlayerActivity.originOf(url: String): String? = runCatching {
     val u = java.net.URI(url)
-    if (u.scheme == null || u.authority == null) null else "${u.scheme}://${u.authority}"
+    val s = u.scheme ?: return@runCatching null
+    if (!s.equals("http", true) && !s.equals("https", true)) return@runCatching null
+    if (u.authority == null) null else "$s://${u.authority}"
 }.getOrNull()
 
 internal fun PlayerActivity.refreshProgress() {

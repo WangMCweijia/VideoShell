@@ -587,7 +587,19 @@ public class Agg38 {
                 live(player, "\"Origin\""));
         ok("browserHeaders 只补缺失、不覆盖站点试出来的头",
                 live(player, "fun browserHeaders(): Map<String, String>"));
-        ok("用页面源算 Origin", live(player, "originOf(fallbackPage)"));
+        ok("用页面源算 Origin", live(player, "originOf(it)"));
+        // v1.0.78（§4.78）：网盘直连的"播放页"是 `panref://quark/…`，不是网页。
+        // 拿它当 Origin 会发出 `Origin: panref://quark` ⇒ CDN/WAF 403（真机：网盘直连
+        // 全 403，而自检 [9] 用同一套 DataSource 只发 Cookie 是 200）。
+        // 这两条只能钉源码：头合成读的是 Activity 的字段，离线没有行为观测点。
+        ok("★ Origin/Referer 的来源必须是 http(s) 页面（panref 不是网页）",
+                live(player, "startsWith(\"http://\") || ")
+                        && live(player, "startsWith(\"https://\")"),
+                "又会把非网页的播放页当成 Origin 的来源 ⇒ 发 `Origin: panref://quark` ⇒ 403");
+        ok("★ originOf 对非 http(s) 返回 null（不把 panref://quark 当源）",
+                live(player, "equals(\"http\", true)")
+                        && live(player, "equals(\"https\", true)"),
+                "`originOf` 又对任意 scheme 返回 `scheme://authority`");
 
         // ---- HlsFix ----
         ok("★ 目录从 URI 的 rawPath 取（旧实现直接按最后一个斜杠切）", live(hls, "rawPath"));

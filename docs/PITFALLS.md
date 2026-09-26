@@ -3498,4 +3498,81 @@ sweepPending(ck, except = saved)      // 先存再清，且不删刚拿到的这
 - **排除项要显式表达。** "顺手清"的语义里天生含"别删我正在用的这个"，把它写成形参
   `except`，比在调用点赌"不会有重复 fid"可靠。
 
+## §4.78 「站点能播、网盘直连全 403」：把 `panref://` 当成了 Origin（v1.0.78）
+
+### 一、症状：媒体清单 403，重解析也没用；但**同一台设备从站点进去就能播**
+
+真机播放诊断（v1.0.77，网盘直连）：
+
+```
+播放页：panref://quark/33490838929f/346b9b…/67871c17…
+错误码：ERROR_CODE_IO_BAD_HTTP_STATUS(2004)  HTTP 403
+地址：https://video-play-h-zb.drive.quark.cn/qv/FF9AF3CC…/media.m3u8?
+播放记录：⚠ 网盘直链 403 ⇒ 自动重新解析一次（凭据已滚动…）→ 换了一条直链仍 [MEDIA 403]
+```
+
+关键对照在 `播放页` 那一行：**它是 `panref://`，不是一个网页地址**。
+而 14:39 从「蜡笔」站点进去播的同一类夸克直链是 `[MEDIA 200]` —— 两条路用的是
+**同一个解析器、同一套 DataSource、同一份 Cookie**，唯一不同的是播放页长什么样。
+
+### 二、根因：`browserHeaders()` 把非网页的"播放页"当成了 Origin 的来源
+
+`browserHeaders()`（v1.0.38 为"网页能播、App 不能播"补的）会拿 `fallbackPage` 合成
+`Origin` 与 `Referer`。而网盘直连的 `fallbackPage` 是 `panref://quark/{share}/{fid}/{token}`
+⇒ `java.net.URI` 解析出 `scheme=panref` ⇒ 于是发出去的是：
+
+```
+Origin: panref://quark
+Referer: panref://quark/33490838929f/346b9b…/67871c17…
+```
+
+`Origin` 的 scheme 不是 `http(s)` —— 这本身就是**非法头**，CDN/WAF 在边缘直接 403
+（真机响应 29~68ms，是典型的边缘拒绝，不是回源失败）。
+
+⚠️ 反证同样干净：自检 [9]「播放器栈实测」用的是**同一套 OkHttpDataSource、只发 Cookie**、
+**不带** Origin/Referer，实测 `200`。所以夸克媒体域**并不要求** Referer —— 我们要做的
+不是"换一个更真的 Referer"，而是**别再发这个假头**。
+
+### 三、修法：来源必须是 http(s) 页面（判据与 `WebSiteKit.originOf` 对齐）
+
+```kotlin
+internal fun PlayerActivity.browserHeaders(): Map<String, String> {
+    val h = HashMap(headers)
+    val page = fallbackPage.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+    if (h.keys.none { it.equals("Origin", true) }) {
+        page?.let { originOf(it) }?.let { h["Origin"] = it }
+    }
+    if (h.keys.none { it.equals("Referer", true) } && page != null) {
+        h["Referer"] = page
+    }
+    return h
+}
+
+internal fun PlayerActivity.originOf(url: String): String? = runCatching {
+    val u = java.net.URI(url)
+    val s = u.scheme ?: return@runCatching null
+    if (!s.equals("http", true) && !s.equals("https", true)) return@runCatching null
+    if (u.authority == null) null else "$s://${u.authority}"
+}.getOrNull()
+```
+
+同一份判据在 `WebSiteKit.originOf` **早就有了**（`about:blank` → 空，Agg37 钉着）——
+`PlayerActivity` 这份是后来单独写的，漏掉了 scheme 这一层。两处从此对齐。
+
+守卫：`Agg38` 加了「Origin/Referer 的来源必须是 http(s) 页面」与「`originOf` 对非 http(s)
+返回 null」两条；原有的「用页面源算 Origin」从 `originOf(fallbackPage)` 改成 `originOf(it)`。
+（这两条只能钉源码：头合成读的是 Activity 字段，离线没有行为观测点。）
+
+### 四、方法论
+
+- **"同一个地址，两边结果不同"时，先把两边发出的**字节**摆出来比对。** 这轮真正定性的
+  不是"403 是什么"，而是"站点进去 200、网盘直连 403"这一条对照 —— 解析器/DataSource/Cookie
+  全都相同，差别只剩请求头，于是范围瞬间收到一行。
+- **自检 [9] 不只是"证明链路通"**，它同时是**一份已经被证明能播的请求头基准**。当我们想给
+  播放器"补得像浏览器一点"时，得先确认补的东西**不比基准更差** —— 这里补的 Origin 恰恰
+  比不加更容易 403。
+- **同一判据写两遍，就得有两份守卫。** `originOf` 的 scheme 检查在 `WebSiteKit` 有、
+  在 `PlayerActivity` 没有，症状不是"少了个校验"，而是**只在这条链路上 403**。
+- **宁可少发一个头，也不发假值。** 这条本来写在 `originOf` 的注释里，这回是它自己没做到。
+
 
