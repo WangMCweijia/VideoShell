@@ -424,9 +424,20 @@ class PanCloudDrive private constructor(
             err = PanError.NeedLogin(needLoginMsg(type), type)
             return null
         }
-        // 先清上次留下的（此刻已"凉"）—— 效果是盘里最多只积压 1 个转存产物
-        sweepPending(ck)
         val saved = saveToMyDrive(ref, ck) ?: return null
+        // ⚠️ 顺序不能反（v1.0.77，§4.77）：**先 save、再清，并且排除刚拿到的这个 fid**。
+        //
+        // 旧写法是「先清再存」，真机**双次解析**（第一遍播着播着媒体 403 → 自动重新解析）
+        // 会挂：第二次 `file/v2/play` 回 `21001 file not found [文件已删除: <fid>]`，
+        // 而报告里那个 fid 正是**第二次 save 刚返回的**（见 §4.76 的两个 fid：它们不等，
+        // 说明转存真的成功了）。全仓唯一会删 fid 的代码就是下面这一处 —— 所以只要
+        // 夸克对**同一份源文件重复转存回同一个 fid**（本条的推断环节，未单独实测），
+        // 「先清再存」删掉的就正好是**这一秒要播的那个文件**。
+        // （`file/delete` 自己也是**异步任务**：200 时文件还没消失 ⇒ 竞态客观存在。）
+        //
+        // 挪到 save 之后**仍然满足原来的目的** —— 赶在**播放会话锁住它之前**清掉
+        // （`v2/play` 一旦开过，delete 必 500，见 [pendingDelete] 的实测表）。
+        sweepPending(ck, except = saved)
         // 转存产物只有一个用途：换一个**已签名的播放入口**。拿到 URL 之后就没用了
         // （实测：删掉转存文件后，已签发的 m3u8 与 ts 仍返回 200）。
         //
@@ -748,16 +759,23 @@ class PanCloudDrive private constructor(
     }
 
     /**
-     * 顺手清掉待清理队列（放在取流 / 列目录 / 看账号**之前**：此刻它们已经"凉"了，删得掉）。
+     * 顺手清掉待清理队列（放在**播放会话开起来之前** / 列目录 / 看账号**之前**：此刻它们已经"凉"了，删得掉）。
      *
      * 三分派见 [delete]。只有 5xx/网络才留在队列里等下次；4xx 直接出队
      * （否则 `23004 已删除` 这种"本来就没问题"的条目会永远重试）。
      * 超过 [PENDING_TTL_MS] 的条目放弃 —— 防止真有删不掉的东西永远拖着。
+     *
+     * @param except **这一秒就要用**的 fid，必须跳过（v1.0.77，§4.77）。取流那一步传的是
+     *   刚 save 回来的那个 —— 夸克对同一份源文件重复转存会回**同一个 fid**，而本函数删的
+     *   正是「上一次」的产物 ⇒ 不排除它，重解析时会把 save 刚交出来的文件删掉，
+     *   取流随即回 `21001 file not found [文件已删除]`（真机报告见 §4.77）。
      */
-    private suspend fun sweepPending(ck: String) {
+    private suspend fun sweepPending(ck: String, except: String? = null) {
         if (pendingDelete.isEmpty()) return
         val now = System.currentTimeMillis()
         for (fid in pendingDelete.keys.take(SWEEP_MAX)) {
+            // 这一秒要播的就是它 —— 删了等于把播放入口一起删了
+            if (fid == except) continue
             val born = pendingDelete[fid] ?: now
             if (now - born > PENDING_TTL_MS) {
                 pendingDelete.remove(fid)

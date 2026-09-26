@@ -488,12 +488,17 @@ public class PanLinkTest {
                 "实测记录被删 ⇒ 下次又会写成「拿到 URL 就立刻删」");
         // 这条是本轮**唯一**一个"必败路径"的守卫：v2/play 打开播放会话后几百秒内删不掉，
         // 所以"记账 + 下次顺手清"是功能正确性的一部分，不是优化。
-        int sweepCall = pcdCode == null ? -1 : pcdCode.indexOf("sweepPending(ck)");
+        //
+        // ⚠️ 顺序在 v1.0.77 **反过来了**（§4.77）：旧写法是「先清再存」，而夸克对同一份源文件
+        // 重复转存会回**同一个 fid** ⇒ 清掉的就正好是这一秒要播的那个文件（真机双次解析回
+        // `21001 file not found [文件已删除: <fid>]`）。现在必须是 **save → sweep(except=saved)**。
+        // 语义（记账 + 下次顺手清、绝不硬删）没变，变的是**这一秒要用的 fid 必须被排除**。
+        int sweepCall = pcdCode == null ? -1 : pcdCode.indexOf("sweepPending(ck, except = saved)");
         int saveCall = pcdCode == null ? -1 : pcdCode.indexOf("saveToMyDrive(ref, ck)");
         ok("E14e 转存产物是**记账 + 下次顺手清**，不是拿到 URL 就硬删（实测硬删必败：500 ×4）",
                 pcdCode != null && pcdCode.contains("rememberPending(saved)")
                         && pcdCode.contains("sweepPending(")
-                        && sweepCall > 0 && saveCall > 0 && sweepCall < saveCall,
+                        && sweepCall > 0 && saveCall > 0 && saveCall < sweepCall,
                 "sweepPending@" + sweepCall + " saveToMyDrive@" + saveCall);
         // 4xx（23004 已删除 / 14001 参数错）必须出队：否则"本来就没问题"的条目会永远重试
         ok("E14f 4xx 直接出队、只有 5xx/网络才留队列（否则 23004 会永久重试）",
@@ -660,6 +665,26 @@ public class PanLinkTest {
                         && onceBody.contains("if (primary == null) note(g)")
                         && onceBody.contains("if (primary != null) err = primary"),
                 "退路的 note/classify 跑在主端点之后且无条件赋值 ⇒ 用户只看到「·退路」，主端点那句丢了");
+
+        // ------------------------------------ 清理队列不许删「这一秒要播的文件」（v1.0.77）
+        // 真机报告（§4.77）：同一集在同一进程里被解析**第二次**时（第一次播着播着媒体 403
+        // → 自动重新解析），`file/v2/play` 回 `21001 file not found [文件已删除: <fid>]`，
+        // 而报告里两个 fid **不相等** ⇒ 转存真的成功了，"没了"说的是**我们的转存产物**。
+        // 全仓唯一会删 fid 的就是清理队列，而 `file/delete` 是**异步任务**（200 之后文件才消失）
+        // ⇒ 「先清再存」撞上"重存回同一个 fid"，就把播放入口一起删了。
+        // ⚠️ 同上：PanCloudDrive 用 org.json、离线只能钉**结构** —— 所以断言的是
+        // "sweep 必须带 `except = saved`" 与"函数体里真的跳过它"，不是某句文案。
+        int sweepAt = pcdCode == null ? -1 : pcdCode.indexOf("private suspend fun sweepPending(");
+        int sweepEnd = sweepAt < 0 ? -1 : pcdCode.indexOf("private fun mediaHeaders(", sweepAt);
+        String sweepBody = (sweepAt < 0 || sweepEnd <= sweepAt) ? ""
+                : pcdCode.substring(sweepAt, sweepEnd);
+        // 自测：先证窗口**真的截到了**那个函数（签名与循环都在），否则 E21 会因空串而恒真
+        ok("E21a 守卫自测：窗口确实截到了 sweepPending 的函数体",
+                sweepBody.contains("pendingDelete") && sweepBody.contains("delete(fid, ck)"),
+                "截到 " + sweepBody.length() + " 字符（窗口错位 ⇒ E21 是恒真断言）");
+        ok("E21 清理必须排除「这一秒要用的 fid」（否则重解析会删掉刚转存、正要播的那个文件）",
+                sweepBody.contains("except: String? = null") && sweepBody.contains("fid == except"),
+                "sweep 又变成无差别清理 ⇒ 双次解析时连播放入口一起删，取流回 21001 文件已删除");
 
         System.out.println();
         System.out.println("==== pass=" + pass + " fail=" + fail + " ====");
