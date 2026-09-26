@@ -26,6 +26,9 @@ import java.util.Map;
  *  - **v1.0.76 / §4.76「退路修好了，可它报的仍不是真凶」**：判据升级成
  *    {@link PanCloudDrive#deadVerdict}（**加一层上下文**）—— 取播放入口那一步问的 fid 是
  *    **我们自己的转存产物**，那里的"文件已删除"说的是它，不能拿来判"分享已失效"（J2 组）。
+ *  - **v1.0.79「UC 刚登录就提示登录已过期」**：M 组钉住三个互相独立的原因 ——
+ *    `pr` 的产品身份（夸克 `ucpro` / UC `UCBrowser`）、两盘**不同**的登录标记键、
+ *    以及"媒体 cookie 不筛"必须同时做到不丢键**且**用 jar 新值覆盖。
  *
  * ## E 组为什么是这两版最值钱的断言
  *
@@ -402,6 +405,57 @@ public class PanMediaCookieTest {
         // 源码级：归因处**必须**用 envelopeFields 读失败体 —— 不许再回去用 JSONObject（它必抛）
         ok("L10 ★ 源码级：classify 用 envelopeFields 读失败体（不许再用 JSONObject 解它）",
                 pcd != null && pcd.contains("?.let { envelopeFields(it) }"), "");
+
+        // ---------------------------------------------------------------- M
+        // v1.0.79「UC 网盘刚登录就提示登录已过期」：三个**互相独立**的原因，每个都得钉住。
+        //   ① `pr` 是**产品身份**：夸克 `ucpro`、UC `UCBrowser`（依据是 UC 自己的 PC bundle，
+        //      `paramInfo:{pr:"UCBrowser",fr:"pc"}`）。拿夸克的 pr 去问 UC 的会话 ⇒
+        //      服务端认不出这个产品 ⇒ `41001/31001 require login [guest]` ⇒ 校验判过期。
+        //   ② 登录标记键不同：UC 是 `__kp/__kps`（bundle 里 `be(){return !!get("__kp")}`），
+        //      拿夸克的 `__puus/__pus/__uid` 去等 ⇒ 永远等不到，或**会话没落全**就抓了快照
+        //      ⇒ 回到接口那一侧仍是 guest。
+        //   ③ 媒体 cookie：拿夸克白名单筛 UC 会把 `__kp/__kps` 筛掉 ⇒ 分片 412/403。
+        //      而「不筛」必须**同时**做到"不丢键"与"用 jar 的新值覆盖" —— 只保留不覆盖
+        //      等于让每个分片都拿着登录那一刻的旧凭据去问 CDN（能解析、一播就 403）。
+        System.out.println("-- M. UC：pr / 登录标记 / 媒体 cookie（v1.0.79「刚登录就过期」） --");
+        String ucAll = PanCloudDrive.mediaCookie(SNAPSHOT, m(), null);
+        ok("M1 不筛（UC）时 `__kp/__kps` 都留着",
+                ucAll.contains("__kp=xx") && ucAll.contains("__kps=yy"), ucAll);
+        String ucFresh = PanCloudDrive.mediaCookie(SNAPSHOT, m("__kp", "NEWKP"), null);
+        ok("M2 ★ 不筛**不等于**不要新值：jar 的 `__kp` 覆盖快照旧值",
+                ucFresh.contains("__kp=NEWKP") && !ucFresh.contains("__kp=xx"), ucFresh);
+        ok("M3 覆盖只动同名键：`__kps` 仍是快照那个", ucFresh.contains("__kps=yy"), ucFresh);
+        ok("M4 「不筛」保留快照里的全部键（含非凭据键）",
+                ucAll.contains("navCompanyId=z") && ucAll.contains("__uid=t0ld"), ucAll);
+        // 对照：夸克那份白名单**必须**继续筛 —— 否则 B 组的"最小暴露"就悄悄丢了
+        String qk = PanCloudDrive.mediaCookie(SNAPSHOT, m("__puus", "N1"));
+        ok("M5 对照：夸克（默认白名单）仍把 `__kp/__kps` 筛掉",
+                !qk.contains("__kp") && !qk.contains("__kps") && qk.contains("__puus=N1"), qk);
+        ok("M6 不筛 + 快照空 + 无新值 ⇒ 空串（调用方维持原样）",
+                PanCloudDrive.mediaCookie("", m(), null).isEmpty(), "");
+        ok("M7 不筛也不收无 `=` 的碎片",
+                !PanCloudDrive.mediaCookie("junk; a=1", m(), null).contains("junk"), "");
+
+        ok("M8 ★ 源码级：UC 的 `pr` 是 `UCBrowser`（不是从夸克抄来的 `ucpro`）",
+                pcd != null && pcd.contains(
+                        "PanType.UC, \"https://pc-api.uc.cn/1/clouddrive\", "
+                                + "\"https://drive.uc.cn/\", \"UCBrowser\""), "");
+        ok("M9 ★ 源码级：`mediaKeys()` 对非夸克返回 null（不筛），不是空集",
+                pcd != null
+                        && pcd.contains("if (type == PanType.QUARK) MEDIA_COOKIE_KEYS else null"), "");
+        ok("M10 ★ 源码级：`mediaCookie` 的白名单参数可空（null = 不筛）",
+                pcd != null && pcd.contains("keys: Set<String>? = MEDIA_COOKIE_KEYS"), "");
+        String dla = code(readSrc("app/src/main/java/com/videoshell/ui/DriveLoginActivity.kt"));
+        ok("M11 ★ 源码级：UC 的登录标记是 `__kp/__kps`（不是夸克那三个）",
+                dla != null && dla.contains("PanType.UC -> listOf(\"__kp\", \"__kps\")"), "");
+        ok("M12 源码级：夸克的标记仍是那三个（没被 UC 的改动顺手改掉）",
+                dla != null
+                        && dla.contains("PanType.QUARK -> listOf(\"__puus\", \"__pus\", \"__uid\")"), "");
+        // 第三个 artifact：spike 工具必须和 App 发**同一个 pr**，否则它验的不是 App 那条路
+        String spike = readSrc("tools/verify/panquark_spike.py");
+        ok("M13 ★ spike 工具的 pr 与 App 同源（`UCBrowser` / `ucpro` 按盘取，不写死）",
+                spike != null && spike.contains("PR = \"UCBrowser\" if IS_UC else \"ucpro\"")
+                        && spike.contains("Q = \"pr=%s&fr=pc&uc_param_str=\" % PR"), "");
 
         System.out.println();
         System.out.println("PASS=" + pass + "  FAIL=" + fail);

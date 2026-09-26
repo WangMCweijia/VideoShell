@@ -17,7 +17,9 @@ import java.util.concurrent.ConcurrentHashMap
  *  - `https://pc-api.uc.cn/1/clouddrive/share/sharepage/token`（UC）
  *  两个 host 对同一个请求体返回**同样的信封**（`{status,code,message,data}`，
  *  `code:41006` = 分享不存在，`code:31001` = 需要登录）。UC 云盘就是夸克云盘换了品牌，
- *  路径、参数、`pr=ucpro&fr=pc` 全都一样。写成两份只会让"改一处漏一处"变成必然。
+ *  路径与参数形状全都一样。⚠️ **唯一不同的是 `pr`**（产品身份）：夸克 `ucpro`、
+ *  UC `UCBrowser` —— 这一个是"登录态找不到"的全部原因，见 [uc]。
+ *  写成两份实现只会让"改一处漏一处"变成必然。
  *
  * ### 实测确认的接口事实（决定了整个 P0 的形状）
  *
@@ -76,8 +78,26 @@ class PanCloudDrive private constructor(
             PanType.QUARK, "https://drive-pc.quark.cn/1/clouddrive", "https://pan.quark.cn/", "ucpro"
         )
 
+        /**
+         * ⚠️ UC 的 `pr` 是 **`UCBrowser`**，不是从夸克抄来的 `ucpro`（v1.0.79 修正）。
+         *
+         * 依据是 UC 自己的 PC 网页客户端 —— 2026-09-26 直接下载并读了
+         * `drive.uc.cn` 首屏加载的登录页 bundle
+         * （`@ali/uc-pegasus-source-project-uc-cloud-drive-login-static-page/1.1.11`），
+         * 其 prod 段写着：
+         *
+         * ```js
+         * cloudDriveConfig: { cloudDriveHost: "https://pc-api.uc.cn",
+         *                     paramInfo: { pr: "UCBrowser", fr: "pc" } }
+         * ```
+         *
+         * 之后它用 `pr=UCBrowser&fr=pc` 打 `/1/clouddrive/member`（同一个端点、同一个
+         * host —— 证实我们选的端点没错）。`pr` 是**产品身份**：夸克是 `ucpro`、UC 是
+         * `UCBrowser`，而登录态按产品存放。拿夸克的 `pr` 去问 UC 的会话，服务端认不出
+         * ⇒ 回 `41001/31001 require login [guest]` ⇒ 刚扫码登录的 UC 立刻显示"登录已过期"。
+         */
         fun uc() = PanCloudDrive(
-            PanType.UC, "https://pc-api.uc.cn/1/clouddrive", "https://drive.uc.cn/", "ucpro"
+            PanType.UC, "https://pc-api.uc.cn/1/clouddrive", "https://drive.uc.cn/", "UCBrowser"
         )
 
         /**
@@ -107,12 +127,15 @@ class PanCloudDrive private constructor(
         /** 一个 fid 在队列里最多待多久（超过就放弃 —— 防止永远删不掉的条目无限重试） */
         private const val PENDING_TTL_MS = 6 * 60 * 60 * 1000L
         /**
-         * 播放器的分片请求**只需要**这几个 Cookie 键。
+         * 播放器的分片请求**只需要**这几个 Cookie 键 —— ⚠️ **只对夸克成立**。
          *
          * 实测（2026-09-23，在 `media.m3u8` 与 `.ts` 上逐个组合打）：
          * `__puus` 单独 → 200；`__pus` 单独 → **412**；`__uid` 单独 → **412**；
          * `__pus+__puus` → 200；全量 1281 字符 → 200。
          * ⇒ 真正的凭据是 `__puus`，另两个带着只为兼容将来可能的变动。
+         *
+         * UC 的凭据键不是这一组（是 `__kp/__kps`），所以那份实测**不能**套到 UC 上 ——
+         * 见 [mediaKeys]，那里按盘选键。
          */
         private val MEDIA_COOKIE_KEYS = setOf("__pus", "__puus", "__uid")
 
@@ -138,19 +161,38 @@ class PanCloudDrive private constructor(
          * 落盘快照打底（白名单键），[fresh]（jar 最新值，见 [Http.cookieValuesFor]）
          * **覆盖**同名键 —— `__puus` 是滚动凭据，快照必然越来越旧（v1.0.69 修 403）。
          * 合成后为空时退回整份快照：宁可多带，也不能因为键名没见过就播不了。
+         *
+         * [keys] 是白名单，默认**夸克**那份实测表（见 [MEDIA_COOKIE_KEYS]）。
+         *
+         * [keys] 传 **null** =「不筛」（UC 走这条，见 [mediaKeys]）：整份快照都留着，
+         * **并且 jar 的值照样覆盖上来**。
+         * ⚠️ 「不筛」只表示**不丢键**，不表示"不要新值"（v1.0.79 修正）—— 原来的写法是
+         * "空集 ⇒ 直接退回整份快照"，那等于对 UC **同时**关掉了新鲜度：快照里的 `__kp`
+         * 在登录后只新鲜一阵，之后每个分片都拿着旧凭据去问 CDN，症状是"能解析、一播就 403"。
+         * 拿夸克白名单去筛 UC 会把 `__kp/__kps` 筛掉（⇒ 412/403），而"保留全部 + 覆盖新值"
+         * 对两个盘都成立 ⇒ 这才是 UC 该走的那条。
          */
         @JvmStatic
-        fun mediaCookie(snapshot: String, fresh: Map<String, String>): String {
+        @JvmOverloads
+        fun mediaCookie(
+            snapshot: String,
+            fresh: Map<String, String>,
+            keys: Set<String>? = MEDIA_COOKIE_KEYS
+        ): String {
             val jar = LinkedHashMap<String, String>()
             for (part in snapshot.split(';')) {
                 val i = part.indexOf('=')
                 if (i <= 0) continue
                 val k = part.substring(0, i).trim()
-                if (k in MEDIA_COOKIE_KEYS) jar[k] = part.substring(i + 1).trim()
+                if (keys == null || k in keys) jar[k] = part.substring(i + 1).trim()
             }
-            for (k in MEDIA_COOKIE_KEYS) {
-                val v = fresh[k]
-                if (!v.isNullOrBlank()) jar[k] = v
+            if (keys == null) {
+                for ((k, v) in fresh) if (k.isNotBlank() && !v.isNullOrBlank()) jar[k] = v
+            } else {
+                for (k in keys) {
+                    val v = fresh[k]
+                    if (!v.isNullOrBlank()) jar[k] = v
+                }
             }
             if (jar.isEmpty()) return snapshot
             return jar.entries.joinToString("; ") { "${it.key}=${it.value}" }
@@ -807,9 +849,21 @@ class PanCloudDrive private constructor(
      * 不会自动带 App 里存的凭据 —— 少了它，症状是"解析成功、一播就黑屏"。
      */
     private fun mediaHeaders(ck: String): Map<String, String> {
-        val merged = mediaCookie(ck, Http.cookieValuesFor("$apiBase/member"))
+        val merged = mediaCookie(ck, Http.cookieValuesFor("$apiBase/member"), mediaKeys())
         return mapOf("Cookie" to merged)
     }
+
+    /**
+     * 媒体分片要带哪几个 Cookie 键（**null = 不筛**，见 [mediaCookie]）。
+     *
+     * 只有**夸克**那一份是实测过的（`__puus` 单键即 200，见 [MEDIA_COOKIE_KEYS]）。
+     * UC 的登录键是 `__kp`（UC PC 网页 bundle 里 `be(){return !!get("__kp")}` 就是它的
+     * "已登录"判据）—— 而 `__puus/__pus/__uid` 是夸克的键名。所以 UC **不能用夸克白名单**：
+     * 那会把 `__kp` 筛掉、只留 `__uid`，分片就会被 CDN 判成"带了过期凭据"（403）。
+     * 返回 null = 不筛（保留整份快照 + jar 新值覆盖）。宁可多带，也不能把凭据筛没。
+     */
+    private fun mediaKeys(): Set<String>? =
+        if (type == PanType.QUARK) MEDIA_COOKIE_KEYS else null
 
     // ------------------------------------------------------------------ 内部
 

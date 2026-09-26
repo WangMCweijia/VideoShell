@@ -65,6 +65,14 @@ object PanProviders {
         //（`/1/clouddrive/**` 同路径、同 `code`/`message` 信封，只有 host 与品牌不同）。
         PanCloudDrive.quark().let { m[it.type] = it }
         PanCloudDrive.uc().let { m[it.type] = it }
+        // P1 的第一个：百度。选它不是因为"它有名"，而是**我们自己的样本里有它**
+        //（`samples/panshare/ky_detail.html` 的 `data-clipboard-text` 里，
+        //  夸克旁边挂的就是 `pan.baidu.com/s/1…?pwd=…`）。
+        // ⚠️ 它只**实测了一半**：匿名列目录（含子目录）已确认，取直链那一半按文档形状实现、
+        //    待一次真实登录态复跑（见 [PanBaidu] 类文档）。所以 `supported` 是 true ——
+        //    "匿名能展开真实集数"这件事成立，那半本来就该给用户；取流失败时给的是
+        //    **带 errno 原话的**文案，而不是"点了没反应"。
+        PanBaidu.baidu().let { m[it.type] = it }
         m
     }
 

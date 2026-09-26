@@ -67,15 +67,24 @@ import requests
 
 # --------------------------------------------------------------------- 配置
 
-API_BASE = "https://pc-api.uc.cn/1/clouddrive" if os.environ.get("PAN_API") == "uc" \
-    else "https://drive-pc.quark.cn/1/clouddrive"
-WEB_BASE = "https://drive.uc.cn/" if os.environ.get("PAN_API") == "uc" else "https://pan.quark.cn/"
+IS_UC = os.environ.get("PAN_API") == "uc"
+
+API_BASE = "https://pc-api.uc.cn/1/clouddrive" if IS_UC else "https://drive-pc.quark.cn/1/clouddrive"
+WEB_BASE = "https://drive.uc.cn/" if IS_UC else "https://pan.quark.cn/"
 
 # 与 PanCloudDrive.PAN_UA 逐字相同（PC 接口就别装手机）
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
-Q = "pr=ucpro&fr=pc&uc_param_str="
+# ⚠️ `pr` 是**产品身份**，夸克与 UC 不是同一个值（v1.0.79 修正）：
+#    夸克 `ucpro`、UC `UCBrowser`。依据是 UC 自己的 PC 网页 bundle
+#    （`uc-cloud-drive-login-static-page/1.1.11` 里 `paramInfo:{pr:"UCBrowser",fr:"pc"}`）。
+#    拿夸克的 pr 去问 UC 的会话 ⇒ 服务端认不出这个产品 ⇒ 回
+#    `41001/31001 require login [guest]`，症状正是"刚登录就说过期"。
+#    必须与 `PanCloudDrive.uc()` 逐字一致，否则这个工具验的不是 App 那条路。
+PR = "UCBrowser" if IS_UC else "ucpro"
+
+Q = "pr=%s&fr=pc&uc_param_str=" % PR
 
 SHARE = os.environ.get("PAN_SHARE") or "https://pan.quark.cn/s/9cb3db399337"
 COOKIE = (os.environ.get("PAN_COOKIE") or "").strip()

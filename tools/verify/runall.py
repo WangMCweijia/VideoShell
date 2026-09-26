@@ -35,7 +35,24 @@ Range 探测并验 ZIP 魔数 —— 镜像表会腐化，怀疑"更新变慢/�
 四态 + 直链对 UA/Referer/Range/Cookie 的校验强度。用法 `tools/verify/panquark_spike.py`，
 需要 `requests`；`PAN_COOKIE=` 才跑完整链路、`PAN_SHARE=` 换分享链接、`PAN_API=uc` 换桌子。
 它专答"接口还活着吗 / 直链校验多严"这类**只能问真网络**的问题 —— `PanCloudDrive`
-的行为断言在离线做不了，因为 `android.jar` 是桩、`new JSONObject` 抛 `Stub!`）。
+的行为断言在离线做不了，因为 `android.jar` 是桩、`new JSONObject` 抛 `Stub!`）；
+`panbaidu_spike.py`（百度网盘 P1 spike：分享页 `shareid`/`uk` 抠取 →
+匿名列目录（`root=1` 必需，已实测）→ 有界下钻 → `dlink` 与它对
+UA/Referer/Range/Cookie 的校验强度。用法
+`tools/verify/panbaidu_spike.py`，需要 `requests`；`BAIDU_COOKIE=` 才跑登录段。
+⚠️ 与 `panquark_spike.py` 不同，这个的形状**只实测了一半**：匿名段（分享页 + `root=1`
+列目录）已确认，子目录 `dir` 形状与 `dlink` 段**尚未确定** —— 它存在的目的就是
+"先问清楚再写 `PanBaidu.kt`"，把方案 §6.3 里"百度"那一行换成实测结论。
+默认样本会腐化（旧的那条已失效，见 PITFALLS §4.80）：取样去玩偶站详情页的
+`data-clipboard-text`，用 `BAIDU_SHARE=` 传进来；别连打，会被限流）。
+`panguangya_spike.py`（光鸭云盘 P1 spike：分享会话票 / summary（**匿名可得**）→
+列目录（**匿名静默空表**，见 §4.82）→ 客票对照 → `signedURL` 与它对
+UA/Referer/Range 的校验强度。用法 `tools/verify/panguangya_spike.py`，需要 `requests`；
+`GUANGYA_TOKEN=` 才跑登录段。⚠️ 它与前三家**形状相反**：匿名**不能**列目录，
+所以要判"空分享 / 没登录"只能靠 `summary.totalFileNum` 与 `list` 的**交叉验证** ——
+见 PITFALLS §4.82。它是唯一"真样本里出现过、又还没做"的盘
+（拉站详情页挂着 `guangyapan.com/s/…`），但登录态不是 cookie 而是
+`Authorization: Bearer`，落地前要先想清楚"怎么截这个头"）。
 
 ⚠️ 登记这一节不是形式主义：这三个都是**排查工具**而不是断言套件，它们不进 SUITES 是对的
 （零断言会被标 WEAK），但**不登记就会被误以为"跑过了"** —— 本项目已经栽过一次同型的
@@ -116,6 +133,12 @@ SUITES = [
     # __puus 是滚动凭据，jar 新值必须覆盖快照、白名单三键之外不许发、
     # isPanMediaUrl 判域（403 自愈的闸门，判宽了会把站点流 403 也拉去重解析）。
     'runpanmediacookie',
+    # v1.0.79：百度（P1 第一个 Provider）。**纯函数 + 源码级接线守卫**，无网络 ——
+    # 守的是那三处"与夸克/UC 相反"的形状：目录项 fid 取它自己的 `path`、子目录**不带**
+    # `root=1`（带了服务端静默忽略 `dir` ⇒ 每层原地打转，§4.80）、带 cookie 取分享页
+    # 必须合并 jar（`BDCLND` 在里面）。另一半（Cookie 够不够 / dlink 校验强度）只能问
+    # 真网络，见 `panbaidu_spike.py`。
+    'runpanbaidu',
 ]
 # 需要真实网络的；**默认不跑**（见文件头）。
 # runbs3 是 v1.0.53 从 SUITES 挪过来的：它跑的是 `https://www.bolyship.com`，

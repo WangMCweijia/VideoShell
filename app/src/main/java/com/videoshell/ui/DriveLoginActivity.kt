@@ -54,8 +54,9 @@ import kotlinx.coroutines.launch
  * ### 自动识别登录成功
  *
  * 人手点"我已完成登录"容易点早了（cookie 还没落）或点漏。这里轮询 cookie：
- * 出现该盘的**登录标记键**（夸克/UC 是 `__pus` / `__puus`，实测 PC 网页登录后必然出现）
- * 就自动保存并返回。手动按钮仍然保留 —— 标记键万一改名，用户还有路可走。
+ * 出现该盘的**登录标记键**（见 [loginMarkers] —— 夸克 `__puus/__pus/__uid`、
+ * UC `__kp/__kps`，两盘**键名不同**，不能共用一份）就自动保存并返回。
+ * 手动按钮仍然保留 —— 标记键万一改名，用户还有路可走。
  */
 class DriveLoginActivity : AppCompatActivity() {
 
@@ -64,7 +65,7 @@ class DriveLoginActivity : AppCompatActivity() {
 
         /**
          * 桌面 UA。理由与 [com.videoshell.data.pan.PanCloudDrive] 一致：我们用的是
-         * **PC 接口**（`pr=ucpro&fr=pc`），WebView 若拿手机 UA 去登录，拿回来的 cookie
+         * **PC 接口**（`pr=<品牌>&fr=pc`，夸克 `ucpro` / UC `UCBrowser`），WebView 若拿手机 UA 去登录，拿回来的 cookie
          * 可能对应移动端会话，回到接口那一侧身份就是矛盾的。
          * 而且 PC 版网页才有扫码登录（移动版会直接往 App 里跳）。
          */
@@ -110,12 +111,27 @@ class DriveLoginActivity : AppCompatActivity() {
         /**
          * 「登录成功」的 cookie 标记键 —— 出现任意一个即判定已登录。
          *
-         * 夸克/UC 的判据是**实测**来的：PC 网页登录后 `__pus` / `__puus` / `__uid` 必然出现；
-         * 而一份"看着很长却是纯埋点"的 cookie 里这三个一个都没有（见 PITFALLS E37）。
-         * 其余盘还没做（`UnsupportedPan`），返回空表 ⇒ 只走手动保存。
+         * ⚠️ **夸克与 UC 的键名不同，不能共用一份**（v1.0.79 修正）：
+         *  - 夸克：`__pus` / `__puus` / `__uid`（实测：PC 网页登录后必然出现；而一份
+         *    "看着很长却是纯埋点"的 cookie 里这三个一个都没有，见 PITFALLS E37）；
+         *  - UC：`__kp` / `__kps` —— 判据来自 **UC 自己的 PC 网页 bundle**
+         *    （2026-09-26 读 `uc-cloud-drive-login-static-page/1.1.11`：
+         *    `function be(){return !!Ee.get("__kp")}`，登录成功分支正是 `be()?…:…`，
+         *    且 ucid 取 `__uid`/`__kps`）。
+         *
+         * 为什么这条很关键：`__puus/__pus` 是**夸克**的会话键。UC 登录过程中若被它们
+         * 提前命中（或仅命中并非登录判据的 `__uid`），我们就会在**会话还没落全**时抓快照 ⇒
+         * 校验必然回 `require login` ⇒ 用户看到"刚登录就过期"。以 UC 自己的判据为准，
+         * 就只会在真正登录成功后抓。
+         *
+         * 百度（v1.0.79 补）：`BDUSS` —— 判据与 [com.videoshell.data.pan.PanBaidu.verify] 的
+         * **结构判据同源**（那里也是"没有 `BDUSS` 就不可能是登录会话，只有 `BAIDUID` 是游客"）。
+         * 两处认同一个键，才不会出现"页面说登录成功、接口说未登录"的分裂。
          */
         fun loginMarkers(t: PanType): List<String> = when (t) {
-            PanType.QUARK, PanType.UC -> listOf("__puus", "__pus", "__uid")
+            PanType.QUARK -> listOf("__puus", "__pus", "__uid")
+            PanType.UC -> listOf("__kp", "__kps")
+            PanType.BAIDU -> listOf("BDUSS")
             else -> emptyList()
         }
 

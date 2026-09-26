@@ -609,19 +609,25 @@ object Http {
      * v1.0.25 新增：加密接口站（见 [com.videoshell.data.site.CryptRecipes]）一律要求
      * **POST + 表单体**，GET 过去只会收到「关键词无效」—— 这是实测结论，不是猜测。
      * 与 [get] 共用重试、CookieJar、NetLog 与韧性 DNS，行为保持一致。
+     *
+     * [headers]（v1.0.79）与 [postJson] 的同名参数同一个理由：网盘类接口的登录态由
+     * [com.videoshell.data.pan.DriveStore] 保管，**必须逐次显式带 `Cookie`**。百度网盘的
+     * `share/verify`（换放行票据）与 `/api/sharedownload`（取 dlink）**都是表单体**，
+     * 拿不到这个口子就只能自己 newCall —— 那时重试 / NetLog / 韧性 DNS 会各少一份实现。
      */
     suspend fun postForm(
         url: String,
         params: Map<String, String>,
         referer: String? = null,
         ua: String = UA,
+        headers: Map<String, String> = emptyMap(),
         fast: Boolean = false
     ): String = withContext(Dispatchers.IO) {
         var last: Exception? = null
         for (attempt in 0 until MAX_ATTEMPTS) {
             if (attempt > 0) delay(RETRY_DELAY_MS[attempt])
             try {
-                return@withContext oncePost(url, params, referer, ua, fast)
+                return@withContext oncePost(url, params, referer, ua, headers, fast)
             } catch (e: Exception) {
                 last = e
                 if (!worthRetry(e)) break
@@ -635,9 +641,10 @@ object Http {
         params: Map<String, String>,
         referer: String? = null,
         ua: String = UA,
+        headers: Map<String, String> = emptyMap(),
         fast: Boolean = false
     ): String? = try {
-        postForm(url, params, referer, ua, fast)
+        postForm(url, params, referer, ua, headers, fast)
     } catch (e: Exception) {
         null
     }
@@ -767,6 +774,7 @@ object Http {
         params: Map<String, String>,
         referer: String?,
         ua: String,
+        headers: Map<String, String>,
         fast: Boolean
     ): String {
         val form = okhttp3.FormBody.Builder()
@@ -781,6 +789,8 @@ object Http {
             // 表单 POST 带 Origin：部分站点的 WAF 对"有 Referer 没有 Origin"的 XHR 直接 403
             runCatching { b.header("Origin", originOf(referer)) }
         }
+        // 显式头放在最后：它要能覆盖上面那些默认值（`Cookie` 就是靠这一条进来的）
+        for ((k, v) in headers) runCatching { b.header(k, v) }
         val c = if (fast) fastClient else client
         val t0 = System.currentTimeMillis()
         try {
