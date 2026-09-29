@@ -758,3 +758,15 @@ data class BaiduShare(
     val sign: String = "",
     val timestamp: Long = 0L
 )
+
+/**
+ * `/api/gettemplatevariable` 里抠出来的**账号级签名**（[templateSign] 的返回）。
+ *
+ * 三样是**一份**：`sign` 与 `timestamp` 配套签发，混用另一份的时间戳会被服务端判成
+ * 「验证码签名错误」（`errno=113`，§4.84）—— 所以这里整份带走，不拆开发。
+ */
+data class BaiduSign(
+    val sign: String,
+    val timestamp: Long = 0L,
+    val bdstoken: String = ""
+)
