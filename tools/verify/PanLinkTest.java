@@ -468,6 +468,24 @@ public class PanLinkTest {
         ok("E13b 有 GET /file/play 退路（两档 raw/low 实测都能出 URL）",
                 pcdCode != null && pcdCode.contains("/file/play?") && pcdCode.contains("\"raw\"")
                         && pcdCode.contains("\"low\""), "");
+        // v1.0.81：用户反馈"夸克/UC 放的不是原画" —— 根因是取哪一档**外包给了服务端**
+        // （有 default_resolution 就用它）。下面三条把"取最高档"钉在我们这一侧：
+        // 判据必须落在**档名**上（位置不可信），且必须真的接进 urlOf。
+        ok("E13c ★ 档位有高低序，且**原画最高**（raw/origin > super > high > low）",
+                PanCloudDrive.resolutionRank("raw") > PanCloudDrive.resolutionRank("super")
+                        && PanCloudDrive.resolutionRank("super") > PanCloudDrive.resolutionRank("high")
+                        && PanCloudDrive.resolutionRank("high") > PanCloudDrive.resolutionRank("low")
+                        && PanCloudDrive.resolutionRank(null) < PanCloudDrive.resolutionRank("low"),
+                "raw=" + PanCloudDrive.resolutionRank("raw")
+                        + " super=" + PanCloudDrive.resolutionRank("super")
+                        + " high=" + PanCloudDrive.resolutionRank("high")
+                        + " low=" + PanCloudDrive.resolutionRank("low"));
+        ok("E13d ★ urlOf 真的用上了「取最高档」（bestVideoUrl + resolutionRank），否则 E13c 只是空谈",
+                pcdCode != null && pcdCode.contains("bestVideoUrl(")
+                        && pcdCode.contains("resolutionRank("), "");
+        ok("E13e ★ 取流请求体点名时**最高档在最前**（服务端可能把第一档当默认档）",
+                PanCloudDrive.DEFAULT_RESOLUTIONS.startsWith("super"),
+                PanCloudDrive.DEFAULT_RESOLUTIONS);
 
         ok("E14 删除转存产物的 body 是 filelist（原用 fids ⇒ 恒 400 code:14001，静默失败）",
                 pcd != null && pcd.contains("put(\"filelist\"")

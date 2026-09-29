@@ -2099,6 +2099,14 @@ F12 → Network → 刷新 → 筛选 `drive-pc` → 任一请求 → Request He
 ```
 
 **取档判据：用服务器自报的 `default_resolution`**，别自己挑。
+
+> ⚠️ **这一条已在 v1.0.81 被取代**（用户反馈"夸克/UC 放的不是原画"）：`default_resolution`
+> 是服务端替我们挑的，可能低我们一档；而且上面那次实测用的还是**过时请求体**
+> （`resolution:"normal"` 单数），换形状后没人复验过默认档还是不是 `super`。
+> 现在由 `PanCloudDrive.resolutionRank` + `bestVideoUrl` 在**我们这一侧**取最高可播档
+> （`raw/origin` > `super` > `high` > `low`，同档再看 `width`/`bitrate`），
+> `default_resolution` 只当"一档都不可播"时的兜底。守卫：`PanLinkTest` E13c~E13e。
+
 各档还带 `right`/`member_right`/`trans_status`/`accessable`/`width`/`bitrate`/`size`
 —— 将来要做"会员过期就降档"，判据就在这几个字段里，不用猜。
 
@@ -3884,6 +3892,70 @@ Python spike（`panbaidu_spike.py`）用的是**正确**的单斜杠地址，所
 - **兜底归类要承认自己"说不出状态码"**：`code <= 0 ⇒ Net` 本身是对的，但它会把
   "服务端回了个坏响应（解不开的 body）"也说成"网络失败"。兜底分支的文案该留一句
   "也可能是服务端响应坏了"，否则排错方向会被它带偏一整个下午。
+
+---
+
+## §4.84 `errno 113` 有**两个成因**，且都藏在我们这一侧（v1.0.81，百度侧）
+
+### 一、症状
+
+用户反馈"百度网盘资源播放失败"，气泡文案是：
+
+```
+百度网盘·取直链接口返回 errno 113：\u9a8c\u8bc1\u7801\u7b7e\u540d\u9519\u8bef
+```
+
+两件事**同时**发生：取流失败（`113`）**与**文案不可读（`\uXXXX` 原样显示）。后者让前者
+更难查 —— 用户在气泡里看到的是一串反斜杠，等于没有文案。
+
+### 二、根因：读百度**自己的**下载 bundle 读出来的（`function-widget-1/pkg/download-all_*.js`）
+
+```js
+a().locals.get("public","share_uk","shareid","sign","timestamp", function (l,p,f,g,y) {
+    if (0 === l) { n.extra = JSON.stringify({sekey: decodeURIComponent(BDCLND)}); }
+    …POST url + "?sign=" + g + "&timestamp=" + y …
+});
+```
+
+三条能**在我们这一侧堵住**的成因：
+
+1. **加密分享必须回显放行票据**：`public === 0`（有提取码）时，请求体要带
+   `extra={"sekey":<解码后的 BDCLND>}`。我们**一个字段都没发** —— 而样本（玩偶站那条
+   `?pwd=`）页面里正是 `"public":0` ⇒ 必 `113`。票据在 cookie 里是**百分号编码**的，
+   请求体里要的是**解码后**的值（`decodeURIComponent` 那一步）。
+2. **签名时间单位**：页面变量叫 `servertime`（`locals.set('servertime', 1790669409761)`，
+   **毫秒**），而请求参数是**秒**。差 1000 倍与"`sign` 为空"**回同一个码**（`113`）——
+   症状是"看起来有值、其实全错"。
+3. **`sign` 是页面变量**（`locals.get(...)`）：匿名页里根本没有它（2026-09-26 直接看过
+   `yunData` 字面量）⇒ 空 ⇒ `113`。页面的 `locals` 由
+   `/api/gettemplatevariable?fields=["sign","timestamp","bdstoken"]` 填（匿名打它回
+   `errno=-6`，与"游客"一致）—— 所以它与"页面变量"是**同源的两条路**。
+
+外加一条纯显示问题：百度把中文错误串写成 `\uXXXX` 转义，旧 `msgOf` 把它**原样**塞进气泡。
+
+### 三、修法
+
+1. `sekey(cookie)` 取 `BDCLND` 并 `URLDecoder.decode`；`extraOf(t)` 拼 `{"sekey":"…"}`；
+   **仅在有票据（加密分享）时**加进表单 —— 公开分享那边它是 `undefined`，发空串会被按
+   "加密"校验。
+2. `pageStamp(html)` 把 `servertime` 毫秒归一到秒；`sign` 与 `timestamp` **同源**取用
+   （取谁的就用谁的时间戳，混用等于没签名）。
+3. `sign` 优先取**页面变量**，页面没给时回落到 `/api/gettemplatevariable`。⚠️ 这条**未实测**
+   （匿名回 `-6`），且失败**不覆盖**主路错误 —— 真失败由表单 POST 用服务端原话说明。
+4. `msgOf` 出口接 `unescape`（`\uXXXX` → 人话）。
+
+守卫：`PanBaiduTest` **H1~H11**（纯函数：单位归一 / 票据解码 / 转义还原）+ **H12~H16**（接线）。
+
+### 四、可迁移的判据
+
+- **"定义了"不等于"用上了"。** 这一组函数最初的失败形状就是这样：纯函数写好、测好、
+  全绿，而 `stream` 的表单里**一个字段都没加** ⇒ 编译全过、自检全绿、症状照旧。
+  所以判据必须有一条落在**调用点**上（这里是 H12~H16），否则"修好了"只是"写好了"。
+- **同一个错误码背后往往不止一个成因。** `113` 既能是"没签名"、也能是"签了但差 1000 倍"、
+  还能是"加密分享没回显票据"。只堵一个就宣称修好，下次一定还会回来。
+- **服务端把中文写成转义时，等于没写文案。** 错误串进气泡前要有一次 `unescape`，
+  否则 60 字符的额度全花在 6 个反斜杠上，用户与排错者都读不到信息。
+
 
 
 

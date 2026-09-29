@@ -2,6 +2,7 @@ package com.videoshell.data.pan
 
 import com.videoshell.data.net.Http
 import org.json.JSONObject
+import java.net.URLDecoder
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 
@@ -23,6 +24,7 @@ import java.util.concurrent.ConcurrentHashMap
  * | 列**根**目录 | `GET /share/list?…&root=1&dir=/` | ✅ `errno=0` + `list[]` | ✅ |
  * | 列**子**目录 | `GET /share/list?…&dir={path}`（⚠️ **不带 `root`**） | ✅ `errno=0` | ✅ |
  * | 取直链 | `POST /api/sharedownload` | ❌ `errno=113 验证码签名错误` | ⏳ **未实测** |
+ * | 账号级签名 | `GET /api/gettemplatevariable?fields=["sign","timestamp","bdstoken"]` | ❌ `errno=-6` | ⏳ **未实测**（本类当 `sign` 的兜底，见 `accountSign`） |
  *
  * ⇒ **详情页能像夸克/UC 一样匿名展开真实集数**（[list] 一整条都实测过），
  * 只有"点开某一集"需要登录 —— 与 P0 两盘的形状一致。
@@ -36,7 +38,32 @@ import java.util.concurrent.ConcurrentHashMap
  * （那是"这个模块要消费哪些变量"，不是值）。所以匿名打 `/api/sharedownload` 恒
  * `errno=113`，不是我们参数写错。
  *
- * ⇒ "Cookie 就够、还是必须再带 `bdstoken`"这个判据，**只能靠一份真实登录态跑一次**
+ * #### v1.0.81 补的一课：`errno=113` 有两个成因，一个已经能在我们这一侧堵住（§4.84）
+ *
+ * 2026-09-29 把百度**自己的**下载 bundle（`function-widget-1/pkg/download-all_*.js`）读了
+ * 一遍，`ajaxGetDlinkShare` 的形状是：
+ *
+ * ```js
+ * a().locals.get("public","share_uk","shareid","sign","timestamp", function (l,p,f,g,y) {
+ *     if (0 === l) {                                  // ← `public` 为 0 = **加密分享**
+ *         n.extra = JSON.stringify({sekey: decodeURIComponent(BDCLND)});
+ *     }
+ *     …POST url + "?sign=" + g + "&timestamp=" + y …
+ * });
+ * ```
+ *
+ * 四条从这段里钉住了（都写进了 [sekey] / [extraOf] / [pageStamp] / [templateSign]）：
+ *
+ * 1. **加密分享必须回显放行票据**：`extra={"sekey":<解码后的 BDCLND>}`。我们之前**一个
+ *    字段都没发** —— 而我们的样本（玩偶站那条 `?pwd=`）页面里正是 `"public":0`。
+ * 2. `sign`/`timestamp` 是**页面变量**（`locals.get(...)`）：匿名页没有 ⇒ 空 ⇒ `113`。
+ * 3. 页面的签名时间是 `servertime`（`locals.set('servertime', 1790669409761)`，**毫秒**），
+ *    而请求参数是秒 —— 混用就是"看起来有值、其实差 1000 倍"，症状同样是 `113`。
+ * 4. 那些 `locals` 由 `/api/gettemplatevariable` 填 ⇒ 页面**没内联**它们时走 [accountSign]
+ *    那条兜底（与页面同源）。四条都已**接进 [stream]**（`sekey`→`extra`、`servertime`→秒、
+ *    `sign` 空则兜底、错误串 [unescape]），守卫是 `PanBaiduTest` H1~H16。
+ *
+ * ⇒ "Cookie 就够、还是必须再带 `bdstoken`"这个判据，**仍然只能靠一份真实登录态跑一次**
  * 才能钉住（文件和工具都已就绪）：
  *
  * ```
@@ -44,7 +71,8 @@ import java.util.concurrent.ConcurrentHashMap
  * ```
  *
  * 跑出来的 ⑤⑥ 两段就是本类 [stream] 的验收依据。在那之前它的行为是**可预期地失败**：
- * 失败文案一定带**哪一步 + 服务端 errno 原话**（[note]），而不是"点了没反应"。
+ * 失败文案一定带**哪一步 + 服务端 errno 原话**（[note]，且 [unescape] 过），
+ * 而不是"点了没反应"。
  *
  * ### 两个与夸克/UC 相反的形状（容易抄错的地方）
  *
@@ -112,9 +140,115 @@ class PanBaidu private constructor() : PanProvider {
             // 而 webpack 元数据里的 `"sign","servertime"` 后面跟的是逗号、不是 `:`/`=` ⇒ 不命中
             val sign = Regex("\\bsign\\b\\s*[:=]\\s*[\"']([^\"']{4,200})[\"']")
                 .find(html)?.groupValues?.get(1).orEmpty()
-            val ts = Regex("\\btimestamp\\b\\s*[:=]\\s*(\\d{9,13})")
-                .find(html)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
-            return BaiduShare(sid, uk, tok, sign, ts)
+            return BaiduShare(sid, uk, tok, sign, pageStamp(html))
+        }
+
+        /**
+         * 页面上的"签名时间"，单位统一成**秒**（**纯函数**，`PanBaiduTest` H1~H4 钉着）。
+         *
+         * 两个名字都要认，因为页面在**两个地方**各写一份、形状还不一样：
+         *  - `timestamp:1790252372` —— JSON 老形状（**秒**）；
+         *  - `locals.set('servertime', 1790669409761)` —— 现网页面（**毫秒**）。
+         *
+         * ⚠️ 它和 `sign` 是**一对**：差 1000 倍与服务端记的对不上，回的就是 `errno=113`
+         * （与"sign 为空"同一个码）。所以单位归一不能省 —— 详见 §4.84。
+         *
+         * 认不出回 `0`：调用方（[stream]）据此判断"页面没给"，而不是拿 0 当有效值发出去。
+         */
+        @JvmStatic
+        fun pageStamp(html: String): Long {
+            if (html.isBlank()) return 0L
+            val v = Regex("\\btimestamp\\b[\"']?\\s*[,:=]\\s*[\"']?(\\d{9,13})")
+                .find(html)?.groupValues?.get(1)?.toLongOrNull()
+                ?: Regex("\\bservertime\\b[\"']?\\s*[,:=]\\s*[\"']?(\\d{9,13})")
+                    .find(html)?.groupValues?.get(1)?.toLongOrNull()
+                ?: return 0L
+            return if (v > 100_000_000_000L) v / 1000 else v
+        }
+
+        /**
+         * 从一份 `Cookie` 头里取 `BDCLND`（放行票据）并**按 URL 解码**（**纯函数**）。
+         *
+         * 为什么要它：加密分享（页面里 `"public":0`）取 dlink 时**必须**把票据回显进表单的
+         * `extra` 字段（见 [extraOf]）—— 百度自己的客户端就是这么发的（§4.84）。
+         * 票据在 cookie 里是**百分号编码**的（`j%2FIw…%3D`），请求体里要的是**解码后**的值
+         * （`decodeURIComponent` 那一步）。
+         *
+         * 没有这一项就回空串：**公开分享本来就没有它**，所以空不等于出错。
+         */
+        @JvmStatic
+        fun sekey(cookie: String?): String {
+            if (cookie.isNullOrBlank()) return ""
+            for (part in cookie.split(';')) {
+                val i = part.indexOf('=')
+                if (i <= 0 || part.substring(0, i).trim() != "BDCLND") continue
+                val v = part.substring(i + 1).trim()
+                return runCatching { URLDecoder.decode(v, "UTF-8") }.getOrDefault(v)
+            }
+            return ""
+        }
+
+        /** `extra` 字段的形状（**纯函数**）：`{"sekey":"<解码后的 BDCLND>"}`，见 [sekey] */
+        @JvmStatic
+        fun extraOf(sekey: String): String =
+            "{\"sekey\":\"" + sekey.replace("\\", "\\\\").replace("\"", "\\\"") + "\"}"
+
+        /**
+         * 把信封里的 JSON 转义还原成**人话**（**纯函数**）。
+         *
+         * 百度把错误串写成 `\u9a8c\u8bc1\u7801\u7b7e\u540d\u9519\u8bef`（= "验证码签名错误"）。
+         * 旧 [msgOf] 把**转义后的原样**塞进文案，用户在气泡里看到的是一串 `\uXXXX`
+         * —— 等于没有文案，还把 60 字符的额度浪费在 6 个反斜杠转义上（§4.84）。
+         */
+        @JvmStatic
+        fun unescape(s: String): String {
+            if (s.indexOf('\\') < 0) return s
+            val b = StringBuilder(s.length)
+            var i = 0
+            while (i < s.length) {
+                val c = s[i]
+                if (c != '\\' || i + 1 >= s.length) {
+                    b.append(c)
+                    i++
+                    continue
+                }
+                val n = s[i + 1]
+                val hex = if (n == 'u' && i + 6 <= s.length) s.substring(i + 2, i + 6) else null
+                val cp = hex?.toIntOrNull(16)
+                when {
+                    cp != null -> { b.append(cp.toChar()); i += 6 }
+                    n == 'n' -> { b.append('\n'); i += 2 }
+                    n == 't' -> { b.append('\t'); i += 2 }
+                    n == 'r' -> { b.append('\r'); i += 2 }
+                    n == '/' || n == '"' || n == '\\' -> { b.append(n); i += 2 }
+                    else -> { b.append(c); i++ }
+                }
+            }
+            return b.toString()
+        }
+
+        /**
+         * 从 `/api/gettemplatevariable` 的信封里抠签名字段（**纯函数**）。
+         *
+         * 形状（2026-09-29 匿名实测到的后半段是 `"result":[]` + `errno:-6`）：
+         *
+         * ```json
+         * {"errno":0,"result":{"sign":"…","timestamp":1790252372,"bdstoken":"…"}}
+         * ```
+         *
+         * 认不出 `sign` 就返回 null —— 调用方据此判"这一步没拿到签名"，而不是拿空串去发。
+         */
+        @JvmStatic
+        fun templateSign(body: String): BaiduSign? {
+            if (body.isBlank()) return null
+            val sign = Regex("\"sign\"\\s*:\\s*\"([^\"]{4,200})\"")
+                .find(body)?.groupValues?.get(1).orEmpty()
+            if (sign.isBlank()) return null
+            val ts = Regex("\"timestamp\"\\s*:\\s*\"?(\\d{9,13})")
+                .find(body)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+            val tok = Regex("\"bdstoken\"\\s*:\\s*\"([^\"]*)\"")
+                .find(body)?.groupValues?.get(1).orEmpty()
+            return BaiduSign(sign, ts, tok)
         }
 
         /**
@@ -279,9 +413,21 @@ class PanBaidu private constructor() : PanProvider {
         val sh = cachedShare(ref.link) ?: shareOf(ref.link) ?: return null
         // 带 cookie 重取：`sign` 只在登录态下才有（匿名页的字面量里根本没有它）
         val page = pageOf(ref.link, ck, "取直链·读分享页")
-        val sign = page?.sign.orEmpty()
-        val ts = page?.timestamp?.takeIf { it > 0L } ?: nowSec()
-        val bdstoken = page?.bdstoken.orEmpty().ifBlank { sh.bdstoken }
+        // 签名优先级：**页面变量**（百度自己的下载 bundle 就是 `locals.get("sign")` 那一套）
+        // → **账号级** `/api/gettemplatevariable`（页面没内联时的那条路，也是页面上
+        // `locals` 的来源）。`sign` 与 `timestamp` 必须是**同一份**：取谁的就用谁的时间戳，
+        // 混用等于没签名（回 `errno=113 验证码签名错误`，§4.84）。
+        var sign = page?.sign.orEmpty()
+        var ts = page?.timestamp ?: 0L
+        var bdstoken = page?.bdstoken.orEmpty().ifBlank { sh.bdstoken }
+        if (sign.isBlank()) {
+            accountSign(ck)?.let {
+                sign = it.sign
+                if (it.timestamp > 0L) ts = it.timestamp
+                if (bdstoken.isBlank()) bdstoken = it.bdstoken
+            }
+        }
+        if (ts <= 0L) ts = nowSec()
         // 放行票据（BDCLND）在 Http 的 CookieJar 里、账号凭据在 DriveStore 里，
         // 两边都要带上 —— 合并用的是 [PanCloudDrive.mediaCookie]（纯函数、离线有断言，
         // `keys = null` = 不筛键）。不复用就只能再抄一份合并逻辑，早晚改一处漏一处。
@@ -295,6 +441,12 @@ class PanBaidu private constructor() : PanProvider {
             if (bdstoken.isNotBlank()) append("&bdstoken=").append(u(bdstoken))
             append("&clienttype=0")
         }
+        // 加密分享（页面里 `"public":0`）取 dlink 时**必须**把放行票据回显进表单的
+        // `extra` 字段：百度自己的客户端只在 `public === 0` 时发它（§4.84）。
+        // 票据（`BDCLND`）在 cookie 里是百分号编码的、请求体里要**解码后**的值 ——
+        // [sekey] 一并做了。没有票据（公开分享）就**不发这一个字段**：
+        // 百度那边它是 `undefined`，发个空串会让服务端按"加密"去校验。
+        val ticket = sekey(merged)
         val form = LinkedHashMap<String, String>().apply {
             put("encrypt", "0")
             put("product", "share")
@@ -302,6 +454,7 @@ class PanBaidu private constructor() : PanProvider {
             put("uk", sh.uk)
             put("primaryid", sh.shareid)
             put("fid_list", "[${ref.fid}]")
+            if (ticket.isNotBlank()) put("extra", extraOf(ticket))
         }
         val body = postForm(url, form, merged, "取直链") ?: return null
         val e = errnoOf(body)
@@ -447,6 +600,29 @@ class PanBaidu private constructor() : PanProvider {
         return true
     }
 
+    /**
+     * **账号级签名**：`GET /api/gettemplatevariable?fields=["sign","timestamp","bdstoken"]`。
+     *
+     * 页面上的 `locals`（百度下载 bundle 里 `locals.get("sign", …)` 读的就是它）正是由这个
+     * 接口填的 —— 所以它和"页面变量"是同源的两条路，谁先拿到就用谁。匿名打它回 `errno=-6`，
+     * 登录态下的形状**待一次 `BAIDU_COOKIE=` 复跑**（见类文档的接口事实表）。
+     *
+     * ⚠️ 它**不覆盖** [err]：这是"多试一个来源"，本身失败不代表这一步失败 ——
+     * 真失败由随后的表单 POST 用服务端原话（[note]）说清楚，别让兜底把主路的错误顶掉。
+     * 这也是为什么它返回 `null` 而不是 `Unit`：调用方只在该更新字段时更新。
+     */
+    private suspend fun accountSign(ck: String): BaiduSign? = try {
+        step = "取直链·取账号签名"
+        val url = "$API/api/gettemplatevariable?fields=" +
+                u("[\"sign\",\"timestamp\",\"bdstoken\"]") +
+                "&channel=$CHANNEL&web=1&app_id=$APP_ID&clienttype=0"
+        templateSign(
+            Http.get(url, referer = WEB, ua = PAN_UA, headers = jsonAccept + cookie(ck))
+        )
+    } catch (e: Exception) {
+        null
+    }
+
     // ------------------------------------------------------------------ 内部
 
     private fun u(s: String): String =
@@ -497,7 +673,9 @@ class PanBaidu private constructor() : PanProvider {
         for (k in arrayOf("errmsg", "error_msg", "show_msg", "error")) {
             val v = Regex("\"$k\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").find(body)
                 ?.groupValues?.get(1)
-            if (!v.isNullOrBlank()) return v.take(60)
+            // ⚠️ 百度把中文写成 `\uXXXX` 转义（`errmsg:"\u9a8c\u8bc1\u7801\u7b7e\u540d\u9519\u8bef"`）。
+            // 不还原的话，气泡里显示的是一串反斜杠转义 = 等于没有文案（§4.84）。
+            if (!v.isNullOrBlank()) return unescape(v).take(60)
         }
         return ""
     }

@@ -293,6 +293,69 @@ public class PanBaiduTest {
         ok("G5 ★ 源码里不许再出现 `\"$WEB/s/\"`（旧写法）",
                 pbd != null && !pbd.contains("$WEB/s/"), "");
 
+        // ★ H 组是 v1.0.81 补的那一课（PITFALLS §4.84）：用户反馈"百度资源播放失败"，
+        //   气泡文案是 `errno 113: \u9a8c\u8bc1\u7801...`。读了百度自己的下载 bundle
+        //   （`download-all_*.js` 的 `ajaxGetDlinkShare`）后，113 有两个**能在我们这侧堵住**的成因：
+        //   加密分享没回显放行票据（`extra={"sekey":BDCLND}`）、签名时间单位差 1000 倍；
+        //   外加一条纯显示问题：错误串是 `\uXXXX`，不还原等于没有文案。
+        //   H1~H4 是 `pageStamp`（单位归一），H5~H8 是 `sekey`/`extraOf`（票据回显），
+        //   H9~H11 是 `unescape`（把人话还给用户），H12~H16 是**接线守卫** ——
+        //   这一组函数"定义了却没人调用"正是它一开始的失败形状（编译全过、症状照旧）。
+        System.out.println("-- H. pageStamp/sekey/extraOf/unescape：errno=113 的三个成因（v1.0.81） --");
+        ok("H1 `timestamp:1790252372`（秒）原样返回",
+                PanBaidu.pageStamp("yunData={timestamp:1790252372}") == 1790252372L,
+                String.valueOf(PanBaidu.pageStamp("yunData={timestamp:1790252372}")));
+        // ★ H2 是这一组的核心：现网页面写的是 `servertime`（**毫秒**），而请求参数要秒。
+        //   混用的症状是"看起来有值、其实差 1000 倍" ⇒ 服务端回 errno=113（与"sign 为空"同码）。
+        ok("H2 ★ `servertime`（毫秒）归一到秒 —— 不归一就是 errno=113",
+                PanBaidu.pageStamp("locals.set('servertime', 1790669409761)") == 1790669409L,
+                String.valueOf(PanBaidu.pageStamp("locals.set('servertime', 1790669409761)")));
+        ok("H3 `timestamp`（秒）优先于 `servertime`（毫秒）",
+                PanBaidu.pageStamp("servertime:1790669409761,timestamp:1790252372") == 1790252372L,
+                String.valueOf(PanBaidu.pageStamp(
+                        "servertime:1790669409761,timestamp:1790252372")));
+        ok("H4 页面没给签名时间 ⇒ 0（调用方回落 now，不拿 0 当有效值发出去）",
+                PanBaidu.pageStamp("yunData={}") == 0L && PanBaidu.pageStamp("") == 0L, "");
+
+        // ★ H5~H8：加密分享（页面 `"public":0`）取 dlink 必须回显放行票据。
+        //   票据在 cookie 里是百分号编码的，请求体里要**解码后**的值（bundle 里的 `decodeURIComponent`）。
+        String ckc = "BDUSS=abc; BDCLND=j%2FIwOK%3D; STOKEN=z";
+        ok("H5 ★ BDCLND 取值并**按 URL 解码**（`j%2FIwOK%3D` → `j/IwOK=`）",
+                "j/IwOK=".equals(PanBaidu.sekey(ckc)), PanBaidu.sekey(ckc));
+        ok("H6 没有 BDCLND ⇒ 空串（公开分享本来就没有它，空 ≠ 出错）",
+                PanBaidu.sekey("BDUSS=abc").isEmpty() && PanBaidu.sekey(null).isEmpty(),
+                PanBaidu.sekey("BDUSS=abc"));
+        String ex = PanBaidu.extraOf("j/IwOK=");
+        ok("H7 ★ extra 的形状 = `{\"sekey\":\"<票据>\"}`",
+                "{\"sekey\":\"j/IwOK=\"}".equals(ex), ex);
+        ok("H8 extraOf 转义 `\"`（票据里出现引号时不许把 JSON 拼坏）",
+                "{\"sekey\":\"a\\\"b\"}".equals(PanBaidu.extraOf("a\"b")), PanBaidu.extraOf("a\"b"));
+
+        // ★ H9~H11：错误文案必须是人话。旧 `msgOf` 把 `\u9a8c\u8bc1...` 原样塞进气泡 ——
+        //   用户看到的是一串反斜杠，等于没有文案（这正是截图里的那一行）。
+        ok("H9 ★ `\\uXXXX` 还原成中文（`\\u9a8c\\u8bc1\\u7801\\u7b7e\\u540d\\u9519\\u8bef` → 验证码签名错误）",
+                "验证码签名错误".equals(PanBaidu.unescape(
+                        "\\u9a8c\\u8bc1\\u7801\\u7b7e\\u540d\\u9519\\u8bef")),
+                PanBaidu.unescape("\\u9a8c\\u8bc1\\u7801\\u7b7e\\u540d\\u9519\\u8bef"));
+        ok("H10 没有转义的串逐字节保留（不许顺手改正文）",
+                "errno 113 请求失败".equals(PanBaidu.unescape("errno 113 请求失败")), "");
+        ok("H11 `\\n`/`\\t` 也还原（文案里可能带换行）",
+                "a\nb\tc".equals(PanBaidu.unescape("a\\nb\\tc")), "");
+
+        // ★ H12~H16 是**接线守卫**：这一组函数"定义了却没人调用"就是它一开始的失败形状
+        //   （编译全过、跑起来症状照旧）。它们没有行为观测点，只能钉在源码上。
+        ok("H12 ★ stream 的表单真的把票据回显进 `extra`（定义了却没用 = 等于没修）",
+                pbd != null && pbd.contains("put(\"extra\", extraOf("), "");
+        ok("H13 ★ 只在有票据时发 `extra`（公开分享那边它是 `undefined`，发空串会被按加密校验）",
+                pbd != null && pbd.contains("if (ticket.isNotBlank()) put(\"extra\","), "");
+        ok("H14 ★ 失败文案走 unescape（`msgOf` 里），不是把 `\\uXXXX` 原样交给用户",
+                pbd != null && pbd.contains("return unescape(v).take(60)"), "");
+        ok("H15 ★ 页面没给 sign 时回落到账号级签名（`gettemplatevariable`，与页面 `locals` 同源）",
+                pbd != null && pbd.contains("accountSign(ck)")
+                        && pbd.contains("gettemplatevariable"), "");
+        ok("H16 ★ sign 与 timestamp **同源**：回落到账号级时也要用它的时间戳（混用 = 没签名）",
+                pbd != null && pbd.contains("if (it.timestamp > 0L) ts = it.timestamp"), "");
+
         System.out.println();
         System.out.println("PASS=" + pass + "  FAIL=" + fail);
         if (fail > 0) {

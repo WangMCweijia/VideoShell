@@ -147,9 +147,36 @@ class PanCloudDrive private constructor(
          *
          * `low/high/super` 是当前网页端的词汇表；`normal` 不是（旧代码发的是
          * `resolution:"normal"`，服务端匹配不到码流 ⇒ 404）。三档都点名，图的是
-         * "哪档能出就给哪档"，最终取哪档由响应里的 `default_resolution` 决定。
+         * "哪档能出就给哪档"。
+         *
+         * ⚠️ **顺序是最高档在前**（v1.0.81）：服务端可能把**点名的第一档**当默认档。
+         * 旧值是 `low,high,super` —— 若它真这么做，就会把"点了原画却放到流畅"变成
+         * 必然（用户 2026-09-29 反馈的就是这个症状）。档位取舍本身见 [urlOf]：那里
+         * 不再唯 `default_resolution` 是从。
          */
-        const val DEFAULT_RESOLUTIONS = "low,high,super"
+        const val DEFAULT_RESOLUTIONS = "super,high,low"
+
+        /**
+         * 档位高低排序（**纯函数**，`PanLinkTest` E13c 钉着）。
+         *
+         * 为什么需要它：`video_list[]` 里各档的 **位置** 不可信（服务端可以任意排序），
+         * 而档名是**跨盘稳定**的 —— 所以"取最高档"这条判据必须落在**名字**上。
+         * 认不出的名字给 0：它们排在已知档之后，但仍可用 `width`/`bitrate` 分出高下
+         * （见 [urlOf]），不至于因为"多了个新词"就整条路失败。
+         *
+         * 原画那几个别名（`origin`/`original`/`raw`）放最高：实测（PITFALLS §4.60）
+         * 夸克 `GET /file/play?resolution=raw` 与 v2 的 `super` 指向**同一个** m3u8，
+         * 说明 `raw` 就是这条链路里"原画"的名字。
+         */
+        @JvmStatic
+        fun resolutionRank(resolution: String?): Int =
+            when (resolution?.trim()?.lowercase()) {
+                "origin", "original", "raw", "原画" -> 4
+                "super", "超清", "蓝光" -> 3
+                "high", "高清" -> 2
+                "low", "流畅", "标清" -> 1
+                else -> 0
+            }
 
         /** 取流尝试次数与补一次的间隔（刚转存完的文件偶尔"还没就绪"） */
         private const val PLAY_TRIES = 2
@@ -719,16 +746,24 @@ class PanCloudDrive private constructor(
     /**
      * 从取流响应里挑出播放入口。认两种形状（同一个信封）：
      *  ① `data.video_list[]` —— 每档一条，地址在 `video_info.url`（也见过平铺的 `url`）；
-     *     有 `default_resolution` 就优先那一档，否则取第一条非空的；
+     *     **取最高的一档**（见 [bestVideoUrl]），而不是服务端自报的 `default_resolution`；
+     *     服务器说一档都不可播时才退到 `default_resolution` / 第一条非空；
      *  ② `data.url` / `data.play_url` —— 信封直接给地址的简化形状。
      *
      * ⚠️ **绝不要退到 `data.preview_url`**：那是"游客试看"通道给的**预览图**
      * （实测 HEAD 回来 `Content-Type: image/webp`、14KB），拿它当视频流只会黑屏。
+     *
+     * ⚠️ v1.0.80 及以前这里是"有 `default_resolution` 就优先那一档"。用户 2026-09-29
+     * 反馈"夸克/UC 放的不是原画" —— 而 `video_list` 里明明白白躺着更高档。
+     * 服务端给的默认档可以只是它自己觉得合适的一档（且 PITFALLS §4.71 那个
+     * `default_resolution = "super"` 是用**过时请求体**跑出来的，换形状后没人复验过），
+     * 所以"取哪档"这件事**不能外包给服务端**：判据要落在我们这一侧。
      */
     private fun urlOf(o: JSONObject): String? {
         val d = o.optJSONObject("data") ?: return null
-        val want = d.optString("default_resolution")
         val list = d.optJSONArray("video_list")
+        bestVideoUrl(list)?.let { return it }
+        val want = d.optString("default_resolution")
         var first: String? = null
         if (list != null) {
             for (i in 0 until list.length()) {
@@ -746,6 +781,47 @@ class PanCloudDrive private constructor(
             if (v.startsWith("http")) return v
         }
         return null
+    }
+
+    /**
+     * `video_list[]` 里**最高的一档**，取不到返回 null。
+     *
+     * 三层判据，依次是：
+     *  1. **只看服务端说能播的档**（`accessable` 不为 false、`trans_status` 为
+     *     `success` 或缺省）—— 拿一份 412 的地址比拿低一档更糟；
+     *  2. 同一档名之下按 `width`、`bitrate` 再分高下（新出现的档名认不出时，
+     *     [resolutionRank] 给 0，仍能靠这两项排序）；
+     *  3. 一档都不可播 ⇒ 返回 null，由 [urlOf] 退回 `default_resolution` 那套旧判据
+     *     （服务端的默认档至少是它能给的，别把"全标不可播"直接升级成"播不了"）。
+     */
+    private fun bestVideoUrl(list: JSONArray?): String? {
+        if (list == null) return null
+        var best: String? = null
+        var bestRank = Int.MIN_VALUE
+        var bestWidth = Int.MIN_VALUE
+        var bestBitrate = Int.MIN_VALUE
+        for (i in 0 until list.length()) {
+            val e = list.optJSONObject(i) ?: continue
+            if (e.has("accessable") && !e.optBoolean("accessable")) continue
+            val trans = e.optString("trans_status")
+            if (trans.isNotBlank() && trans != "success") continue
+            val vi = e.optJSONObject("video_info")
+            val url = vi?.optString("url").orEmpty().ifBlank { e.optString("url") }
+            if (url.isBlank()) continue
+            val rank = resolutionRank(e.optString("resolution"))
+            val width = vi?.optInt("width", 0) ?: 0
+            val bitrate = vi?.optInt("bitrate", 0) ?: 0
+            val better = rank > bestRank
+                    || (rank == bestRank && width > bestWidth)
+                    || (rank == bestRank && width == bestWidth && bitrate > bestBitrate)
+            if (better) {
+                best = url
+                bestRank = rank
+                bestWidth = width
+                bestBitrate = bitrate
+            }
+        }
+        return best
     }
 
     /**
