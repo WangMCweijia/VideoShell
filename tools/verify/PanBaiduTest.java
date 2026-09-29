@@ -297,7 +297,7 @@ public class PanBaiduTest {
         //   气泡文案是 `errno 113: \u9a8c\u8bc1\u7801...`。读了百度自己的下载 bundle
         //   （`download-all_*.js` 的 `ajaxGetDlinkShare`）后，113 有两个**能在我们这侧堵住**的成因：
         //   加密分享没回显放行票据（`extra={"sekey":BDCLND}`）、签名时间单位差 1000 倍；
-        //   外加一条纯显示问题：错误串是 `\uXXXX`，不还原等于没有文案。
+        //   外加一条纯显示问题：错误串是 `\\uXXXX`，不还原等于没有文案。
         //   H1~H4 是 `pageStamp`（单位归一），H5~H8 是 `sekey`/`extraOf`（票据回显），
         //   H9~H11 是 `unescape`（把人话还给用户），H12~H16 是**接线守卫** ——
         //   这一组函数"定义了却没人调用"正是它一开始的失败形状（编译全过、症状照旧）。
