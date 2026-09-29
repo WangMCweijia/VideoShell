@@ -65,7 +65,13 @@ class PanBaidu private constructor() : PanProvider {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
                     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
+        /** 拼接口地址用这个：**不带尾斜杠**（见 [sharePageUrl] 那条事故） */
         private const val API = "https://pan.baidu.com"
+
+        /**
+         * ⚠️ **只当 `Referer` 用**。它带尾斜杠，**绝不能**再拼 `"/…"` ——
+         * 那样会造出 `pan.baidu.com//s/…`（见 [sharePageUrl]）。
+         */
         private const val WEB = "https://pan.baidu.com/"
 
         /** `app_id=250528` = 网页版这个产品；`channel=chunlei` 是网页端一直用的值 */
@@ -159,6 +165,26 @@ class PanBaidu private constructor() : PanProvider {
          */
         @JvmStatic
         fun useRoot(fid: String?): Boolean = fid.isNullOrBlank() || fid == "/"
+
+        /**
+         * 分享页地址（**纯函数**，可离线断言）。
+         *
+         * ⚠️ 必须拼在 [API]（**不带尾斜杠**）上，**不能**拼 [WEB]（自带尾斜杠）。
+         * 这一条是 v1.0.80 的真事故，症状与原因完全对不上（PITFALLS §4.83）：
+         *
+         * ```
+         * 错： "$WEB/s/${id}"  → https://pan.baidu.com//s/1abc   （双斜杠）
+         * 对： "$API/s/${id}"  → https://pan.baidu.com/s/1abc
+         * ```
+         *
+         * 双斜杠那条路径服务端回 **HTTP 404**，而那个 404 的响应头**谎称**
+         * `Content-Encoding: gzip`、正文却是**明文 HTML** ⇒ OkHttp 解 gzip 时抛
+         * `ZipException`（不是 [com.videoshell.data.net.Http.HttpError]，没有状态码）
+         * ⇒ [classify] 落到 `code <= 0` 分支，报成「**网络请求失败**」——
+         * 指向一个根本不存在的网络问题。真机上的现象就是 BD 线路永远「未展开」。
+         */
+        @JvmStatic
+        fun sharePageUrl(id: String): String = "$API/s/$id"
     }
 
     override val type: PanType get() = PanType.BAIDU
@@ -377,7 +403,9 @@ class PanBaidu private constructor() : PanProvider {
      * "请输入提取码"那一页，`sign` 抠不到、取直链必失败。
      */
     private suspend fun pageOf(link: PanLink, ck: String?, what: String): BaiduShare? {
-        val url = "$WEB/s/${link.id}"
+        // ⚠️ 地址必须走 [sharePageUrl]（拼 [API]，不带尾斜杠）—— 这里曾经写成
+        //    "$WEB/s/…"，于是每次请求都是 `//s/…`：404 + 假 gzip，被报成"网络请求失败"（§4.83）
+        val url = sharePageUrl(link.id)
         val jar = Http.cookieValuesFor(url)
         val merged = if (ck.isNullOrBlank()) null else PanCloudDrive.mediaCookie(ck, jar, null)
         val html = getText(url, merged, what, json = false) ?: return null

@@ -269,6 +269,30 @@ public class PanBaiduTest {
                 dla != null && dla.contains("PanType.BAIDU -> listOf(\"BDUSS\")")
                         && pbd != null && pbd.contains("ck.contains(\"BDUSS=\")"), "");
 
+        // ★ G 组是 v1.0.80 的真事故（PITFALLS §4.83）：分享页地址被拼成了
+        //   `https://pan.baidu.com//s/{id}`（`WEB` 自带尾斜杠，又拼了一个 `/s/`）。
+        //   那条路径回 **HTTP 404** + **谎称** `Content-Encoding: gzip`（正文却是明文 HTML）
+        //   ⇒ OkHttp 解 gzip 抛 ZipException ⇒ classify 报成「网络请求失败」。
+        //   真机症状：BD 线路永远「未展开」，且错误文案把人指向网络问题。
+        System.out.println("-- G. sharePageUrl：分享页地址不许出现双斜杠 --");
+        String spu = PanBaidu.sharePageUrl("1abc");
+        ok("G1 ★ 分享页从 API 拼（**不带尾斜杠**）：pan.baidu.com/s/1abc",
+                "https://pan.baidu.com/s/1abc".equals(spu), spu);
+        // ★ G2 是这条事故的机器化判据：`//s/` 一旦出现，服务和响应形状就全错，
+        //   而它**编译得过、看起来也像个正常 URL**。
+        ok("G2 ★ 结果里不许出现 `//s/`（双斜杠那一次事故的判据）",
+                !PanBaidu.sharePageUrl("1kzwNTOAPLJqLbGvIU_e3Kg").contains("//s/"),
+                PanBaidu.sharePageUrl("1kzwNTOAPLJqLbGvIU_e3Kg"));
+        ok("G3 带 `_`/`-` 的分享码原样保留（别顺手编码掉）",
+                "https://pan.baidu.com/s/1t1A3ohq6_PqP0QrnoIo-ig"
+                        .equals(PanBaidu.sharePageUrl("1t1A3ohq6_PqP0QrnoIo-ig")),
+                PanBaidu.sharePageUrl("1t1A3ohq6_PqP0QrnoIo-ig"));
+        ok("G4 pageOf 走的就是 sharePageUrl（不许再各拼一份）",
+                pbd != null && pbd.contains("val url = sharePageUrl(link.id)"), "");
+        // ★ G5：`$WEB` 只该当 Referer。它带尾斜杠，任何 `"$WEB/…"` 都会造出双斜杠。
+        ok("G5 ★ 源码里不许再出现 `\"$WEB/s/\"`（旧写法）",
+                pbd != null && !pbd.contains("$WEB/s/"), "");
+
         System.out.println();
         System.out.println("PASS=" + pass + "  FAIL=" + fail);
         if (fail > 0) {
