@@ -3956,6 +3956,34 @@ a().locals.get("public","share_uk","shareid","sign","timestamp", function (l,p,f
 - **服务端把中文写成转义时，等于没写文案。** 错误串进气泡前要有一次 `unescape`，
   否则 60 字符的额度全花在 6 个反斜杠上，用户与排错者都读不到信息。
 
+---
+
+## §4.85 两个"编译/自检才拦得住"的坑：tag 打出去了、包没出来（v1.0.82）
+
+§4.84 的修复推上去并打了 `v1.0.81` 的 tag，**但那一次没有任何产物**：CI 在 `Build APKs`
+就红了（1m19s），后面 `Publish Release` 直接 skipped。查下来是两个各自独立的低级错误：
+
+1. **`BaiduSign` 用了却没声明。** `templateSign`/`accountSign` 的返回类型是它，类本身没写
+   —— `Unresolved reference: BaiduSign`，连带 `accountSign(ck)?.let { … }` 里的 `it`
+   也推断失败（Kotlin 把这一串都算成"未解析引用"）。
+2. **测试注释里的 `\uXXXX` 是非法 Java 转义。** `PanBaiduTest.java` 的注释里写了
+   `` `\uXXXX` ``，javac 报 `illegal unicode escape` ⇒ `runpanbaidu` 整个套件
+   `BAD_SUITES=1`：**H 组 16 条守卫一条都没跑**，"全绿"其实是"整段没执行"。
+
+### 可迁移的判据
+
+- **Java 的 `\u` 转义在词法分析之前处理，且不认"这是注释"。** 被**偶数**个反斜杠前缀的
+  `\u` 才算转义（`\\uXXXX` 安全，`\uXXXX` 里 X 不是十六进制 ⇒ 直接编译失败）。
+  写文档/注释引用转义本身时，一律写成 `\\uXXXX`。
+- **"tag 发出去了" ≠ "版本发出去了"。** 判定要落在**产物/Release**上（CI 绿 + Release 有
+  `version.json`），不是落在"push 成功"上。这次两个坑都发生在编译前/编译期，也就是说
+  **真机复验之前没有任何一道工序会碰它** —— 直到 CI 跑起来。
+- **`BAD_SUITES` 与 `FAIL=0` 是两回事。** 前者是"这一套压根没编译/没跑"，
+  此时 `PASS=0 FAIL=0` 看着比"有失败"还干净。`runall.py` 把它单列成 `BAD` 是对的。
+- **本地不能编译时，别把 CI 当编译器用到底。** 这次是靠 `javac` 单文件跑一遍
+  （只报 `package does not exist`、不再报 unicode escape）先把第 2 个坑钉死的。
+
+
 
 
 
