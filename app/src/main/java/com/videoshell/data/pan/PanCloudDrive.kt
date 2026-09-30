@@ -145,16 +145,22 @@ class PanCloudDrive private constructor(
         /**
          * 取流请求体里点名的分辨率（**复数、逗号分隔** —— v1.0.71 纠正的形状）。
          *
-         * `low/high/super` 是当前网页端的词汇表；`normal` 不是（旧代码发的是
-         * `resolution:"normal"`，服务端匹配不到码流 ⇒ 404）。三档都点名，图的是
-         * "哪档能出就给哪档"。
+         * 这一串是**照当前网页端 bundle 逐字抄的**（2026-09-30 从
+         * `g.alicdn.com/uc-cloud-drive-web-system/cloud-drive-web/4.6.7/index.js` 扒下来，
+         * 播放组件的取流调用）：
          *
-         * ⚠️ **顺序是最高档在前**（v1.0.81）：服务端可能把**点名的第一档**当默认档。
-         * 旧值是 `low,high,super` —— 若它真这么做，就会把"点了原画却放到流畅"变成
-         * 必然（用户 2026-09-29 反馈的就是这个症状）。档位取舍本身见 [urlOf]：那里
-         * 不再唯 `default_resolution` 是从。
+         * ```js
+         * this.props.play({fid: this.fileId, resolutions: ["normal","low","high","super","2k","4k"]})
+         * ```
+         *
+         * ⚠️ v1.0.83 把这里改成过 `origin,super,high,low`（把「原画」猜成 `origin`）。同一份
+         * bundle 里档名的枚举是
+         * `{low:"流畅", normal:"标清", high:"高清", super:"超清", "2k":"2K", "4k":"4K"}`
+         * ⇒ **没有 `origin` 这一档**，而真正的两个高档 `2k`/`4k` 我们**一个都没点**。
+         * 服务端只会从我们点名的档里给 ⇒ `video_list[]` 里永远没有 2k/4k ⇒
+         * "清晰度很低"是**必然**的，与 [bestVideoUrl] 挑得对不对无关。见 PITFALLS §4.86。
          */
-        const val DEFAULT_RESOLUTIONS = "super,high,low"
+        const val DEFAULT_RESOLUTIONS = "normal,low,high,super,2k,4k"
 
         /**
          * 档位高低排序（**纯函数**，`PanLinkTest` E13c 钉着）。
@@ -164,17 +170,22 @@ class PanCloudDrive private constructor(
          * 认不出的名字给 0：它们排在已知档之后，但仍可用 `width`/`bitrate` 分出高下
          * （见 [urlOf]），不至于因为"多了个新词"就整条路失败。
          *
-         * 原画那几个别名（`origin`/`original`/`raw`）放最高：实测（PITFALLS §4.60）
-         * 夸克 `GET /file/play?resolution=raw` 与 v2 的 `super` 指向**同一个** m3u8，
-         * 说明 `raw` 就是这条链路里"原画"的名字。
+         * 次序照网页端自己的枚举（PITFALLS §4.86）：
+         * `low("流畅") < normal("标清") < high("高清") < super("超清") < 2k < 4k`。
+         *
+         * ⚠️ `raw`/`origin` 只给到 `super` 同级 —— 实测（PITFALLS §4.60）夸克
+         * `GET /file/play?resolution=raw` 与 v2 的 `super` 指向**同一个** m3u8，
+         * 它并不是更高的一档。把它当"原画最高"是 v1.0.83 那次误改的来源。
          */
         @JvmStatic
         fun resolutionRank(resolution: String?): Int =
             when (resolution?.trim()?.lowercase()) {
-                "origin", "original", "raw", "原画" -> 4
-                "super", "超清", "蓝光" -> 3
-                "high", "高清" -> 2
-                "low", "流畅", "标清" -> 1
+                "4k" -> 6
+                "2k" -> 5
+                "super", "超清", "蓝光", "raw", "origin", "original" -> 4
+                "high", "高清" -> 3
+                "normal", "标清" -> 2
+                "low", "流畅" -> 1
                 else -> 0
             }
 
@@ -530,11 +541,20 @@ class PanCloudDrive private constructor(
             return null
         }
         rememberPending(saved)
+        // 内容类型**按地址判**（v1.0.83）：主端点给的一直是转码后的 `media.m3u8`，但退路
+        // （历史接口 `/file/play`）可能给直出的 mp4/fmp4。报错内容类型的代价是 media3 把 HLS
+        // 当 progressive 解（"能解析、一播就黑屏"，§4.65），所以这件事由**拿到的地址**说话，
+        // 而不是由"我们以为"说话。
+        val hls = url.contains(".m3u8", ignoreCase = true)
+        PanDiag.record(
+            "${type.label}取流成功：hls=$hls host=" +
+                    url.substringAfter("://").substringBefore('/')
+        )
         return PanStream(
             url = url,
             headers = mediaHeaders(ck),
-            hls = true,
-            mime = MIME_HLS
+            hls = hls,
+            mime = if (hls) MIME_HLS else null
         )
     }
 
@@ -711,14 +731,30 @@ class PanCloudDrive private constructor(
 
     /** 单次取流（不重试）。失败原因写进 [err]。 */
     private suspend fun playUrlOnce(fid: String, ck: String): String? {
+        // ① 主端点：点名的档位是**照网页端 bundle 抄的完整档位表**（见 [DEFAULT_RESOLUTIONS]）。
+        //
+        // 服务端只会从**我们点名的那几档**里给。v1.0.81 只改了"挑"（[bestVideoUrl]），
+        // v1.0.83 又只点到了 `super` —— 真正的 `2k`/`4k` 一次都没点过，`video_list[]` 里
+        // 自然永远没有它们。这一版把 6 档全点上，再由 [urlOf] 取最高**可播**的那档。
+        // （多档一次请求就够：不再有"档名可能不被认"这种不确定性，见 PITFALLS §4.86。）
         val resp = postJson("$apiBase/file/v2/play?${q()}", playBody(fid), ck, "取播放入口")
         val o = resp?.let { json(it) }
         if (o != null) {
             if (o.optInt("code", -1) == 0) {
-                urlOf(o)?.let { return it }
+                urlOf(o)?.let {
+                    // ⚠️ 成功时必须把失败痕迹清掉，否则一句"已失败"会跟着一个**已经播成功**
+                    //    的流一起交出去（上层读 [lastError] 就会把好流报成失败）。
+                    err = null
+                    return it
+                }
+                PanDiag.record("${type.label}取播放入口：服务端没给可用地址（一档都不可播？）")
             } else {
                 // 留痕但不提前返回 —— 下面还有退路（note 会把"需登录/分享失效"分类好）
                 note(o)
+                PanDiag.record(
+                    "${type.label}取播放入口：被拒" +
+                            "（code ${o.optInt("code", -1)}：${o.optString("message").take(60)}）"
+                )
             }
         }
         // ⚠️ 主端点已经说出的结论必须**留住**。退路是历史接口（见 [playUrl] 头注），它的失败
@@ -726,16 +762,36 @@ class PanCloudDrive private constructor(
         //    而 `v2/play` 到底回了什么**一点都没留下**（和 §4.74 同一种病，换了个洞）。
         //    所以退路只在主端点**没给出结论**（err == null）时才补位；拿到 URL 仍照常返回。
         val primary = err
+        // ⚠️ 退路一旦成功，用户看到的就是**这条**历史接口给的档 —— 而它此前**一条日志都没有**。
+        //    于是"解析成功、画面却是流畅"这件事在报告里完全看不出来：主端点（v2/play）
+        //    的档位表明明有 `super`，最后播的却是 `raw|low` 这一路的产物（见 [PanDiag]）。
+        //    这正是"不是原画、清晰度很低"最可能的来源，所以成功与失败**都要留痕**。
         for (res in arrayOf("raw", "low")) {
             val body = getJson(
                 "$apiBase/file/play?${q()}&fid=${u(fid)}&resolution=$res", ck, "取播放入口·退路"
             ) ?: continue
             val g = json(body) ?: continue
             if (g.optInt("code", -1) != 0) {
+                PanDiag.record(
+                    "${type.label}取播放入口·退路：[$res] 被拒（code ${g.optInt("code", -1)}）"
+                )
                 if (primary == null) note(g)
                 continue
             }
-            urlOf(g)?.let { return it }
+            urlOf(g)?.let {
+                PanDiag.record(
+                    "${type.label}取播放入口·退路：**[$res] 成功** —— " +
+                            "主端点没给出可用档，这一条才是实际播的（档位由它定）"
+                )
+                // ⚠️ 与主端点那条成功分支**同一条纪律**：成功就必须把失败痕迹清掉。
+                //    上一个候选被拒时 [note] 把 [err] 写成了失败，而这里一旦成功、
+                //    那句"已失败"会跟着一个**已经播成功**的流一起交出去（上层读 [lastError]
+                //    就把它报成失败）。两条成功分支漏一条，症状只在"主端点被拒 + 退路救回来"
+                //    这一小段路径上出现 —— 退路恰恰是**历史接口**，越是主端点不顺时它越常被走到。
+                err = null
+                return it
+            }
+            PanDiag.record("${type.label}取播放入口·退路：[$res] 成功但没给可用地址")
         }
         // 退路的失败（无论来自 [note] 还是 [classify] 的异常）都不许顶掉主端点那句
         if (primary != null) err = primary
@@ -764,6 +820,9 @@ class PanCloudDrive private constructor(
         val list = d.optJSONArray("video_list")
         bestVideoUrl(list)?.let { return it }
         val want = d.optString("default_resolution")
+        // 走到这里说明"取最高档"没给出结论（一档都不可播 / 一个地址都没给）——
+        // 这正是"为什么不是原画"的另一种答案，必须留痕（见 [PanDiag]）
+        PanDiag.record("${type.label}取播放入口·退回服务端默认档：default_resolution=[$want]")
         var first: String? = null
         if (list != null) {
             for (i in 0 until list.length()) {
@@ -797,30 +856,48 @@ class PanCloudDrive private constructor(
     private fun bestVideoUrl(list: JSONArray?): String? {
         if (list == null) return null
         var best: String? = null
+        var bestName = ""
         var bestRank = Int.MIN_VALUE
         var bestWidth = Int.MIN_VALUE
         var bestBitrate = Int.MIN_VALUE
+        // 把服务端**实际给的**档位整表留一份（见 [PanDiag]）：用户那句"不是原画"到底是
+        // "它没给原画"还是"我们选错了"，只有这张表能回答 —— 光看"解析成功"看不出来。
+        val rows = StringBuilder()
         for (i in 0 until list.length()) {
             val e = list.optJSONObject(i) ?: continue
-            if (e.has("accessable") && !e.optBoolean("accessable")) continue
-            val trans = e.optString("trans_status")
-            if (trans.isNotBlank() && trans != "success") continue
             val vi = e.optJSONObject("video_info")
             val url = vi?.optString("url").orEmpty().ifBlank { e.optString("url") }
-            if (url.isBlank()) continue
-            val rank = resolutionRank(e.optString("resolution"))
+            val name = e.optString("resolution")
+            val rank = resolutionRank(name)
             val width = vi?.optInt("width", 0) ?: 0
             val bitrate = vi?.optInt("bitrate", 0) ?: 0
+            val ok = !e.has("accessable") || e.optBoolean("accessable")
+            val trans = e.optString("trans_status")
+            rows.append("    ").append(name.ifBlank { "-" })
+                .append(" w=").append(width).append(" br=").append(bitrate)
+                .append(" 可播=").append(ok).append(" trans=").append(trans.ifBlank { "-" })
+                .append(if (url.isBlank()) " 无地址" else "")
+                .append('\n')
+            if (!ok) continue
+            if (trans.isNotBlank() && trans != "success") continue
+            if (url.isBlank()) continue
             val better = rank > bestRank
                     || (rank == bestRank && width > bestWidth)
                     || (rank == bestRank && width == bestWidth && bitrate > bestBitrate)
             if (better) {
                 best = url
+                bestName = name
                 bestRank = rank
                 bestWidth = width
                 bestBitrate = bitrate
             }
         }
+        val pickName = bestName.ifBlank { "无：一档都不可播" }
+        PanDiag.record(
+            "${type.label}取播放入口（video_list）：\n" +
+                    rows.toString() +
+                    "    ⇒ 选中［" + pickName + "］"
+        )
         return best
     }
 

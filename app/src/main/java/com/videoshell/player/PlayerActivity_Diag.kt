@@ -40,6 +40,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.recyclerview.widget.GridLayoutManager
+import com.videoshell.data.pan.PanDiag
 import android.app.AlertDialog
 import android.app.PictureInPictureParams
 import android.content.BroadcastReceiver
@@ -162,6 +163,9 @@ internal fun PlayerActivity.copyDiag() {
     sb.appendLine()
     sb.appendLine("---------- HTTP 记录 ----------")
     sb.appendLine(NetLog.report())
+    sb.appendLine()
+    sb.appendLine("---------- 网盘取流记录 ----------")
+    sb.appendLine(PanDiag.report())
     sb.appendLine()
     sb.appendLine("---------- 播放记录 ----------")
     sb.appendLine(PlayLog.report())

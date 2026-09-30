@@ -257,11 +257,11 @@ public class PanMediaCookieTest {
         // 真正的判据来自**当前网页端自己的实现**（cloud-drive-web/4.6.7 的 share.js）：
         //   { fid, resolutions: (res||["low"]).join(","), supports: "fmp4,m3u8" }
         // 而旧代码发的是 { fid, resolution:"normal" }（单数键 + 过时值）。
-        ok("H1 DEFAULT_RESOLUTIONS 是复数逗号列表、且不含过时的 normal",
-                PanCloudDrive.DEFAULT_RESOLUTIONS.contains("low")
-                        && PanCloudDrive.DEFAULT_RESOLUTIONS.contains("super")
-                        && PanCloudDrive.DEFAULT_RESOLUTIONS.contains(",")
-                        && !PanCloudDrive.DEFAULT_RESOLUTIONS.contains("normal"),
+        // ⚠️ `normal` **是**当前网页端的档名（`{low:"流畅",normal:"标清",high:"高清",super:"超清","2k","4k"}`，
+        //    2026-09-30 直接扒 bundle）—— 旧断言"不含 normal"把它与**过时的单数键**混为一谈了：
+        //    过时的是 `resolution:"normal"`（单数键），不是 `normal` 这个档名本身。H4/H5 守单数键。
+        ok("H1 DEFAULT_RESOLUTIONS 逐字等于网页端 bundle 的档表（复数逗号列表）",
+                "normal,low,high,super,2k,4k".equals(PanCloudDrive.DEFAULT_RESOLUTIONS),
                 PanCloudDrive.DEFAULT_RESOLUTIONS);
         ok("H2 取流体用 `resolutions`（复数键）",
                 pcd != null && pcd.contains("put(\"resolutions\""), "");

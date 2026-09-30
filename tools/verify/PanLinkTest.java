@@ -469,23 +469,67 @@ public class PanLinkTest {
                 pcdCode != null && pcdCode.contains("/file/play?") && pcdCode.contains("\"raw\"")
                         && pcdCode.contains("\"low\""), "");
         // v1.0.81：用户反馈"夸克/UC 放的不是原画" —— 根因是取哪一档**外包给了服务端**
-        // （有 default_resolution 就用它）。下面三条把"取最高档"钉在我们这一侧：
+        // （有 default_resolution 就用它）。下面几条把"取最高档"钉在我们这一侧：
         // 判据必须落在**档名**上（位置不可信），且必须真的接进 urlOf。
-        ok("E13c ★ 档位有高低序，且**原画最高**（raw/origin > super > high > low）",
-                PanCloudDrive.resolutionRank("raw") > PanCloudDrive.resolutionRank("super")
+        //
+        // ⚠️ 档位**词表**以网页端 bundle 为准（2026-09-30 直接扒
+        // `g.alicdn.com/uc-cloud-drive-web-system/cloud-drive-web/4.6.7/index.js`）：
+        //   `e.low="流畅", e.normal="标清", e.high="高清", e.super="超清", e["2k"]="2K", e["4k"]="4K"`
+        // ⇒ **没有 `origin`/`原画` 这一档**（v1.0.83 把它猜成 origin 是错的，`raw`≡`super`）。
+        ok("E13c ★ 档位有高低序（实测网页端枚举：low<normal<high<super<2k<4k）",
+                PanCloudDrive.resolutionRank("4k") > PanCloudDrive.resolutionRank("2k")
+                        && PanCloudDrive.resolutionRank("2k") > PanCloudDrive.resolutionRank("super")
                         && PanCloudDrive.resolutionRank("super") > PanCloudDrive.resolutionRank("high")
-                        && PanCloudDrive.resolutionRank("high") > PanCloudDrive.resolutionRank("low")
+                        && PanCloudDrive.resolutionRank("high") > PanCloudDrive.resolutionRank("normal")
+                        && PanCloudDrive.resolutionRank("normal") > PanCloudDrive.resolutionRank("low")
                         && PanCloudDrive.resolutionRank(null) < PanCloudDrive.resolutionRank("low"),
-                "raw=" + PanCloudDrive.resolutionRank("raw")
+                "4k=" + PanCloudDrive.resolutionRank("4k")
+                        + " 2k=" + PanCloudDrive.resolutionRank("2k")
                         + " super=" + PanCloudDrive.resolutionRank("super")
                         + " high=" + PanCloudDrive.resolutionRank("high")
+                        + " normal=" + PanCloudDrive.resolutionRank("normal")
                         + " low=" + PanCloudDrive.resolutionRank("low"));
         ok("E13d ★ urlOf 真的用上了「取最高档」（bestVideoUrl + resolutionRank），否则 E13c 只是空谈",
                 pcdCode != null && pcdCode.contains("bestVideoUrl(")
                         && pcdCode.contains("resolutionRank("), "");
-        ok("E13e ★ 取流请求体点名时**最高档在最前**（服务端可能把第一档当默认档）",
-                PanCloudDrive.DEFAULT_RESOLUTIONS.startsWith("super"),
+        // ★ E13e/E13f：服务端**只会从我们点名的档里给** —— 不点名 2k/4k，`video_list[]` 里就
+        //   永远没有它们。所以"点名表"本身是一条判据：它必须**逐字等于**网页端那一串。
+        ok("E13e ★ 取流点名表逐字等于网页端 bundle 的那一串（自造词/漏档 = 那几档永远拿不到）",
+                "normal,low,high,super,2k,4k".equals(PanCloudDrive.DEFAULT_RESOLUTIONS),
                 PanCloudDrive.DEFAULT_RESOLUTIONS);
+        ok("E13f ★ 点名表含两个真正的高档 2k/4k，且**不含** origin（bundle 里没有 origin 这一档）",
+                PanCloudDrive.DEFAULT_RESOLUTIONS.contains("2k")
+                        && PanCloudDrive.DEFAULT_RESOLUTIONS.contains("4k")
+                        && !PanCloudDrive.DEFAULT_RESOLUTIONS.contains("origin"),
+                PanCloudDrive.DEFAULT_RESOLUTIONS);
+        ok("E13g 认不出的档名不致命（rank=0，同档仍靠 width/bitrate 分高下）",
+                PanCloudDrive.resolutionRank("someFutureTier") == 0
+                        && pcdCode != null && pcdCode.contains("width")
+                        && pcdCode.contains("bitrate"), "");
+        ok("E13h ★ 服务端给了哪几档必须留痕（否则「不是原画」永远只能靠猜）",
+                pcdCode != null && pcdCode.contains("PanDiag.record("), "");
+        // ★ v1.0.83 补充（用户二次复验仍报"清晰度很低"）：
+        //   退路（历史接口 /file/play）**成功**时此前**一条日志都没有** —— 主端点（v2/play）
+        //   的档位表明明有 super，最终播的却可能是退路给的产物，而报告里完全看不出来。
+        //   低清晰度最可能的来源就在这条分支上，所以成功与失败都必须留痕。
+        ok("E13i ★ 退路成功时也必须留痕（否则「主端点有 super、实际播了退路」在报告里不可见）",
+                pcdCode != null && pcdCode.contains("取播放入口·退路")
+                        && pcdCode.contains("才是实际播的"), "");
+        ok("E13j ★ 退回服务端默认档时必须留痕（`default_resolution`——「它没给高档」与「我们选错了」只能靠它分开）",
+                pcdCode != null && pcdCode.contains("退回服务端默认档")
+                        && pcdCode.contains("default_resolution"), "");
+        // ★ v1.0.83：**两条**成功分支都要清掉失败痕迹 —— 只清主端点那条是不够的。
+        //   点名原画（`origin`）被服务端拒时会先把 `err` 写成失败，紧接着退路救回来；
+        //   若那条分支不清 `err`，一句"已失败"就会跟着一个**已经播成功**的流交出去
+        //   （上层读 lastError 就把它报成失败）。判据落在"退路成功分支里有 err = null"上。
+        int legAt = pcdCode == null ? -1 : pcdCode.indexOf("for (res in arrayOf(\"raw\", \"low\"))");
+        int legEnd = legAt < 0 ? -1 : pcdCode.indexOf("if (primary != null) err = primary", legAt);
+        String legBody = (legAt < 0 || legEnd <= legAt) ? "" : pcdCode.substring(legAt, legEnd);
+        ok("E13ka 守卫自测：窗口确实截到了退路那段函数体",
+                legBody.contains("取播放入口·退路") && legBody.contains("urlOf(g)"),
+                "截到 " + legBody.length() + " 字符（窗口错位 ⇒ E13k 是恒真断言）");
+        ok("E13k ★ 退路**成功**时也要清 err（只清主端点那条 ⇒ 好流会被报成失败）",
+                legBody.contains("return it") && legBody.contains("err = null"), "");
 
         ok("E14 删除转存产物的 body 是 filelist（原用 fids ⇒ 恒 400 code:14001，静默失败）",
                 pcd != null && pcd.contains("put(\"filelist\"")
@@ -530,8 +574,9 @@ public class PanLinkTest {
         ok("E15b 白名单一个都没命中时退回整份 Cookie（键名没见过也不能直接播不了）",
                 pcd != null && pcd.contains("mapOf(\"Cookie\" to ck)"), "");
 
-        ok("E16 PanStream 标成 HLS 且自报 MIME（media3 靠 MIME 才会建 HlsMediaSource）",
-                pcd != null && pcd.contains("hls = true") && pcd.contains("mime = MIME_HLS")
+        ok("E16 HLS 与否**按拿到的地址判**、HLS 时自报 MIME（media3 靠 MIME 才会建 HlsMediaSource）",
+                pcd != null && pcd.contains("hls = url.contains(\".m3u8\"")
+                        && pcd.contains("mime = if (hls) MIME_HLS else null")
                         && pcd.contains("application/x-mpegURL"), "");
         String pmr = read(PROJ + "/app/src/main/java/com/videoshell/data/pan/PanResolver.kt");
         ok("E16b PanResolver 把 hls/mime 透传给 MediaSource.Direct",

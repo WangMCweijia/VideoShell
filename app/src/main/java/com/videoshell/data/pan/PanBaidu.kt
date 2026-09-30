@@ -24,7 +24,38 @@ import java.util.concurrent.ConcurrentHashMap
  * | 列**根**目录 | `GET /share/list?…&root=1&dir=/` | ✅ `errno=0` + `list[]` | ✅ |
  * | 列**子**目录 | `GET /share/list?…&dir={path}`（⚠️ **不带 `root`**） | ✅ `errno=0` | ✅ |
  * | 取直链 | `POST /api/sharedownload` | ❌ `errno=113 验证码签名错误` | ⏳ **未实测** |
- * | 账号级签名 | `GET /api/gettemplatevariable?fields=["sign","timestamp","bdstoken"]` | ❌ `errno=-6` | ⏳ **未实测**（本类当 `sign` 的兜底，见 `accountSign`） |
+ * | 分享签名 | `GET /share/tplconfig?fields=sign,timestamp&share_id=&uk=&surl=` | ❌ `errno=2`（2026-09-30 复验） | ⏳ **未实测**（`sign` 的第一来源，见 [tplSign]） |
+ * | 账号签名 | `GET /api/gettemplatevariable?fields=["sign","timestamp","bdstoken"]` | ❌ `errno=-6`（2026-09-30 复验） | ⏳ **未实测**（`sign` 的第二来源，见 [accountSign]） |
+ *
+ * ### v1.0.85：`errno=113` 的正解只有一个 —— `sign` 拿不到，而**三条来源一条都不能删**
+ *
+ * 2026-09-30 直接打现网复核了匿名段（`curl` + 桌面 UA，三条真实样本链接）：
+ *
+ * ```
+ * GET /s/1NkV…            → 302 → /share/init，yunData 里**没有** sign/timestamp
+ *                             （只有 `{bdstoken:'', uk:'0', loginstate:'0', share_uk, shareid}`）
+ * POST /share/verify…     → errno=0 + Set-Cookie: BDCLND（放行票据到手）
+ * GET /s/1NkV…（带票据）   → 仍是 `bdstoken:''`，`sign` **一次都没出现过**（连字样都没有）
+ * GET /share/tplconfig…   → {"errno":2,"show_msg":"啊哦，链接出错了"}
+ * GET /api/gettemplatevariable… → {"errno":-6,"result":[]}   ← -6 = 未登录
+ * ```
+ *
+ * ⇒ 匿名**拿不到** `sign`（三条路都断），所以"匿名取直链"恒 `errno=113` —— 与"参数写错"
+ * 无关。登录态下哪一条能给，**只能靠一次 `BAIDU_COOKIE=` 复跑**（工具已就绪，见下）。
+ *
+ * ⚠️ 同一次复核还钉住了一件事：页面**确实会内联** locals —— 匿名页里就写着
+ * `locals.set('servertime', 1790747838499)`（**毫秒**）与 `locals.mset({…})`。但那一批
+ * 键里**没有** `sign`/`timestamp`，只有 `csrf`/`uk`/`username`/`loginstate`/`bdstoken`/`public`/…
+ * ⇒ 不能指望"从 HTML 里抠 sign"这条兜底（它只在页面把它内联出来时才成立）。
+ * 另外这份样本（快映那条 `?pwd=6107`）现网已回 `share_page_type:"error"`+`errno:145`，
+ * 即**分享已失效** —— 它只配当"形状样本"，不能当"可用样本"（[shareIsDead] 认的正是这一段）。
+ *
+ * ⚠️ v1.0.83 那次改动的教训：它把 [accountSign]（`/api/gettemplatevariable`）**整个删掉**，
+ * 换成了一条**未实测**的 [tplSign]（`/share/tplconfig`）。而 §4.84 读百度下载 bundle 得到的
+ * 原始出处恰恰是前者（`locals.get("public","share_uk","shareid","sign","timestamp",…)` 读的
+ * `locals` 就是 `gettemplatevariable` 填的）。**删掉一条来源 = 把一个独立答案从报告里抹掉**，
+ * 而三条来源失败的症状**完全相同**（`sign` 空 ⇒ `113`）⇒ 事后分不出是哪一条断的。
+ * ⇒ 现在的纪律是：**三条都试，谁先给出非空 `sign` 就用谁，并把用了哪条写进报告**。
  *
  * ⇒ **详情页能像夸克/UC 一样匿名展开真实集数**（[list] 一整条都实测过），
  * 只有"点开某一集"需要登录 —— 与 P0 两盘的形状一致。
@@ -128,17 +159,25 @@ class PanBaidu private constructor() : PanProvider {
         @JvmStatic
         fun shareFields(html: String): BaiduShare? {
             if (html.isBlank()) return null
-            val sid = Regex("shareid\\s*[:=]\\s*[\"']?(\\d{5,})")
+            // ⚠️ 每个键名后面都要跟一个 `["']?`（键名**带引号**也要认）。这不是"顺手宽松"，
+            //    而是 v1.0.84 找到的 113 根因（§4.86）：`yunData` 有两种写法 ——
+            //      · 键名不带引号的 JS 字面量：`shareid:"…"`（匿名页实测的形状）
+            //      · **带引号**的 JSON 形状：`"shareid":"…"`（页面被序列化时）
+            //    只认第一种时，`shareid` 恰好**另有一个 URL 参数副本**（页内链接里的
+            //    `…&shareid=123`）兜住了它，所以列目录一直是好的；而 `sign` 没有副本
+            //    ⇒ 恒为空 ⇒ 取直链恒 `errno=113`。三处正则只差这一个 `["']?`，
+            //    症状却分散在"列目录正常 / 取直链失败"两件看似无关的事上。
+            val sid = Regex("\\bshareid\\b[\"']?\\s*[:=]\\s*[\"']?(\\d{5,})")
                 .find(html)?.groupValues?.get(1)
             // `share_uk` 与 `uk` 都在页面上；只认前者 —— 匿名页的 `uk` 是 `'0'`（游客 id）
-            val uk = Regex("share_uk\\s*[:=]\\s*[\"']?(\\d{5,})")
+            val uk = Regex("\\bshare_uk\\b[\"']?\\s*[:=]\\s*[\"']?(\\d{5,})")
                 .find(html)?.groupValues?.get(1)
             if (sid.isNullOrBlank() || uk.isNullOrBlank()) return null
-            val tok = Regex("bdstoken\\s*[:=]\\s*[\"']([^\"']*)[\"']")
+            val tok = Regex("\\bbdstoken\\b[\"']?\\s*[:=]\\s*[\"']([^\"']*)[\"']")
                 .find(html)?.groupValues?.get(1).orEmpty()
             // `\bsign\b` 才不会连 `sign1`/`sign2` 一起吃掉（那三个是另一套签名材料），
-            // 而 webpack 元数据里的 `"sign","servertime"` 后面跟的是逗号、不是 `:`/`=` ⇒ 不命中
-            val sign = Regex("\\bsign\\b\\s*[:=]\\s*[\"']([^\"']{4,200})[\"']")
+            // 而 webpack 元数据里的 `"sign","servertime"` 后面跟的是逗号、不是 `:`/`=` ⇒ 不命中。
+            val sign = Regex("\\bsign\\b[\"']?\\s*[:=]\\s*[\"']([^\"']{4,200})[\"']")
                 .find(html)?.groupValues?.get(1).orEmpty()
             return BaiduShare(sid, uk, tok, sign, pageStamp(html))
         }
@@ -244,8 +283,12 @@ class PanBaidu private constructor() : PanProvider {
             val sign = Regex("\"sign\"\\s*:\\s*\"([^\"]{4,200})\"")
                 .find(body)?.groupValues?.get(1).orEmpty()
             if (sign.isBlank()) return null
-            val ts = Regex("\"timestamp\"\\s*:\\s*\"?(\\d{9,13})")
+            val rawTs = Regex("\"timestamp\"\\s*:\\s*\"?(\\d{9,13})")
                 .find(body)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+            // ⚠️ 单位跟 [pageStamp] **同一条规矩**：这一路填的就是页面上的 `locals`，而页面的
+            //    `servertime` 是**毫秒**（见 [pageStamp] 的实测值）。13 位照发 = 差 1000 倍
+            //    ⇒ `errno=113`（与"sign 为空"同码）。归一一次，两条签名路径对服务端才是同一种时间。
+            val ts = if (rawTs > 100_000_000_000L) rawTs / 1000 else rawTs
             val tok = Regex("\"bdstoken\"\\s*:\\s*\"([^\"]*)\"")
                 .find(body)?.groupValues?.get(1).orEmpty()
             return BaiduSign(sign, ts, tok)
@@ -406,28 +449,89 @@ class PanBaidu private constructor() : PanProvider {
     override suspend fun stream(ref: PanRef): PanStream? {
         err = null
         val ck = DriveStore.cookie(type)
-        if (ck.isNullOrBlank()) {
+        // ⚠️ 判据与 [verify] **逐字一致**（同一个盘、同一件事，不能两处两套）：百度登录态的
+        //    会话键就是 `BDUSS`。只有 `BAIDUID`（游客）/`BDCLND`（提取码票据）的 cookie
+        //    同样"非空"，但它**签不了名** —— 2026-09-30 直接打现网复核：匿名（含换取票据
+        //    之后）分享页里 `sign`/`timestamp`/`servertime` **一个都没有**，`/share/tplconfig`
+        //    回 `errno=2`、`/api/gettemplatevariable` 回 `errno=-6`（未登录）。
+        //    不在这里拦住，就等于拿一份游客 cookie 去空打一次 `/api/sharedownload`，
+        //    把它必然回的那句 **`errno=113 验证码签名错误`** 当成结论抛给用户 ——
+        //    而真因是"没登录"。用户看到的是玄学错误码，不是"去登录"。
+        if (ck.isNullOrBlank() || !ck.contains("BDUSS=")) {
+            if (!ck.isNullOrBlank()) DriveStore.markExpired(type)
             err = PanError.NeedLogin(needLoginMsg(type), type)
             return null
         }
         val sh = cachedShare(ref.link) ?: shareOf(ref.link) ?: return null
-        // 带 cookie 重取：`sign` 只在登录态下才有（匿名页的字面量里根本没有它）
+        // 带 cookie 重取：`sign` 只在登录态下才有（匿名页的字面量里根本没有它 —— 2026-09-30 实测）
         val page = pageOf(ref.link, ck, "取直链·读分享页")
-        // 签名优先级：**页面变量**（百度自己的下载 bundle 就是 `locals.get("sign")` 那一套）
-        // → **账号级** `/api/gettemplatevariable`（页面没内联时的那条路，也是页面上
-        // `locals` 的来源）。`sign` 与 `timestamp` 必须是**同一份**：取谁的就用谁的时间戳，
-        // 混用等于没签名（回 `errno=113 验证码签名错误`，§4.84）。
-        var sign = page?.sign.orEmpty()
-        var ts = page?.timestamp ?: 0L
+        // 签名有**三个**来源，按证据强度依次试，谁先给出非空 `sign` 就用谁，并且
+        // **整份带走**（`sign` 与 `timestamp` 必须同源：混用另一份的时间戳 = 没签名，§4.84）：
+        //   ① `GET /share/tplconfig`        —— 分享级模板变量（分享页自己的 `locals`）；
+        //   ② `GET /api/gettemplatevariable` —— 账号级模板变量，**这是 §4.84 读百度下载
+        //      bundle 得到的原始出处**（`locals.get(…"sign","timestamp"…)` 读的 `locals` 就是它填的）；
+        //   ③ 分享页 HTML 里内联的变量（页面把 `locals` 直接写出来时的兜底）。
+        // ⚠️ 三条都要试：任一条都可能因为**端点/参数形状变了**而恒空，而它们失败的症状
+        //    **完全相同**（`sign` 空 ⇒ `errno=113`）—— 只留一条就等于把"这条断没断"这个问题
+        //    埋进 113 里（v1.0.83 删掉 ② 就是这么发生的）。
+        var sign = ""
+        var ts = 0L
+        // 签名的**来源**必须留痕：`113` 一个码分不出"签名为空 / 签了但与时间戳不配套 /
+        // 加密票据没回显"，而"这几个字段各自从哪来"正是唯一能把它分开的证据（§4.84）。
+        var signSrc = ""
         var bdstoken = page?.bdstoken.orEmpty().ifBlank { sh.bdstoken }
+        val fromShare = tplSign(ref.link, sh, ck)
+        val fromAccount = if (fromShare?.sign.isNullOrBlank()) accountSign(ref.link, ck) else null
+        val picked = when {
+            !fromShare?.sign.isNullOrBlank() -> fromShare to "分享级 tplconfig"
+            !fromAccount?.sign.isNullOrBlank() -> fromAccount to "账号级 gettemplatevariable"
+            else -> null
+        }
+        if (picked != null) {
+            sign = picked.first.sign
+            if (picked.first.timestamp > 0L) ts = picked.first.timestamp
+            if (bdstoken.isBlank()) bdstoken = picked.first.bdstoken
+            signSrc = picked.second
+        }
         if (sign.isBlank()) {
-            accountSign(ck)?.let {
-                sign = it.sign
-                if (it.timestamp > 0L) ts = it.timestamp
-                if (bdstoken.isBlank()) bdstoken = it.bdstoken
+            sign = page?.sign.orEmpty()
+            if (sign.isNotBlank()) {
+                ts = page?.timestamp ?: 0L
+                signSrc = "分享页内联"
             }
         }
-        if (ts <= 0L) ts = nowSec()
+        if (signSrc.isBlank()) signSrc = "空（tplconfig / gettemplatevariable / 分享页都没给）"
+        // ⚠️ 时间戳的兜底只能在"连 sign 都没有"时发生，并且**必须在报告里写明**：
+        //    `sign` 是按页面那一刻的时间戳签发的，混一个 now() 进去 ⇒ 签名必然对不上
+        //    （回 113，与"根本没签名"同一个码）。"有 sign 却读不到 ts"是页面形状变了，
+        //    这一句留痕就是下一轮唯一能指出它的东西。
+        val tsFallback = ts <= 0L
+        if (tsFallback) ts = nowSec()
+        // 留痕（见 [PanDiag]）：这一步的答案全在"发出去的那几个字段"里。
+        // ⚠️ 只记长度与来源，不记明文 —— 这份报告会被用户贴出来。
+        PanDiag.record(
+            "百度·取直链参数：sign=" + PanDiag.brief(sign) + "（来源=" + signSrc + "）" +
+                    " ts=" + ts + (if (tsFallback) "·⚠️兜底成当前时间" else "·随 sign 同源") +
+                    " bdstoken=" + PanDiag.brief(bdstoken) +
+                    " 分享页=" + (if (page == null) "取不到" else "已取到") +
+                    " shareid=" + sh.shareid
+        )
+        // 三条来源都没给出 `sign` ⇒ 这一次 `/api/sharedownload` **必然**回 `errno=113`
+        // （服务端拿它当"验证码签名错误"，而真因是没拿到签名 —— 2026-09-30 现网复核：
+        //  匿名三条路全断）。空打一次只会把一句玄学错误码交给用户，所以就地收手，
+        // 按"需要登录"上报（[PanError.NeedLogin] 是终态，上层会给出「去登录」入口）。
+        // ⚠️ 留痕不可省：报告里"sign=空 + 来源=…"这一行才是下一轮唯一能指出是谁断了的证据。
+        if (sign.isBlank()) {
+            // `bdstoken` 是**账号级**令牌：登录态的分享页必然带着它（`yunData` 里那个
+            // `bdstoken:"…"`），而游客页永远是空串。所以"sign 空 **且** bdstoken 空"
+            // 基本可以断定这份 cookie 已经不是有效登录态 ⇒ 标失效，让账号页如实显示
+            // "需重新登录"；反过来（bdstoken 有值）就只是这一次取不到签名，
+            // 不该把一份还能用的凭据标成过期。
+            if (bdstoken.isBlank()) DriveStore.markExpired(type)
+            err = PanError.NeedLogin(needLoginMsg(type), type)
+            PanDiag.record("百度·取直链中止：sign 为空（来源=$signSrc）⇒ 不再空打接口，按「需要登录」上报")
+            return null
+        }
         // 放行票据（BDCLND）在 Http 的 CookieJar 里、账号凭据在 DriveStore 里，
         // 两边都要带上 —— 合并用的是 [PanCloudDrive.mediaCookie]（纯函数、离线有断言，
         // `keys = null` = 不筛键）。不复用就只能再抄一份合并逻辑，早晚改一处漏一处。
@@ -447,6 +551,9 @@ class PanBaidu private constructor() : PanProvider {
         // [sekey] 一并做了。没有票据（公开分享）就**不发这一个字段**：
         // 百度那边它是 `undefined`，发个空串会让服务端按"加密"去校验。
         val ticket = sekey(merged)
+        PanDiag.record(
+            "百度·加密票据 BDCLND=${if (ticket.isBlank()) "无（按公开分享发）" else "有·${ticket.length}字符"}"
+        )
         val form = LinkedHashMap<String, String>().apply {
             put("encrypt", "0")
             put("product", "share")
@@ -456,7 +563,15 @@ class PanBaidu private constructor() : PanProvider {
             put("fid_list", "[${ref.fid}]")
             if (ticket.isNotBlank()) put("extra", extraOf(ticket))
         }
-        val body = postForm(url, form, merged, "取直链") ?: return null
+        val body = postForm(
+            url, form, merged, "取直链",
+            // ⚠️ `Referer` 必须是**分享页**，不是站根 [WEB]。理由：`sign` 是**按页面签发**的，
+            // 而百度自己的下载 bundle 是在分享页里发这个请求的（浏览器同源会把 `Referer`
+            // 补成完整的分享页地址）。用站根等于换了一个来路，服务端判"签名对不上"——
+            // 症状与"根本没签名"**同一个码**（`errno=113`）。§4.84 那条"同一个错误码不止
+            // 一个成因"在这里又长出一条。
+            referer = sharePageUrl(ref.link.id)
+        ) ?: return null
         val e = errnoOf(body)
         if (e == null) {
             err = PanError.Broken("${type.label}取直链返回的不是信封（接口可能变了）")
@@ -464,6 +579,7 @@ class PanBaidu private constructor() : PanProvider {
         }
         if (e != 0) {
             note(e, msgOf(body))
+            PanDiag.record("百度·取直链响应：errno=$e ${msgOf(body)}")
             return null
         }
         val dlink = dlinkOf(body)
@@ -601,23 +717,62 @@ class PanBaidu private constructor() : PanProvider {
     }
 
     /**
-     * **账号级签名**：`GET /api/gettemplatevariable?fields=["sign","timestamp","bdstoken"]`。
+     * **分享签名（来源①）**：`GET /share/tplconfig?fields=sign,timestamp&…&share_id=&uk=&surl=`。
      *
-     * 页面上的 `locals`（百度下载 bundle 里 `locals.get("sign", …)` 读的就是它）正是由这个
-     * 接口填的 —— 所以它和"页面变量"是同源的两条路，谁先拿到就用谁。匿名打它回 `errno=-6`，
-     * 登录态下的形状**待一次 `BAIDU_COOKIE=` 复跑**（见类文档的接口事实表）。
+     * 一个**分享级**模板变量接口，要 `share_id`/`uk`/`surl` 三个分享标识
+     * （`surl` = [sharePageUrl] 里那个 id 去掉固定前缀 `1`，与 [verifyPwd] 同规矩）。
+     *
+     * ⚠️ **未实测**：2026-09-30 匿名打它就是 `{"errno":2,"show_msg":"啊哦，链接出错了"}`
+     * （登录态下是什么，要一次 `BAIDU_COOKIE=` 复跑才知道）。所以它只是**来源之一**，
+     * 不是"正路"—— 拿不到就让 [accountSign] 接着试（见类文档 v1.0.85 那条教训）。
+     *
+     * 两条路的 `sign`/`timestamp` 都**整份带走、不拆开**（混用另一份的时间戳 = 没签名，
+     * 回 `errno=113`，§4.84）。
      *
      * ⚠️ 它**不覆盖** [err]：这是"多试一个来源"，本身失败不代表这一步失败 ——
      * 真失败由随后的表单 POST 用服务端原话（[note]）说清楚，别让兜底把主路的错误顶掉。
      * 这也是为什么它返回 `null` 而不是 `Unit`：调用方只在该更新字段时更新。
      */
-    private suspend fun accountSign(ck: String): BaiduSign? = try {
-        step = "取直链·取账号签名"
-        val url = "$API/api/gettemplatevariable?fields=" +
-                u("[\"sign\",\"timestamp\",\"bdstoken\"]") +
-                "&channel=$CHANNEL&web=1&app_id=$APP_ID&clienttype=0"
+    private suspend fun tplSign(link: PanLink, sh: BaiduShare, ck: String): BaiduSign? =
+        signAt("取直链·取分享签名", "$API/share/tplconfig?fields=${u("sign,timestamp")}" +
+                "&channel=$CHANNEL&web=1&clienttype=0&app_id=$APP_ID" +
+                "&share_id=${u(sh.shareid)}&uk=${u(sh.uk)}" +
+                "&surl=${u(link.id.removePrefix("1"))}", link, ck)
+
+    /**
+     * **账号签名（来源②）**：`GET /api/gettemplatevariable?fields=["sign","timestamp","bdstoken"]`。
+     *
+     * 这是 §4.84 读百度下载 bundle 得到的**原始出处** —— bundle 里
+     * `locals.get("public","share_uk","shareid","sign","timestamp", …)` 读的 `locals`
+     * 就是它填的。匿名打它回 `errno=-6`（= 未登录，2026-09-30 复验），所以只在带 cookie 时才有意义。
+     *
+     * ⚠️ v1.0.83 曾把它整个删掉、只留 [tplSign]（而那一条**未实测**）。三条来源失败的症状
+     * 完全相同（`sign` 空 ⇒ `errno=113`）⇒ 删掉一条就是把一个独立答案从报告里抹掉。v1.0.85 补回。
+     */
+    private suspend fun accountSign(link: PanLink, ck: String): BaiduSign? =
+        signAt("取直链·取账号签名", "$API/api/gettemplatevariable?fields=" +
+                "${u("[\"sign\",\"timestamp\",\"bdstoken\"]")}" +
+                "&channel=$CHANNEL&web=1&app_id=$APP_ID&clienttype=0", link, ck)
+
+    /**
+     * 两条签名接口的**共用那一半**：合并 jar 里的 `BDCLND` → 带 cookie 发 → 抠 `sign`。
+     *
+     * ⚠️ 显式 `Cookie` 头会**顶掉** jar（§4.81）：`BDCLND`（提取码换来的放行票据）只活在
+     * jar 里，加密分享少了它这一步也会失败。所以与 [pageOf] 同一条规矩 —— 先合 jar 再发。
+     *
+     * `Referer` 用**分享页**：`sign` 是按页面签发的，而这两步都是"站在分享页上"做的 ——
+     * 站根（[WEB]）等于换了个来路，与 §4.84 那条 `113`（"签名按页面签发"）同源。
+     *
+     * 任何异常都吞成 `null`：这是"多试一个来源"，不许把主路的错误顶掉（见 [tplSign] 头注）。
+     */
+    private suspend fun signAt(what: String, url: String, link: PanLink, ck: String): BaiduSign? = try {
+        step = what
+        val merged = PanCloudDrive.mediaCookie(ck, Http.cookieValuesFor(url), null)
         templateSign(
-            Http.get(url, referer = WEB, ua = PAN_UA, headers = jsonAccept + cookie(ck))
+            Http.get(
+                url, referer = sharePageUrl(link.id), ua = PAN_UA,
+                headers = jsonAccept + cookie(merged)
+            )
         )
     } catch (e: Exception) {
         null
@@ -659,10 +814,15 @@ class PanBaidu private constructor() : PanProvider {
         url: String,
         params: Map<String, String>,
         ck: String?,
-        what: String
+        what: String,
+        /**
+         * `Referer`。默认是站根（[WEB]）—— 但 `/api/sharedownload` 必须用**分享页地址**，
+         * 理由见 [stream] 里那一处调用点的注释。
+         */
+        referer: String = WEB
     ): String? = try {
         step = what
-        Http.postForm(url, params, referer = WEB, ua = PAN_UA, headers = cookie(ck))
+        Http.postForm(url, params, referer = referer, ua = PAN_UA, headers = cookie(ck))
     } catch (e: Exception) {
         err = classify(e)
         null

@@ -350,11 +350,79 @@ public class PanBaiduTest {
                 pbd != null && pbd.contains("if (ticket.isNotBlank()) put(\"extra\","), "");
         ok("H14 ★ 失败文案走 unescape（`msgOf` 里），不是把 `\\uXXXX` 原样交给用户",
                 pbd != null && pbd.contains("return unescape(v).take(60)"), "");
-        ok("H15 ★ 页面没给 sign 时回落到账号级签名（`gettemplatevariable`，与页面 `locals` 同源）",
-                pbd != null && pbd.contains("accountSign(ck)")
-                        && pbd.contains("gettemplatevariable"), "");
-        ok("H16 ★ sign 与 timestamp **同源**：回落到账号级时也要用它的时间戳（混用 = 没签名）",
-                pbd != null && pbd.contains("if (it.timestamp > 0L) ts = it.timestamp"), "");
+        ok("H15 ★ 分享级拿不到时回落到账号级签名（`gettemplatevariable`，与页面 `locals` 同源）",
+                pbd != null && pbd.contains("accountSign(ref.link, ck)")
+                        && pbd.contains("gettemplatevariable")
+                        && pbd.contains("if (fromShare?.sign.isNullOrBlank())"), "");
+        ok("H16 ★ sign 与 timestamp **同源**：整份带走（混用另一份的时间戳 = 没签名）",
+                pbd != null && pbd.contains("if (picked.first.timestamp > 0L) ts = picked.first.timestamp"), "");
+
+        // ★ H17~H18 是 v1.0.83 补的第三条成因（§4.84 的「同一个码不止一个成因」又长一条）：
+        //   用户复验后 errno 仍是 113。`sign` 是**按页面签发**的，而百度自己的下载 bundle
+        //   是在**分享页里**发 `/api/sharedownload`（浏览器同源会把 Referer 补成分享页地址）；
+        //   我们用站根等于换了个来路，服务端同样回「验证码签名错误」。
+        ok("H17 ★ 取直链的 Referer 是**分享页**，不是站根（sign 按页面签发，来路不对同码 113）",
+                pbd != null && pbd.contains("referer = sharePageUrl(ref.link.id)")
+                        && pbd.contains("referer: String = WEB"), "");
+        ok("H18 ★ 发出去的签名字段必须留痕（sign/timestamp/sekey 只记有无与长度，不记明文）",
+                pbd != null && pbd.contains("PanDiag.record(")
+                        && pbd.contains("PanDiag.brief(sign)")
+                        && pbd.contains("PanDiag.brief(bdstoken)"), "");
+
+        // ★ H19~H20（v1.0.83，二次复验仍 113）：`113` 一个码分不出三种成因，
+        //   "sign 从哪来"与"ts 是不是兜底成 now()"是唯一能把它分开的证据。
+        //   ⚠️ 混用（页面 sign + now() 时间戳）必然 113 —— 而旧代码在
+        //   "有 sign、读不到 ts" 时会**静默**走这条必败路径，报告里看不出来。
+        ok("H19 ★ 签名的**来源**（分享级 / 账号级 / 分享页内联 / 都为空）必须写进报告",
+                pbd != null && pbd.contains("signSrc")
+                        && pbd.contains("分享级 tplconfig")
+                        && pbd.contains("账号级 gettemplatevariable")
+                        && pbd.contains("分享页内联")
+                        && pbd.contains("都没给"), "");
+        ok("H20 ★ 时间戳兜底成当前时间时必须显式标出来（否则「有 sign 却混了 now()」不可见）",
+                pbd != null && pbd.contains("tsFallback") && pbd.contains("兜底成当前时间"), "");
+
+        // ★ H22（v1.0.83，三次复验仍 113）：`113` 的成因里，"sign 与 timestamp 必须**同源**"
+        //   这条纪律还有**单位**这一层没被守住 —— 页面的 `servertime` 是**毫秒**（H2 的实测值），
+        //   而账号级那条路（`gettemplatevariable`）填的就是页面同一批 `locals`。
+        //   它若回 13 位而我们照发，就等于"有 sign、时间却差 1000 倍" ⇒ 同样回 113。
+        ok("H22 ★ 账号级 sign 的时间戳与 pageStamp **同一条单位规矩**（毫秒归一到秒）",
+                PanBaidu.templateSign("{\"errno\":0,\"result\":{\"sign\":\"a1b2c3d4\","
+                        + "\"timestamp\":1790669409761}}").getTimestamp() == 1790669409L
+                        && PanBaidu.templateSign("{\"errno\":0,\"result\":{\"sign\":\"a1b2c3d4\","
+                        + "\"timestamp\":1790252372}}").getTimestamp() == 1790252372L,
+                String.valueOf(PanBaidu.templateSign("{\"errno\":0,\"result\":"
+                        + "{\"sign\":\"a1b2c3d4\",\"timestamp\":1790669409761}}").getTimestamp()));
+
+        // ★ H23~H24（v1.0.85，四次复验仍 113）：v1.0.83 把 `sign` 的三个来源**删成两个**
+        //   （账号级 `gettemplatevariable` 整个不见了），而三条路失败的症状**完全相同**
+        //   （`sign` 空 ⇒ `errno=113`）⇒ 删掉一条就等于把一个独立答案从报告里抹掉。
+        //   这两条钉住"三选一"这个形状本身，以及两条接口共用同一份 cookie 合并。
+        ok("H23 ★ 三条签名来源都在（tplconfig / gettemplatevariable / 分享页内联），"
+                        + "且两条接口共用同一个 signAt（各写一份 = 改一处漏一处）",
+                pbd != null && pbd.contains("tplSign(ref.link, sh, ck)")
+                        && pbd.contains("accountSign(ref.link, ck)")
+                        && pbd.contains("private suspend fun signAt(")
+                        && pbd.contains("PanCloudDrive.mediaCookie(ck, Http.cookieValuesFor(url), null)"), "");
+        ok("H24 ★ 两条签名接口的 Referer 都是**分享页**（sign 按页面签发；站根 = 换个来路）",
+                pbd != null && pbd.contains("referer = sharePageUrl(link.id)"), "");
+
+        // ★ H25~H26（v1.0.85，现网复核得到的那条"真因"）：2026-09-30 用 curl 直接打了三条
+        //   真实样本链接（含**换取票据之后**再取一次页面），匿名页里
+        //   `sign`/`timestamp`/`servertime` **一个都没有** —— `/share/tplconfig` 回 `errno=2`、
+        //   `/api/gettemplatevariable` 回 `errno=-6`（未登录）。
+        //   ⇒ "匿名取直链"**恒** `errno=113`，与参数写错无关。而 113 那句
+        //   「验证码签名错误」对用户是玄学：真因是"没登录/登录态拿不到签名"。
+        //   H25 钉住"不是登录态就别往下走"，H26 钉住"拿不到 sign 就别空打接口" ——
+        //   两条都是把 113 换成一句可执行的话（用户能点「去登录」）。
+        ok("H25 ★ 不是登录态的 cookie（没有 BDUSS）在 stream 入口就拦下（游客 cookie 非空但签不了名）",
+                pbd != null && pbd.contains("!ck.contains(\"BDUSS=\")")
+                        && pbd.contains("if (ck.isNullOrBlank() || !ck.contains(\"BDUSS=\"))"), "");
+        ok("H26 ★ sign 三条来源都为空时**不再空打** `/api/sharedownload`（空签名必 113），"
+                        + "按「需要登录」上报并留痕",
+                pbd != null && pbd.contains("if (sign.isBlank())")
+                        && pbd.contains("PanDiag.record(\"百度·取直链中止：sign 为空"),
+                "");
 
         System.out.println();
         System.out.println("PASS=" + pass + "  FAIL=" + fail);
