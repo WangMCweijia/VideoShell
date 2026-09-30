@@ -5,6 +5,7 @@ import com.videoshell.data.model.MediaSource
 import com.videoshell.data.model.SiteConfig
 import com.videoshell.data.net.Http
 import com.videoshell.data.net.NetLog
+import com.videoshell.data.pan.PanDiag
 import com.videoshell.player.HlsFixDataSource
 import com.videoshell.player.OkHttpDataSource
 import com.videoshell.player.PlayLog
