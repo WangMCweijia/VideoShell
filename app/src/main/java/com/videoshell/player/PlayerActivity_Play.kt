@@ -135,6 +135,18 @@ internal fun PlayerActivity.setupPlayer() {
             lastVideoSize = videoSize
             applyResLabel(videoSize)
             applyVideoOrientation(videoSize)
+            // ★ 把"**解码器真解出来的**尺寸"落进播放记录，每条流只记一次（[loggedResKey] 设闸：
+            //   这个回调一次播放会来好几次）。这是"夸克/UC 不是原画"这类反馈**唯一**能量化的
+            //   证据 —— 与 [com.videoshell.data.pan.PanDiag] 里"问了哪几档、选了哪档"对上，
+            //   才能区分"服务端只给了低档"和"我们选错了档"（前者在两头都一样低，
+            //   后者则会看到"点了 4k、解出来却是 720P"）。站点自检报告尾部会自动带上它。
+            if (videoSize.width > 0 && videoSize.height > 0) {
+                val k = "${videoSize.width}x${videoSize.height}"
+                if (k != loggedResKey) {
+                    loggedResKey = k
+                    PlayLog.record("▶ 实际解码 ${videoSize.width}x${videoSize.height}（${resLabel}）")
+                }
+            }
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -193,6 +205,7 @@ internal fun PlayerActivity.playUrl(rawUrl: String, fromRetry: Boolean = false) 
     keepNotification = true
     // 上一集的画面尺寸不能留给下一集：PiP 会拿它当纵横比，脏值会把窗口比例带偏。
     lastVideoSize = null
+    loggedResKey = ""
     PlayLog.newSession()
     PlayLog.record("▶ 开始播放 ${shorten(url)}" + if (headers.isEmpty()) "" else "  头=${headers.keys.joinToString(",")}")
 

@@ -749,6 +749,28 @@ public class PanLinkTest {
                 sweepBody.contains("except: String? = null") && sweepBody.contains("fid == except"),
                 "sweep 又变成无差别清理 ⇒ 双次解析时连播放入口一起删，取流回 21001 文件已删除");
 
+        // ------------------------------------ 「能播、但清晰度不对」的出口（v1.0.84）
+        // 真机反馈：夸克/UC「不是原画」。查"证据怎么带回来"时撞见一个死结 ——
+        // `copyDiag`（唯一会把 PanDiag 贴出来的入口）挂在**错误面板**上，而"能播、就是糊"
+        // 根本不会弹错误面板 ⇒ 用户手里**没有任何**出口能交出档位表，只能去跑站点自检
+        // （这正是那次反馈只附了一份**对自己问题只字未提**的自检报告的原因）。
+        // 所以两件事必须同时在：① 自检报告尾部带上 PanDiag；
+        // ② 播放记录里带上**解码器真解出来的尺寸** —— 我们"点名了哪档、选了哪档"在 PanDiag 里，
+        //    两头对上才分得清"服务端只给低档"和"我们选错了档"（后者会看到"点了 4k、解出 720P"）。
+        String sd = read(PROJ + "/app/src/main/java/com/videoshell/data/site/SiteDoctor.kt");
+        String sdCode = sd == null ? null : stripComments(sd);
+        ok("E22 站点自检报告尾部要带「网盘取流记录」（错误面板够不着 ⇒ 这是「能播但糊」的唯一出口）",
+                sdCode != null && sdCode.contains("L(PanDiag.report())")
+                        && sdCode.contains("---------- 网盘取流记录"),
+                "自检报告不带 PanDiag ⇒ 用户只能贴回一份对自己的问题只字未提的报告");
+        String plp = read(PROJ + "/app/src/main/java/com/videoshell/player/PlayerActivity_Play.kt");
+        String plpCode = plp == null ? null : stripComments(plp);
+        ok("E22b 实际解码的宽高要落进播放记录（档位 ≠ 真解出来的尺寸，缺了就只能靠猜）",
+                plpCode != null
+                        && plpCode.contains("PlayLog.record(\"▶ 实际解码 ${videoSize.width}x${videoSize.height}")
+                        && plpCode.contains("loggedResKey"),
+                "不记实际尺寸 ⇒ 点名了 4k、真解出 720P 这种「选错了」永远看不见");
+
         System.out.println();
         System.out.println("==== pass=" + pass + " fail=" + fail + " ====");
         if (fail > 0) {

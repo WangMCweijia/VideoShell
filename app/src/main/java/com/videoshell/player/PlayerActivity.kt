@@ -272,6 +272,16 @@ class PlayerActivity : AppCompatActivity() {
     /** 最近一次画面尺寸，用于画中画窗口比例（FN-3） */
     internal var lastVideoSize: VideoSize? = null
 
+    /**
+     * 本次流**已经落进播放记录**的那个尺寸（`宽x高`）。空 = 这一条还没记过。
+     *
+     * 为什么要它：`onVideoSizeChanged` 在一次播放里会回调多次（起播一次、切轨/换清晰度
+     * 又一次），不设闸就会把同一条流写成好几行。而那一行恰恰是"夸克/UC 不是原画"
+     * 这类反馈**唯一**能量化的证据 —— 它量的是**解码器真解出来的**尺寸，
+     * 不是我们"以为点到的"档位（后者在 [com.videoshell.data.pan.PanDiag] 里）。
+     */
+    internal var loggedResKey: String = ""
+
     /** 字幕文件选择器（FN-5）：选 .srt / .vtt 后加载为外挂字幕轨 */
     internal val subtitlePicker =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
