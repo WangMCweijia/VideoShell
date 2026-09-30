@@ -483,8 +483,12 @@ class PanBaidu private constructor() : PanProvider {
         val fromShare = tplSign(ref.link, sh, ck)
         val fromAccount = if (fromShare?.sign.isNullOrBlank()) accountSign(ref.link, ck) else null
         val picked = when {
-            !fromShare?.sign.isNullOrBlank() -> fromShare to "分享级 tplconfig"
-            !fromAccount?.sign.isNullOrBlank() -> fromAccount to "账号级 gettemplatevariable"
+            // ⚠️ 两处 `!!` 是**安全的**：判据与下面这个分支用的是同一个表达式
+            //    （`?.sign.isNullOrBlank()`），"非空"已经被判过 —— 不写 `!!` 的话
+            //    `picked` 会退化成 `Pair<BaiduSign?, String>`，`picked.first.sign`
+            //    在 K2 上直接编译不过（`Only safe (?.) or non-null asserted (!!.)`）。
+            !fromShare?.sign.isNullOrBlank() -> fromShare!! to "分享级 tplconfig"
+            !fromAccount?.sign.isNullOrBlank() -> fromAccount!! to "账号级 gettemplatevariable"
             else -> null
         }
         if (picked != null) {
