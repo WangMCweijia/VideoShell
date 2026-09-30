@@ -160,7 +160,7 @@ class PanBaidu private constructor() : PanProvider {
         fun shareFields(html: String): BaiduShare? {
             if (html.isBlank()) return null
             // ⚠️ 每个键名后面都要跟一个 `["']?`（键名**带引号**也要认）。这不是"顺手宽松"，
-            //    而是 v1.0.84 找到的 113 根因（§4.86）：`yunData` 有两种写法 ——
+            //    而是 v1.0.84 找到的 113 根因（§4.87）：`yunData` 有两种写法 ——
             //      · 键名不带引号的 JS 字面量：`shareid:"…"`（匿名页实测的形状）
             //      · **带引号**的 JSON 形状：`"shareid":"…"`（页面被序列化时）
             //    只认第一种时，`shareid` 恰好**另有一个 URL 参数副本**（页内链接里的
@@ -522,18 +522,28 @@ class PanBaidu private constructor() : PanProvider {
         )
         // 三条来源都没给出 `sign` ⇒ 这一次 `/api/sharedownload` **必然**回 `errno=113`
         // （服务端拿它当"验证码签名错误"，而真因是没拿到签名 —— 2026-09-30 现网复核：
-        //  匿名三条路全断）。空打一次只会把一句玄学错误码交给用户，所以就地收手，
-        // 按"需要登录"上报（[PanError.NeedLogin] 是终态，上层会给出「去登录」入口）。
+        //  匿名三条路全断）。空打一次只会把一句玄学错误码交给用户，所以就地收手。
         // ⚠️ 留痕不可省：报告里"sign=空 + 来源=…"这一行才是下一轮唯一能指出是谁断了的证据。
+        // ⚠️ 收手之后的文案按「到底登没登录」分两句（[bdstoken] 是判据）—— 见下面那段注释。
         if (sign.isBlank()) {
             // `bdstoken` 是**账号级**令牌：登录态的分享页必然带着它（`yunData` 里那个
-            // `bdstoken:"…"`），而游客页永远是空串。所以"sign 空 **且** bdstoken 空"
-            // 基本可以断定这份 cookie 已经不是有效登录态 ⇒ 标失效，让账号页如实显示
-            // "需重新登录"；反过来（bdstoken 有值）就只是这一次取不到签名，
-            // 不该把一份还能用的凭据标成过期。
-            if (bdstoken.isBlank()) DriveStore.markExpired(type)
-            err = PanError.NeedLogin(needLoginMsg(type), type)
-            PanDiag.record("百度·取直链中止：sign 为空（来源=$signSrc）⇒ 不再空打接口，按「需要登录」上报")
+            // `bdstoken:"…"`，32 字符），游客页永远是空串。所以拿它当"到底登没登录"的判据。
+            //
+            // ⚠️ v1.0.84 在这里**判错过一次**：只要 sign 空就喊"未登录"。而 2026-09-30 的真机
+            // 报告里 `bdstoken=32字符` —— 用户**是登录着的**，是"登录态下取不到签名"。
+            // 把两件事混成一句话，等于把用户往"去登录"这条改不了任何事的路上推。分两句（§4.89）：
+            err = if (bdstoken.isBlank()) {
+                // 确实不是有效登录态 ⇒ 标失效，给出「去登录」这个真能走的下一步
+                DriveStore.markExpired(type)
+                PanError.NeedLogin(needLoginMsg(type), type)
+            } else {
+                // 登录态在，是**我们取不到签名** —— 这是接口层面的问题，重登没有用
+                PanError.Broken(
+                    "${type.label}：登录态取不到分享签名（sign 为空）⇒ 取直链必失败。" +
+                            "请把「复制诊断」里的网盘取流记录发回"
+                )
+            }
+            PanDiag.record("百度·取直链中止：sign 为空（来源=$signSrc）⇒ 不再空打接口")
             return null
         }
         // 放行票据（BDCLND）在 Http 的 CookieJar 里、账号凭据在 DriveStore 里，
@@ -772,15 +782,33 @@ class PanBaidu private constructor() : PanProvider {
     private suspend fun signAt(what: String, url: String, link: PanLink, ck: String): BaiduSign? = try {
         step = what
         val merged = PanCloudDrive.mediaCookie(ck, Http.cookieValuesFor(url), null)
-        templateSign(
-            Http.get(
-                url, referer = sharePageUrl(link.id), ua = PAN_UA,
-                headers = jsonAccept + cookie(merged)
-            )
+        val body = Http.get(
+            url, referer = sharePageUrl(link.id), ua = PAN_UA,
+            headers = jsonAccept + cookie(merged)
         )
+        val r = templateSign(body)
+        // ★ **每个来源单独留痕**，把服务端原话（`errno` + `msg`）也带上。
+        //   只记一句"三条都没给"是不够的 —— 它把三种完全不同的原因压成同一句话：
+        //   ① 接口回 `errno=2`（参数/分享标识不对）；② 回了 200 但没有 `sign` 字段（`fields` 要错了）；
+        //   ③ 压根没连上/被 WAF 挡了。2026-09-30 那份真机报告里只有"都没给"，
+        //   于是下一轮仍然只能猜 —— 这一行就是为终结那种猜而加的。
+        //   明文照旧不落盘：只记 `sign` 的**长度**（[PanDiag.brief]）。
+        PanDiag.record(
+            "百度·$what：errno=${errnoOf(body)} msg=[${msgOf(body)}]" +
+                    " sign=" + PanDiag.brief(r?.sign) +
+                    " ts=" + (r?.timestamp ?: 0L) +
+                    " 票据=" + (if (merged.contains("BDCLND")) "有" else "无")
+        )
+        r
     } catch (e: Exception) {
+        PanDiag.record("百度·$what：抛异常 ${e.javaClass.simpleName}：${e.message.orEmpty().take(40)}")
         null
     }
+
+    /** 信封里的 `errno`；抠不到（HTML 错误页 / 空响应）记 `-9999`，与"真回了个码"分得开 */
+    private fun errnoOf(body: String): Int =
+        Regex("\"errno\"\\s*:\\s*(-?\\d+)").find(body)
+            ?.groupValues?.get(1)?.toIntOrNull() ?: -9999
 
     // ------------------------------------------------------------------ 内部
 
