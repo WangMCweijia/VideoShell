@@ -4111,9 +4111,59 @@ v1.0.84 收手逻辑里，只要三条来源都没给出 `sign`，就一律 `Pan
   下一轮仍然只能猜。
 - **"该怎么自救"的入口要对得上真因**：能靠重登修好的才给"去登录"，否则给"复制诊断"。
 
+---
 
+## §4.90 网页能播、App 403：真流是**抖音 CDN**，只认空 Referer（v1.0.86，juzong01 一族）
 
+用户报告 `https://www.juzong01.me/` 在 App 里点某一集播不出、网页却正常。逐层复现后
+发现这站把播放器**整个换成了自研栈**（不是 maccms 原生解析）：
 
+```
+播放页 /vodplay/61405-1-1/
+  player_data={"from":"dujiarbx","url":"juzong1-045bInmV…","encrypt":0}   ← ps:0，url 是令牌、无 http 前缀
+  → /static/player/dujiarbx.js
+       s.src = "https://jzpic.ok1333.cn/wgart/cms-player.js?base=https%3A%2F%2Fjzpic.ok1333.cn%2F&…"
+  → iframe = base + "?url=" + encode(令牌)
+       <script>window.WGART_PARSE_TOKEN="1791781625.7bee…";</script>
+  → GET /wgart/api.php?action=try_json_api&video_url=令牌&parse_token=WGART_PARSE_TOKEN
+       {"success":true,"data":{"url":"https://v6-default.douyinvod.com/…/juzong.mp4","type":"auto"}}
+```
+
+这里其实叠了**两个**独立的病：
+
+1. **解析断在 maccms 那一步**：`ps:0` ⇒ [MacPlayer.playPage] 返回 null ⇒ 只能退网页嗅探
+   （能抠到地址，但很重、要 WebView）。
+2. **嗅到了也播不了**：真流在 `*.douyinvod.com`，它按 Referer 防盗链。实测同一地址：
+
+   | Referer | 结果 |
+   |---|---|
+   | `https://www.juzong01.me/`（App 默认挂的站点根） | **403** |
+   | `https://jzpic.ok1333.cn/`（播放器源） | **403** |
+   | `https://www.douyin.com/` | 206 ✅ |
+   | 空（不发） | 206 ✅ |
+
+   网页端正常，是因为站点给 iframe 打了 `<meta name="referrer" content="no-referrer">` ——
+   **它自己也必须不带 Referer**。而 [PlayerActivity.browserHeaders] 会给"缺失"的 Referer
+   补上播放页地址。所以「不设置」是不够的，得能**显式表达「置空」**。
+
+修法：新增 [JzPlayer]（纯逻辑，离线可断言）复刻这条链，并在 [SiteAdapter.resolve] 里
+增一步 `jzDirect()` 换回直链；换回来的流用 `noRefererHeaders()` 播放。三道自门控
+（非 http 令牌 / 脚本里得有 `cms-player.js?base=` / iframe 里得有 `WGART_PARSE_TOKEN`）
+保证**不是这族的站零额外请求、行为与修复前逐字一致**。
+
+三个必须照抄的细节：
+
+- `video_url` 就是页面里的令牌原文，别改形状；
+- `parse_token` 是**每个 iframe 会话现签**的（带时间戳），必须先抓 iframe 页拿，不能复用/固化；
+- 返回体的 `type` 实测恒为 `"auto"`（连 m3u8 都是）⇒ **是否 HLS 一律按地址判断**，别信 `type`。
+
+### 可迁移的判据
+
+- **"网页能播、App 不能播"优先怀疑请求头差异，而不是地址差异。** 地址两边一模一样时，
+  差的一定是 Referer / Origin / Cookie —— 用同一地址换着头发一遍就能定位到具体哪一个。
+- **"不设置某头"和"把某头发成空"是两回事。** 代码里必须能表达后者（本项目约定：
+  头键存在但值为空 = 明确不发），否则自动补默认值的那一层一定会把它填回来。
+- **令牌是"会话现签"的就不能跨请求复用，更不能写进配方。** 与时效直链同一条规矩。
 
 
 

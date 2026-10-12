@@ -71,7 +71,11 @@ class OkHttpDataSource(
         merged.putAll(props)
         merged.putAll(spec.httpRequestHeaders)
         if (merged.keys.none { it.equals("User-Agent", true) }) merged["User-Agent"] = userAgent
-        for ((k, v) in merged) runCatching { builder.header(k, v) }
+        // ⚠️ 空值 = **明确不发这个头**（v1.0.86）。约定来源见
+        //    SiteAdapter.noRefererHeaders()：jz 这族的第三方 CDN 直链只接受空 Referer，
+        //    带上站点根就 403；而 `builder.header(k, "")` 会真的发出一个空的 `Referer: `，
+        //    语义与「不发」并不等价。这里直接跳过空值，让「置空」真正等于「不发」。
+        for ((k, v) in merged) if (v.isNotBlank()) runCatching { builder.header(k, v) }
 
         // Range：seek / 定长读取时才发。整段读取（HLS 的 playlist 与分片）不发，
         // 保持"服务端整份返回"的语义 —— 与自检 probe 的取法一致。

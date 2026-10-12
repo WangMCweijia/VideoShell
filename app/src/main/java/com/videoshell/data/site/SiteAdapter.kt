@@ -170,6 +170,11 @@ abstract class SiteAdapter(val site: SiteConfig) {
         // 这类线路的 `player_aaaa.url` 只是一个**令牌**（`co_e5a2tzd6xi4age3dnjrq`），
         // 真地址在 `parse 模板 + 令牌` 指向的那一层。实测 zqkhmy 6 条线路里 3 条如此，
         // 以前全数落到嗅探；跟一层就能让其中"解析服务是明文"的站直接播。
+        //
+        // ⚠️ 跟随会改写 `html` / `pageUrl`，而下面的 jz 播放器栈必须看**最初那个播放页**
+        //    （它的 `player_aaaa` 才带令牌），所以先留一份原始引用。
+        val outerHtml = html
+        val outerUrl = pageUrl
         val host = RecipeStore.hostOf(site.baseUrl)
         for (i in 0 until MacPlayer.FOLLOW_MAX) {
             val info = MacPlayer.parseInfo(html) ?: break
@@ -189,6 +194,13 @@ abstract class SiteAdapter(val site: SiteConfig) {
             }
             pageUrl = next
             html = nextHtml
+        }
+        // jz / wgart 播放器栈（v1.0.86，juzong01 等站）。
+        // 这类自营线路 `ps:0` 且 `player_aaaa.url` 是**令牌**，真地址要经
+        // `/static/player/{from}.js → iframe → wgart api` 换回来。见 [JzPlayer]。
+        // 自门控很强：只有「非 http 的令牌型 url」才会发请求，普通站零成本。
+        jzDirect(outerHtml, outerUrl)?.let {
+            return MediaSource.Direct(Media.encodeUrl(it), noRefererHeaders(), Media.isHls(it))
         }
         // v1.0.31：壳并不都是 maccms 线路 —— 还有两种真地址藏在壳里的形状：
         //   ① 页面本身就是「引导对象 + JSON 接口」壳（骚火 hhplayer）；
@@ -282,4 +294,46 @@ abstract class SiteAdapter(val site: SiteConfig) {
         val json = Http.postJsonOrNull(api, PlayerShell.bootJson(boot), referer = pageUrl) ?: return null
         return PlayerShell.jsonUrl(json)
     }
+
+    /**
+     * jz / wgart 播放器栈 → 真地址（v1.0.86，见 [JzPlayer] 的完整链路注释）。
+     *
+     * 三道自门控保证「不该发就不发」：
+     * 1. 页面上必须有 `player_aaaa`，且其 `url` 是**非 http 的令牌**（普通自营线路是 http 直链 ⇒ 直接 null）；
+     * 2. 抓回的 `/static/player/{from}.js` 里必须出现 `…/wgart/cms-player.js?base=…`（不是这族 ⇒ null）；
+     * 3. iframe 页里必须能拿到 `WGART_PARSE_TOKEN`（拿不到就没法换流 ⇒ null）。
+     *
+     * 任一条件不满足都返回 null ⇒ 退回嗅探，行为与修复前一致。
+     */
+    private suspend fun jzDirect(html: String?, pageUrl: String): String? {
+        val info = MacPlayer.parseInfo(html) ?: return null
+        val token = info.url.trim()
+        // 门控①：令牌型 url 才可能是这族；http 直链 / 空值一律不认
+        if (token.isEmpty() || token.startsWith("http")) return null
+        val jsUrl = JzPlayer.playerScriptUrl(pageUrl, info.from) ?: return null
+        val js = Http.getOrNull(jsUrl, referer = pageUrl) ?: return null
+        val iframe = JzPlayer.iframeFromPlayerScript(js, token) ?: return null
+        val frameHtml = Http.getOrNull(iframe, referer = pageUrl) ?: return null
+        val parseToken = JzPlayer.parseToken(frameHtml) ?: return null
+        val api = JzPlayer.apiUrl(iframe, token, parseToken) ?: return null
+        val json = Http.getOrNull(api, referer = iframe) ?: return null
+        return JzPlayer.streamUrl(json)
+    }
+
+    /**
+     * 「**不发 Referer**」的播放头（v1.0.86）。
+     *
+     * 为什么必须能表达这件事：jz 这族换回来的是抖音 / 其它第三方 CDN 的直链，它们按
+     * Referer 做防盗链 —— 实测 `*.douyinvod.com` 只接受**空 Referer** 或
+     * `https://www.douyin.com/`，带上站点根一律 **403**。站点自己的 iframe 打了
+     * `no-referrer` 也正是这个原因。而 [PlayerActivity.browserHeaders] 会给缺失的
+     * Referer 补上播放页地址 ⇒ 只「不设置」是不够的，必须显式表达「置空」。
+     *
+     * 约定：**`Referer` 键存在但值为空** = 明确不带 Referer。
+     *  [browserHeaders] 见到该键存在就不再补；取流层见到空值就不发这个头。
+     */
+    private fun noRefererHeaders(): Map<String, String> = mapOf(
+        "User-Agent" to Http.UA,
+        "Referer" to ""
+    )
 }
